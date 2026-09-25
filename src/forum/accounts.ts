@@ -6,7 +6,7 @@ import type { LoginLimiter } from "../auth/login-limiter.js";
 import { randomToken } from "../auth/tokens.js";
 import type { ForumContext } from "./context.js";
 import { ForumError, forbidden, invalid } from "./errors.js";
-import { isAdmin } from "./permissions.js";
+import { asAdmin } from "./permissions.js";
 import type { Role, Viewer } from "./types.js";
 import { validatePassword, validateUsername } from "./validate.js";
 
@@ -79,18 +79,18 @@ export async function createInvite(
   note: string,
   expiryDays: number | null
 ): Promise<string> {
-  if (!isAdmin(viewer)) throw forbidden();
+  if (!asAdmin(viewer)) throw forbidden();
   const code = randomToken(INVITE_CODE_BYTES);
   await ctx.pool.query(
     `INSERT INTO invites (code, created_by, note, expires_at)
      VALUES ($1, $2, $3, NOW() + $4::float8 * INTERVAL '1 day')`,
-    [code, viewer!.id, note.trim(), expiryDays]
+    [code, viewer.id, note.trim(), expiryDays]
   );
   return code;
 }
 
 export async function listInvites(ctx: ForumContext, viewer: Viewer | null): Promise<InviteStatus[]> {
-  if (!isAdmin(viewer)) throw forbidden();
+  if (!asAdmin(viewer)) throw forbidden();
   const { rows } = await ctx.pool.query<{
     code: string;
     note: string;
@@ -116,7 +116,7 @@ export async function listInvites(ctx: ForumContext, viewer: Viewer | null): Pro
 }
 
 export async function revokeInvite(ctx: ForumContext, viewer: Viewer | null, code: string): Promise<void> {
-  if (!isAdmin(viewer)) throw forbidden();
+  if (!asAdmin(viewer)) throw forbidden();
   await ctx.pool.query(
     "UPDATE invites SET deleted_at = NOW() WHERE code = $1 AND used_at IS NULL AND deleted_at IS NULL",
     [code]

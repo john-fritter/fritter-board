@@ -6,7 +6,7 @@ import { authorColumns, toAuthor, type AuthorRow } from "./authors.js";
 import type { ForumContext } from "./context.js";
 import { forbidden, invalid, notFound } from "./errors.js";
 import { isMember, visibleBoardsSql } from "./permissions.js";
-import type { Author, Viewer } from "./types.js";
+import type { Author, UserStatus, Viewer } from "./types.js";
 import { validateBio, validatePassword, validateUserTitle } from "./validate.js";
 
 export interface Profile {
@@ -16,11 +16,14 @@ export interface Profile {
   bio: string;
   bioHtml: string;
   lastSeenAt: Date | null;
+  status: UserStatus;
 }
 
 export async function getProfile(ctx: ForumContext, username: string): Promise<Profile> {
-  const { rows } = await ctx.pool.query<AuthorRow & { title: string | null; bio: string; last_seen_at: Date | null }>(
-    `SELECT a.title, a.bio, a.last_seen_at, ${authorColumns("a")}
+  const { rows } = await ctx.pool.query<
+    AuthorRow & { title: string | null; bio: string; last_seen_at: Date | null; status: UserStatus }
+  >(
+    `SELECT a.title, a.bio, a.last_seen_at, a.status, ${authorColumns("a")}
        FROM users a
       WHERE LOWER(a.username) = LOWER($1) AND a.deleted_at IS NULL`,
     [username]
@@ -33,6 +36,7 @@ export async function getProfile(ctx: ForumContext, username: string): Promise<P
     bio: r.bio,
     bioHtml: r.bio === "" ? "" : ctx.renderMarkup(r.bio),
     lastSeenAt: r.last_seen_at,
+    status: r.status,
   };
 }
 

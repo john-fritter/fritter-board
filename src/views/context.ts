@@ -11,4 +11,8 @@ export interface PageCtx {
   cssHref: string;
   /** The current path and query, relative to the base path; used for "return here" links. */
   here: string;
+  /** Conversations with unread messages; 0 for visitors. */
+  unreadPms: number;
+  /** Open reports, shown to moderators only; null for everyone else. */
+  openReports: number | null;
 }

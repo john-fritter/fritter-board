@@ -11,6 +11,9 @@ import { LoginLimiter } from "./auth/login-limiter.js";
 import { viewerForSession } from "./auth/sessions.js";
 import { config, type Env } from "./config.js";
 import type { ForumContext } from "./forum/context.js";
+import { openReportCount } from "./forum/moderation.js";
+import { isModerator } from "./forum/permissions.js";
+import { unreadConversationCount } from "./forum/pms.js";
 import { ForumError } from "./forum/errors.js";
 import type { Viewer } from "./forum/types.js";
 import { renderBBCode } from "./markup/bbcode.js";
@@ -18,6 +21,9 @@ import { registerAccountRoutes } from "./routes/account.js";
 import { registerAdminRoutes } from "./routes/admin.js";
 import { registerForumRoutes } from "./routes/forum.js";
 import { registerMemberRoutes } from "./routes/members.js";
+import { registerModRoutes } from "./routes/mod.js";
+import { registerPmRoutes } from "./routes/pms.js";
+import { registerPostRoutes } from "./routes/posts.js";
 import { render, SESSION_COOKIE, THEME_COOKIE } from "./routes/util.js";
 import type { PageCtx, Theme } from "./views/context.js";
 import { ErrorPage } from "./views/members.js";
@@ -97,7 +103,13 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     if (env.basePath && here.startsWith(env.basePath)) here = here.slice(env.basePath.length) || "/";
     c.set("viewer", viewer);
     c.set("sessionToken", viewer ? token : null);
-    c.set("page", { viewer, url, theme, cssHref, here: here + u.search });
+    const [unreadPms, openReports] = viewer
+      ? await Promise.all([
+          unreadConversationCount(services.forum, viewer),
+          isModerator(viewer) ? openReportCount(services.forum) : Promise.resolve(null),
+        ])
+      : [0, null];
+    c.set("page", { viewer, url, theme, cssHref, here: here + u.search, unreadPms, openReports });
     await next();
   });
 
@@ -108,6 +120,9 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   });
 
   registerForumRoutes(app, services);
+  registerPostRoutes(app, services);
+  registerPmRoutes(app, services);
+  registerModRoutes(app, services);
   registerAccountRoutes(app, services);
   registerMemberRoutes(app, services);
   registerAdminRoutes(app, services);

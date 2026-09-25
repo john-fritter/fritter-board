@@ -1,6 +1,6 @@
 import { raw } from "hono/html";
 import { config } from "../config.js";
-import { isModerator } from "../forum/permissions.js";
+import { canEditPost, canReply, canSeeEditHistory, isMember, isModerator } from "../forum/permissions.js";
 import type { Board, CategoryWithBoards, Post, Thread, ThreadListItem } from "../forum/types.js";
 import type { Page } from "../lib/pagination.js";
 import { formatMonthYear } from "../lib/time.js";
@@ -43,6 +43,7 @@ export function IndexPage(props: {
                   <a class="board-name" href={ctx.url(`/b/${b.slug}`)}>
                     {b.name}
                   </a>
+                  {b.unread && <span class="badge badge-new">New</span>}
                   {b.membersOnly && <span class="badge badge-private">Members only</span>}
                   <div class="desc">{b.description}</div>
                 </td>
@@ -67,6 +68,13 @@ export function IndexPage(props: {
           </tbody>
         </table>
       ))}
+      {ctx.viewer && (
+        <form method="post" action={ctx.url("/mark-read")} class="toolbar-form">
+          <button type="submit" class="linkish">
+            Mark all read
+          </button>
+        </form>
+      )}
       <section class="panel online">
         <h2 class="panel-head">Who's online</h2>
         <div class="panel-body">
@@ -110,6 +118,11 @@ export function BoardPage(props: {
       <Crumbs ctx={ctx} trail={[{ label: board.name }]} />
       <h1 class="page-title">{board.name}</h1>
       {board.description && <p class="desc">{board.description}</p>}
+      {!board.membersOnly && (
+        <p class="meta">
+          <a href={ctx.url(`/b/${board.slug}/rss.xml`)}>RSS feed</a>
+        </p>
+      )}
       <div class="toolbar">
         {newThread}
         <Pagination ctx={ctx} base={`/b/${board.slug}`} page={props.page} />
@@ -141,6 +154,11 @@ export function BoardPage(props: {
               <td class="col-main">
                 {t.sticky && <span class="badge badge-sticky">Sticky</span>}
                 {t.locked && <span class="badge badge-locked">Locked</span>}
+                {t.unread && (
+                  <a class="badge badge-new" href={ctx.url(`/t/${t.id}/unread`)} title="Go to the first unread post">
+                    New
+                  </a>
+                )}
                 <a class="thread-title" href={ctx.url(`/t/${t.id}`)}>
                   {t.title}
                 </a>
@@ -193,10 +211,17 @@ function ThreadPages(props: { ctx: PageCtx; thread: ThreadListItem }) {
   );
 }
 
-export function PostView(props: { ctx: PageCtx; post: Post; canQuote: boolean }) {
+export function PostView(props: { ctx: PageCtx; post: Post; thread: { locked: boolean } }) {
   const { ctx, post } = props;
+  const v = ctx.viewer;
   const a = post.author;
-  const showRemoved = post.deleted;
+  const removed = post.deleted;
+  const actions: { label: string; href: string }[] = [];
+  if (!removed && canReply(v, props.thread)) actions.push({ label: "Quote", href: `/t/${post.threadId}/reply?quote=${post.id}` });
+  if (canEditPost(v, { authorId: a.id, deleted: removed }, props.thread)) actions.push({ label: "Edit", href: `/p/${post.id}/edit` });
+  if (post.editedAt && canSeeEditHistory(v, { authorId: a.id })) actions.push({ label: "History", href: `/p/${post.id}/history` });
+  if (!removed && isMember(v) && v.id !== a.id) actions.push({ label: "Report", href: `/p/${post.id}/report` });
+  if (isModerator(v)) actions.push({ label: "Moderate", href: `/p/${post.id}/moderate` });
   return (
     <article class="post" id={`p${post.id}`}>
       <aside class="post-author">
@@ -220,26 +245,74 @@ export function PostView(props: { ctx: PageCtx; post: Post; canQuote: boolean })
             #{post.number}
           </a>
         </header>
-        {showRemoved ? (
+        {removed ? (
           <div class="post-body removed">
             [removed by moderator]
-            {isModerator(ctx.viewer) && post.deleteReason && <div class="meta">Reason: {post.deleteReason}</div>}
+            {isModerator(v) && post.deleteReason && <div class="meta">Reason: {post.deleteReason}</div>}
           </div>
         ) : (
           <div class="post-body">{raw(post.bodyHtml)}</div>
         )}
-        {!showRemoved && post.editedAt && (
+        {!removed && post.editedAt && (
           <p class="edited">
             Last edited by {post.editedByName ?? a.username}, <Time d={post.editedAt} />
           </p>
         )}
-        {props.canQuote && !showRemoved && (
+        {actions.length > 0 && (
           <footer class="post-actions">
-            <a href={ctx.url(`/t/${post.threadId}/reply?quote=${post.id}`)}>Quote</a>
+            {actions.map((act, i) => (
+              <>
+                {i > 0 && " · "}
+                <a href={ctx.url(act.href)}>{act.label}</a>
+              </>
+            ))}
           </footer>
         )}
       </div>
     </article>
+  );
+}
+
+/** Lock, sticky and move, for moderators, at the foot of a thread. */
+function ModPanel(props: { ctx: PageCtx; thread: Thread; boards: { slug: string; name: string }[] }) {
+  const { ctx, thread } = props;
+  const action = ctx.url(`/t/${thread.id}/mod`);
+  return (
+    <section class="panel mod-panel">
+      <h2 class="panel-head">Moderation</h2>
+      <div class="panel-body">
+        <form method="post" action={action} class="inline-fields">
+          <label>
+            Reason <span class="hint">(shown in the mod log)</span>
+            <input type="text" name="reason" maxlength={config.limits.reason_max} />
+          </label>
+          <button type="submit" name="action" value={thread.locked ? "unlock" : "lock"}>
+            {thread.locked ? "Unlock" : "Lock"}
+          </button>
+          <button type="submit" name="action" value={thread.sticky ? "unsticky" : "sticky"}>
+            {thread.sticky ? "Unstick" : "Make sticky"}
+          </button>
+        </form>
+        <form method="post" action={action} class="inline-fields">
+          <input type="hidden" name="action" value="move" />
+          <label>
+            Move to
+            <select name="board">
+              {props.boards.map((b) => (
+                <option value={b.slug} selected={b.slug === thread.board.slug}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Reason
+            <input type="text" name="reason" maxlength={config.limits.reason_max} />
+          </label>
+          <button type="submit">Move</button>
+        </form>
+      </div>
+    </section>
   );
 }
 
@@ -249,6 +322,8 @@ export function ThreadPage(props: {
   posts: Post[];
   page: Page;
   canReply: boolean;
+  /** Boards a moderator can move this thread to; empty for everyone else. */
+  moveTargets: { slug: string; name: string }[];
 }) {
   const { ctx, thread } = props;
   return (
@@ -269,7 +344,7 @@ export function ThreadPage(props: {
       </div>
       <div class="posts">
         {props.posts.map((p) => (
-          <PostView ctx={ctx} post={p} canQuote={props.canReply} />
+          <PostView ctx={ctx} post={p} thread={thread} />
         ))}
       </div>
       <div class="toolbar">
@@ -299,6 +374,7 @@ export function ThreadPage(props: {
           <a href={ctx.url(`/login?next=${encodeURIComponent(ctx.here)}`)}>Log in</a> to reply.
         </p>
       ) : null}
+      {isModerator(ctx.viewer) && <ModPanel ctx={ctx} thread={thread} boards={props.moveTargets} />}
     </Layout>
   );
 }

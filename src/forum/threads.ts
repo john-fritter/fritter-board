@@ -194,12 +194,22 @@ export async function reply(
   });
 }
 
-interface VisiblePost {
+export interface VisiblePost {
   id: number;
   threadId: number;
+  threadTitle: string;
+  threadLocked: boolean;
+  isFirstPost: boolean;
+  boardId: number;
+  boardSlug: string;
+  boardName: string;
+  authorId: number;
   authorName: string;
   body: string;
+  bodyHtml: string;
+  createdAt: Date;
   deleted: boolean;
+  deleteReason: string | null;
   /** 1-based position within the thread. */
   position: number;
 }
@@ -209,13 +219,26 @@ export async function getPost(ctx: ForumContext, viewer: Viewer | null, postId: 
   const { rows } = await ctx.pool.query<{
     id: number;
     thread_id: number;
+    thread_title: string;
+    locked: boolean;
+    first_post_id: number;
+    board_id: number;
+    board_slug: string;
+    board_name: string;
+    author_id: number;
     author_name: string;
     body: string;
+    body_html: string;
+    created_at: Date;
     deleted_at: Date | null;
+    delete_reason: string | null;
     members_only: boolean;
     position: number;
   }>(
-    `SELECT p.id, p.thread_id, u.username AS author_name, p.body, p.deleted_at, b.members_only,
+    `SELECT p.id, p.thread_id, t.title AS thread_title, t.locked, t.first_post_id,
+            b.id AS board_id, b.slug AS board_slug, b.name AS board_name,
+            p.author_id, u.username AS author_name, p.body, p.body_html, p.created_at,
+            p.deleted_at, p.delete_reason, b.members_only,
             (SELECT COUNT(*) FROM posts q WHERE q.thread_id = p.thread_id AND q.id <= p.id) AS position
        FROM posts p
        JOIN users u ON u.id = p.author_id
@@ -229,9 +252,19 @@ export async function getPost(ctx: ForumContext, viewer: Viewer | null, postId: 
   return {
     id: r.id,
     threadId: r.thread_id,
+    threadTitle: r.thread_title,
+    threadLocked: r.locked,
+    isFirstPost: r.first_post_id === r.id,
+    boardId: r.board_id,
+    boardSlug: r.board_slug,
+    boardName: r.board_name,
+    authorId: r.author_id,
     authorName: r.author_name,
     body: r.body,
+    bodyHtml: r.body_html,
+    createdAt: r.created_at,
     deleted: r.deleted_at !== null,
+    deleteReason: r.delete_reason,
     position: r.position,
   };
 }

@@ -25,7 +25,8 @@ you make a choice that isn't obvious from the code.
   forum function with the `Viewer`, and render. Never check access in a route
   or view alone.
 - **The private board must not leak.** Any query that lists or searches posts
-  or threads filters with `visibleBoardsSql(viewer)` / `canSeeBoard`. Hidden
+  or threads filters with `visibleBoardsSql(viewer)` / `canSeeBoard`. The mod
+  log redacts Back Room targets; RSS is always built as an anonymous visitor. Hidden
   things are 404, not 403. The integration test checks this; extend it for any
   new listing (search, RSS, feeds, sitemaps).
 - **Denormalized counts** (`users.post_count`, `boards.thread_count/post_count`,
@@ -34,6 +35,11 @@ you make a choice that isn't obvious from the code.
   `timestamptz`; soft deletes (`deleted_at`); never hard-code board ids (use
   slugs). Migrations qualify names with `board.`; app queries rely on
   `search_path=board`.
+- **Moderation writes a `mod_actions` row in the same transaction** as the
+  change it records (`logAction` in `src/forum/moderation.ts`). No silent mod
+  actions.
+- **Role checks:** `isModerator`/`isAdmin` return booleans; use
+  `asModerator`/`asAdmin` in guard clauses when you need `viewer` narrowed.
 - **Markup:** `src/markup/bbcode.ts` escapes all text and emits only tags it
   writes. Keep it that way; don't add an "allow raw HTML" path. Bump
   `MARKUP_VERSION` if output changes.

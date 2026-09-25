@@ -1,80 +1,18 @@
 import assert from "node:assert/strict";
-import "../src/dotenv.js";
 import { LoginLimiter } from "../src/auth/login-limiter.js";
 import { createApp } from "../src/app.js";
 import { parsePublicUrl } from "../src/config.js";
-import { createPool } from "../src/db/index.js";
-import { migrate } from "../src/db/migrate.js";
 import { insertUser } from "../src/forum/accounts.js";
-import { renderBBCode } from "../src/markup/bbcode.js";
 import { reply } from "../src/forum/threads.js";
+import { ORIGIN, run, setup, threadIdFrom } from "./support.js";
 
-// End-to-end through the real app and a real Postgres. Drops and recreates the
-// board schema in TEST_DATABASE_URL, so it refuses to touch DATABASE_URL.
+// Phase 1 end to end: visibility, invites, posting, quoting, locks,
+// pagination, settings, CSRF, the login limiter, and sub-path deployment.
 
-const TEST_URL = process.env["TEST_DATABASE_URL"];
-if (!TEST_URL) {
-  console.log("app: skipped (TEST_DATABASE_URL not set)");
-  process.exit(0);
-}
-if (TEST_URL === process.env["DATABASE_URL"]) {
-  console.error("TEST_DATABASE_URL must not be the same as DATABASE_URL.");
-  process.exit(1);
-}
-
-const ORIGIN = "http://board.test";
-const pool = createPool(TEST_URL);
-const limiter = new LoginLimiter(3, 60_000);
-const app = createApp({ pool, env: parsePublicUrl(ORIGIN, 0), limiter });
-
-interface Res {
-  status: number;
-  location: string | null;
-  cookie: string | null;
-  text: string;
-}
-
-async function req(
-  method: "GET" | "POST",
-  path: string,
-  opts: { form?: Record<string, string>; cookie?: string | null; origin?: string | null; appOverride?: typeof app } = {}
-): Promise<Res> {
-  const headers: Record<string, string> = {};
-  if (opts.cookie) headers["Cookie"] = opts.cookie;
-  if (method === "POST") {
-    headers["Content-Type"] = "application/x-www-form-urlencoded";
-    if (opts.origin !== null) headers["Origin"] = opts.origin ?? ORIGIN;
-  }
-  const res = await (opts.appOverride ?? app).request(`${ORIGIN}${path}`, {
-    method,
-    headers,
-    body: opts.form ? new URLSearchParams(opts.form).toString() : undefined,
-  });
-  const setCookie = res.headers.get("set-cookie");
-  return {
-    status: res.status,
-    location: res.headers.get("location"),
-    cookie: setCookie ? setCookie.split(";")[0]! : null,
-    text: await res.text(),
-  };
-}
-
-async function login(username: string, password: string): Promise<string> {
-  const res = await req("POST", "/login", { form: { username, password, next: "/" } });
-  assert.equal(res.status, 303, `login as ${username}: ${res.text.slice(0, 200)}`);
-  assert.ok(res.cookie?.startsWith("fb_session="));
-  return res.cookie!;
-}
-
-function threadIdFrom(location: string | null): number {
-  const m = /\/t\/(\d+)/.exec(location ?? "");
-  assert.ok(m, `expected a thread redirect, got ${location}`);
-  return Number(m[1]);
-}
+const { pool, app, forum, reset, req, login } = setup("app");
 
 async function main() {
-  await pool.query("DROP SCHEMA IF EXISTS board CASCADE");
-  await migrate(pool, () => {});
+  await reset();
 
   await insertUser(pool, { username: "John", password: "admin-password-1", role: "admin" });
 
@@ -196,7 +134,6 @@ async function main() {
   await pool.query("UPDATE threads SET locked = FALSE WHERE id = $1", [t1]);
 
   // ── Pagination and permalinks ──
-  const forum = { pool, renderMarkup: (b: string) => renderBBCode(b, { postUrl: (id) => `/p/${id}` }) };
   const { rows: danRow } = await pool.query("SELECT id FROM users WHERE username = 'Dan'");
   const danViewer = { id: danRow[0].id as number, username: "Dan", role: "member" as const, status: "active" as const, isBot: false };
   let lastPost = 0;
@@ -280,12 +217,6 @@ async function main() {
   const raw = await app.request(`${ORIGIN}/`);
   assert.ok(raw.headers.get("content-security-policy")?.includes("default-src 'none'"));
 
-  console.log("app: all tests passed");
 }
 
-main()
-  .catch((err) => {
-    console.error(err);
-    process.exitCode = 1;
-  })
-  .finally(() => pool.end());
+run("app", pool, main);

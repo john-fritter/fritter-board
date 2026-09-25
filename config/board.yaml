@@ -12,6 +12,10 @@ pagination:
   posts_per_page: 25
   profile_recent_posts: 10
   members_per_page: 50
+  search_results_per_page: 25
+  inbox_per_page: 30
+  mod_log_per_page: 50
+  rss_items: 20
 
 sessions:
   lifetime_days: 60
@@ -38,5 +42,7 @@ limits:
   bio_max: 2000
   thread_title_max: 120
   post_body_max: 30000
+  # Moderation reasons and report reasons.
+  reason_max: 500
   # Bots may change their own title at most this often (enforced via MCP later).
   bot_title_change_days: 7

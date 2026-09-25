@@ -1,5 +1,6 @@
 import { raw } from "hono/html";
 import { config } from "../config.js";
+import { canChangeMemberStatus, canPost, isModerator } from "../forum/permissions.js";
 import type { InviteStatus } from "../forum/accounts.js";
 import type { MemberListItem, Profile, RecentPost } from "../forum/users.js";
 import type { Page } from "../lib/pagination.js";
@@ -11,9 +12,14 @@ import { Layout } from "./layout.js";
 const n = (x: number) => x.toLocaleString("en-US");
 const roleLabel = { member: null, moderator: "Moderator", admin: "Administrator" } as const;
 
-export function ProfilePage(props: { ctx: PageCtx; profile: Profile; posts: RecentPost[] }) {
+const STATUS_LABELS = { active: null, suspended: "Suspended", banned: "Banned" } as const;
+
+export function ProfilePage(props: { ctx: PageCtx; profile: Profile; posts: RecentPost[]; error?: string | null }) {
   const { ctx, profile } = props;
   const a = profile.author;
+  const v = ctx.viewer;
+  const self = v?.id === a.id;
+  const name = encodeURIComponent(a.username);
   return (
     <Layout ctx={ctx} title={a.username}>
       <Crumbs ctx={ctx} trail={[{ label: "Members", href: "/members" }, { label: a.username }]} />
@@ -38,11 +44,61 @@ export function ProfilePage(props: { ctx: PageCtx; profile: Profile; posts: Rece
               <dd>{n(a.postCount)}</dd>
               <dt>Last seen</dt>
               <dd>{profile.lastSeenAt ? <Time d={profile.lastSeenAt} /> : "Never"}</dd>
+              {STATUS_LABELS[profile.status] && (
+                <>
+                  <dt>Standing</dt>
+                  <dd>{STATUS_LABELS[profile.status]}</dd>
+                </>
+              )}
             </dl>
+            <p class="profile-links">
+              <a href={ctx.url(`/search?author=${name}`)}>All posts</a>
+              {canPost(v) && !self && (
+                <>
+                  {" · "}
+                  <a href={ctx.url(`/pm/new?to=${name}`)}>Send a message</a>
+                </>
+              )}
+              {isModerator(v) && !self && (
+                <>
+                  {" · "}
+                  <a href={ctx.url(`/u/${name}/warn`)}>Warn</a>
+                </>
+              )}
+            </p>
             {profile.bioHtml && <div class="bio post-body">{raw(profile.bioHtml)}</div>}
           </div>
         </div>
       </section>
+      {canChangeMemberStatus(v) && !self && (
+        <section class="panel">
+          <h2 class="panel-head">Standing</h2>
+          <div class="panel-body">
+            <ErrorNote message={props.error} />
+            <form method="post" action={ctx.url(`/u/${name}/status`)} class="inline-fields">
+              <label>
+                Standing
+                <select name="status">
+                  <option value="active" selected={profile.status === "active"}>
+                    Active
+                  </option>
+                  <option value="suspended" selected={profile.status === "suspended"}>
+                    Suspended (can read, can't post)
+                  </option>
+                  <option value="banned" selected={profile.status === "banned"}>
+                    Banned (can't log in)
+                  </option>
+                </select>
+              </label>
+              <label>
+                Reason <span class="hint">(public, in the mod log)</span>
+                <input type="text" name="reason" required maxlength={config.limits.reason_max} />
+              </label>
+              <button type="submit">Change standing</button>
+            </form>
+          </div>
+        </section>
+      )}
       <section class="panel">
         <h2 class="panel-head">Recent posts</h2>
         <div class="panel-body">
@@ -255,6 +311,10 @@ export function AdminPage(props: {
       <section class="panel">
         <h1 class="panel-head">Invites</h1>
         <div class="panel-body">
+          <p>
+            <a href={ctx.url("/admin/pms")}>All conversations</a> · <a href={ctx.url("/mod/reports")}>Reports</a> ·{" "}
+            <a href={ctx.url("/modlog")}>Moderation log</a>
+          </p>
           {props.newCode && (
             <p class="notice">
               New invite: <code>{props.newCode}</code>

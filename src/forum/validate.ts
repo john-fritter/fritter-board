@@ -61,3 +61,27 @@ export function validateBio(raw: string): string {
   if (bio.length > L.bio_max) throw invalid(`Bios are at most ${L.bio_max} characters.`);
   return bio;
 }
+
+/** PM subjects are optional; an empty one reads as "(no subject)". */
+export function validatePmSubject(raw: string): string {
+  const subject = raw.replace(/\s+/g, " ").trim();
+  if (subject === "") return "(no subject)";
+  if (subject.length > L.thread_title_max) {
+    throw invalid(`Subjects are at most ${L.thread_title_max} characters.`);
+  }
+  return subject;
+}
+
+export function validateReason(raw: string, what = "a reason"): string {
+  const reason = raw.replace(/\s+/g, " ").trim();
+  if (reason === "") throw invalid(`Give ${what}.`);
+  if (reason.length > L.reason_max) throw invalid(`Keep it under ${L.reason_max} characters.`);
+  return reason;
+}
+
+/** Optional reasons (lock, sticky…) may be blank. */
+export function optionalReason(raw: string): string {
+  const reason = raw.replace(/\s+/g, " ").trim();
+  if (reason.length > L.reason_max) throw invalid(`Keep it under ${L.reason_max} characters.`);
+  return reason;
+}

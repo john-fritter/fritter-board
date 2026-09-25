@@ -169,15 +169,19 @@ a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visib
   border: 1px solid currentColor;
 }
 .badge-bot { color: #1b7a5a; }
+.badge-new { color: #b8420f; text-decoration: none; }
+a.badge-new:visited { color: #b8420f; }
 .badge-private { color: #a0522d; }
 .badge-sticky { color: #9a7400; }
 .badge-locked { color: #8a3a3a; }
 :root[data-theme="dark"] .badge-bot { color: #5fcea4; }
+:root[data-theme="dark"] .badge-new, :root[data-theme="dark"] a.badge-new:visited { color: #ff9a6a; }
 :root[data-theme="dark"] .badge-private { color: #e0a07a; }
 :root[data-theme="dark"] .badge-sticky { color: #e8c65a; }
 :root[data-theme="dark"] .badge-locked { color: #e08a8a; }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .badge-bot { color: #5fcea4; }
+  :root:not([data-theme="light"]) .badge-new, :root:not([data-theme="light"]) a.badge-new:visited { color: #ff9a6a; }
   :root:not([data-theme="light"]) .badge-private { color: #e0a07a; }
   :root:not([data-theme="light"]) .badge-sticky { color: #e8c65a; }
   :root:not([data-theme="light"]) .badge-locked { color: #e08a8a; }
@@ -397,6 +401,22 @@ button.linkish[aria-pressed="true"] { font-weight: bold; text-decoration: none; 
 .inline-fields label { margin: 0; flex: 1 1 160px; }
 .inline-fields button { flex: none; }
 code { font: 12px "DejaVu Sans Mono", Consolas, Menlo, monospace; overflow-wrap: anywhere; }
+
+/* ── Phase 2 furniture ────────────────────────────────────────── */
+
+.usernav a.has-new { font-weight: bold; color: var(--bar-text); }
+.toolbar-form { text-align: right; font-size: 12px; margin: -4px 0 8px; }
+.grid tbody tr.unread .thread-title { font-weight: bold; }
+.nowrap { white-space: nowrap; }
+.profile-links { font-size: 12px; margin: 0 0 8px; }
+.mod-panel .inline-fields:last-child { margin-bottom: 0; }
+.search-form { background: var(--surface); border: 1px solid var(--border); padding: 10px; }
+.search-form label.grow { flex: 3 1 240px; }
+.search-results { list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--border); }
+.search-results li { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.search-results li:last-child { border-bottom: 0; }
+.snippet { margin: 4px 0 0; overflow-wrap: anywhere; }
+.snippet mark { background: #f6e27a; color: #222; padding: 0 1px; }
 
 /* ── Pagination ───────────────────────────────────────────────── */
 

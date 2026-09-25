@@ -64,7 +64,8 @@ export function pageWindow(page: number, pageCount: number, radius = 2): (number
 export function Pagination(props: { ctx: PageCtx; base: string; page: Page }) {
   const { page, pageCount } = props.page;
   if (pageCount <= 1) return null;
-  const href = (p: number) => props.ctx.url(p === 1 ? props.base : `${props.base}?page=${p}`);
+  const sep = props.base.includes("?") ? "&" : "?";
+  const href = (p: number) => props.ctx.url(p === 1 ? props.base : `${props.base}${sep}page=${p}`);
   return (
     <nav class="pagination" aria-label="Pages">
       <span class="page-label">

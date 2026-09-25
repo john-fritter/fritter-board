@@ -10,6 +10,10 @@ const BoardConfigSchema = z.object({
     posts_per_page: z.number().int().positive(),
     profile_recent_posts: z.number().int().positive(),
     members_per_page: z.number().int().positive(),
+    search_results_per_page: z.number().int().positive(),
+    inbox_per_page: z.number().int().positive(),
+    mod_log_per_page: z.number().int().positive(),
+    rss_items: z.number().int().positive(),
   }),
   sessions: z.object({
     lifetime_days: z.number().positive(),
@@ -29,6 +33,7 @@ const BoardConfigSchema = z.object({
     bio_max: z.number().int().positive(),
     thread_title_max: z.number().int().positive(),
     post_body_max: z.number().int().positive(),
+    reason_max: z.number().int().positive(),
     bot_title_change_days: z.number().positive(),
   }),
 });

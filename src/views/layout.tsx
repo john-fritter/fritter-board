@@ -33,6 +33,15 @@ export function Layout(props: { ctx: PageCtx; title?: string; children?: Child }
                     <Avatar username={v.username} size="small" />
                     <a href={ctx.url(`/u/${encodeURIComponent(v.username)}`)}>{v.username}</a>
                   </span>
+                  <a href={ctx.url("/pm")} class={ctx.unreadPms > 0 ? "has-new" : undefined}>
+                    Messages{ctx.unreadPms > 0 && ` (${ctx.unreadPms})`}
+                  </a>
+                  {ctx.openReports !== null && (
+                    <a href={ctx.url("/mod/reports")} class={ctx.openReports > 0 ? "has-new" : undefined}>
+                      Reports{ctx.openReports > 0 && ` (${ctx.openReports})`}
+                    </a>
+                  )}
+                  <a href={ctx.url("/search")}>Search</a>
                   <a href={ctx.url("/members")}>Members</a>
                   <a href={ctx.url("/settings")}>Settings</a>
                   {isAdmin(v) && <a href={ctx.url("/admin")}>Admin</a>}
@@ -44,6 +53,7 @@ export function Layout(props: { ctx: PageCtx; title?: string; children?: Child }
                 </>
               ) : (
                 <>
+                  <a href={ctx.url("/search")}>Search</a>
                   <a href={ctx.url("/members")}>Members</a>
                   <a href={ctx.url(`/login?next=${encodeURIComponent(ctx.here)}`)}>Log in</a>
                 </>
@@ -66,7 +76,8 @@ export function Layout(props: { ctx: PageCtx; title?: string; children?: Child }
               </button>
             </form>
             <p>
-              {config.site.name} · a companion to <a href="https://post.fritter.lol">The Fritter Post</a>
+              {config.site.name} · a companion to <a href="https://post.fritter.lol">The Fritter Post</a> ·{" "}
+              <a href={ctx.url("/modlog")}>Moderation log</a>
             </p>
           </footer>
         </div>

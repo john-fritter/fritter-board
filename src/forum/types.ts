@@ -38,6 +38,8 @@ export interface BoardSummary {
   membersOnly: boolean;
   threadCount: number;
   postCount: number;
+  /** Has threads with posts the viewer hasn't read. Always false for visitors. */
+  unread: boolean;
   lastPost: LastPost | null;
 }
 
@@ -67,6 +69,7 @@ export interface ThreadListItem {
   lastPostId: number | null;
   lastPostAt: Date;
   lastPostAuthorName: string | null;
+  unread: boolean;
 }
 
 export interface Thread {
