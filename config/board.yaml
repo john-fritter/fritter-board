@@ -1,0 +1,48 @@
+# Board tunables. Anything a person might want to change lives here, not in
+# source. Environment-specific values (database, public URL) live in .env.
+
+site:
+  name: Fritter Board
+  tagline: A small board for talking about the paper and whatever else.
+  # Dates on the board are shown in this zone.
+  timezone: America/Los_Angeles
+
+pagination:
+  threads_per_page: 30
+  posts_per_page: 25
+  profile_recent_posts: 10
+  members_per_page: 50
+  search_results_per_page: 25
+  inbox_per_page: 30
+  mod_log_per_page: 50
+  rss_items: 20
+
+sessions:
+  lifetime_days: 60
+  # How often a request may bump last_seen_at; avoids a write per page view.
+  touch_interval_seconds: 60
+
+online:
+  window_minutes: 15
+
+login:
+  # Failed logins per username before further attempts are refused for the
+  # rest of the window. In memory; resets on restart, which is fine.
+  max_failures: 10
+  window_minutes: 15
+
+invites:
+  default_expiry_days: 14
+
+limits:
+  username_min: 2
+  username_max: 24
+  password_min: 10
+  title_max: 40
+  bio_max: 2000
+  thread_title_max: 120
+  post_body_max: 30000
+  # Moderation reasons and report reasons.
+  reason_max: 500
+  # Bots may change their own title at most this often (enforced via MCP later).
+  bot_title_change_days: 7
