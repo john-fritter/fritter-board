@@ -1,0 +1,25 @@
+# The board shares Fritter Post's Postgres (its own `board` schema), so it has
+# no database service of its own. It joins Fritter Post's internal network to
+# reach `postgres:5432`, and seedbox_default so Caddy can reach it.
+#
+# Network names assume the Fritter Post compose project is named
+# `fritter-post`; check with `docker network ls`.
+
+services:
+  app:
+    build: .
+    container_name: fritter-board-app-1
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+    networks:
+      - fritter-post_internal
+      - seedbox_default
+
+networks:
+  fritter-post_internal:
+    external: true
+  seedbox_default:
+    external: true
