@@ -1,74 +1,113 @@
-# Gizmo task — deploy Fritter Board phase 3 (the Fritter Post link)
+# Gizmo task — first deploy of Fritter Board at board.fritter.lol, and the Fritter Post side of its link
 
-Two repos, same branch name in both: **`claude/fritter-board-phase-three-wmh6tj`**.
+This is new work, so start with the introduction. The task has three parts:
 
-| Repo | Commit (or later) | Box path (assumed; confirm) |
+- **Part A:** update Fritter Post, which you already run.
+- **Part B:** deploy **Fritter Board** for the first time, at
+  **https://board.fritter.lol**.
+- **Part C:** link the two.
+
+## What Fritter Board is
+
+Fritter Board is John's new, small, text-only discussion board: an idealized
+2006 forum. It's for talking about Fritter Post articles and whatever else
+comes up. It will eventually have a cast of persona bots as members, but not
+yet: bots come in a later phase and will reach the board through an MCP
+server. What exists now is a working human forum:
+
+- invite-only registration and one admin (John);
+- categories, boards and threads, and posts written in BBCode;
+- private messages, search and moderation tools;
+- a members-only "Back Room";
+- **new in this deploy:** threads linked to Fritter Post articles.
+
+How it runs:
+
+- **Repo:** `john-fritter/fritter-board`. Build notes are in `README.md`,
+  conventions in `CLAUDE.md`, and the full plan in `docs/spec.md`.
+- **Stack:** TypeScript on Node 22. Hono serves server-rendered HTML and ships
+  **zero client JavaScript** (the CSP forbids scripts). There is no build step:
+  the container runs `npx tsx src/server.ts` on port **3100**.
+- **Container:** `fritter-board-app-1`, from the repo's own
+  `docker-compose.yml`. It has **no database of its own**. It uses **Fritter
+  Post's Postgres**, in its own schema called `board`, as its own role called
+  `fritter_board`. To reach Postgres it joins Fritter Post's internal network
+  (`fritter-post_internal`), and to be reachable by Caddy it joins
+  `seedbox_default`. Both networks are declared in its compose file.
+- **Reading the paper:** the board reads Fritter Post's published articles
+  read-only, through two views in a schema called `published`. Part A creates
+  them. Its role is granted that schema and **nothing else of Fritter
+  Post's**. In particular, it must never be able to read `article_texts`.
+- **Ops is yours from here on,** as it is for Fritter Post: deployment, Caddy,
+  backups, keeping it up.
+
+## The code
+
+Both repos use the same branch name: **`claude/fritter-board-phase-three-wmh6tj`**.
+
+| Repo | Commit (or later) | Box path |
 | --- | --- | --- |
-| `john-fritter/fritter-post` | `5fa8c8f` | `/srv/fritter-post` |
-| `john-fritter/fritter-board` | `6cd98b3` | `/srv/fritter-board` |
+| `john-fritter/fritter-post` | `5fa8c8f` | `/srv/fritter-post` (existing) |
+| `john-fritter/fritter-board` | `6cd98b3` | `/srv/fritter-board` (new; clone it next to Fritter Post if `/srv` isn't where Fritter Post lives) |
 
-## What changed
+What changed in Fritter Post:
 
-Phase 3 of Fritter Board links discussion threads to Fritter Post articles.
-
-**Fritter Post**
-- New permanent page per piece: `/article/<id>`, where the id is
+- **Permanent page per piece:** `/article/<id>`, where the id is
   `writer_pieces.id`. `/story/<ref>` still works and still means today's paper.
-- Every piece page links "Discuss on the board" to `<BOARD_URL>/article/<id>`.
-  The link only appears when the new env var `BOARD_URL` is set.
-- **Migration 046** creates a schema `published` holding two views,
-  `published.articles` and `published.article_sources`. They are the board's
-  only way to read the paper. The board's role gets access to that schema and
-  nothing in `public`. It must never be able to read `article_texts`.
-
-**Fritter Board**
-- `/article/<id>` opens the article's thread, or offers members the form to
-  start one. Threads about an article show an article card at the top.
-- **Migration 004** changes one index.
-- Two new env vars: `FP_DATABASE_URL` and `FP_PUBLIC_URL`.
+- **"Discuss on the board":** every piece page links to
+  `<BOARD_URL>/article/<id>`. The link only appears once the new env var
+  `BOARD_URL` is set, which is Part C.
+- **Migration 046:** creates the `published` schema and its two views,
+  `published.articles` and `published.article_sources`.
 
 ## Must not happen
 
-- Do not run any Fritter Post pipeline stage by hand: no `collect`, `preprocess`,
-  `prefilter`, `grouping`, `grouping-pass1`, `editor`, `fetch-text`, `write`,
-  `publish` or `pipeline`.
+- **Do not run any Fritter Post pipeline stage by hand:** no `collect`,
+  `preprocess`, `prefilter`, `grouping`, `grouping-pass1`, `editor`,
+  `fetch-text`, `write`, `publish` or `pipeline`.
 - **Do not deploy while the daily pipeline is running.** It starts at 06:00
-  America/Los_Angeles and takes about 15–20 minutes. Rebuilding the app
-  container mid-run kills it. Stay out of the 05:45–06:45 Pacific window, and
-  check first:
+  America/Los_Angeles and takes about 15–20 minutes. Rebuilding Fritter Post's
+  app container mid-run kills it. Stay out of the 05:45–06:45 Pacific window,
+  and check first:
   ```bash
   cd /srv/fritter-post
   docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT id, status, started_at FROM pipeline_runs ORDER BY id DESC LIMIT 1"'
   ```
-  If the latest row says `running` and started less than an hour ago, wait
-  for it to finish. A `running` row older than that is a run that was killed.
-  Note it in your report and carry on.
-- Do not edit `config/*.yaml` on the box. The only env changes are the lines
-  given below.
-- **Do not set `TEST_DATABASE_URL` on the box, and do not run the board's test
-  suite there.** Its integration tests drop and recreate the `board` and
-  `published` schemas.
-- Do not pick or change the board's public URL. If the board isn't deployed
-  yet, do Part A only, then report back.
-- Do not post, register or create threads on the board. John will test that.
+  If the latest row says `running` and started less than an hour ago, wait for
+  it to finish. A `running` row older than that is a run that was killed. Note
+  it in your report and carry on.
+- **Don't change config you weren't asked to change.**
+  - Don't edit `config/*.yaml` in either repo.
+  - The only env changes are the ones below. Don't commit any env file.
+  - Don't edit tracked files on the box. If something in a repo has to change
+    (a network name, say), report it and the change will be made on the branch.
+- **Don't run the board's test suite on the box, and never set
+  `TEST_DATABASE_URL` there.** Its integration tests drop and recreate the
+  `board` and `published` schemas.
+- **Don't post, invite anyone or create threads on the board.** That's for John.
+- **Keep secrets out of the report.** The new database password and John's
+  temporary admin password go in the files named below, never in the report.
 
 ## 0. Report the current state first
 
 ```bash
 cd /srv/fritter-post && git log --oneline -1 && git status --short | head
-docker ps --format '{{.Names}}\t{{.Status}}' | grep -i fritter
-ls -d /srv/fritter-board 2>/dev/null && (cd /srv/fritter-board && git log --oneline -1 && grep -E '^(PUBLIC_URL|FP_PUBLIC_URL)=' .env)
-cd /srv/fritter-post && docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "SELECT rolname FROM pg_roles WHERE rolname = '"'"'fritter_board'"'"'; SHOW server_version;"'
-cd /srv/fritter-post && grep -E '^POSTGRES_USER=' .env
+grep -E '^POSTGRES_(USER|DB)=' /srv/fritter-post/.env
+docker ps --format '{{.Names}}\t{{.Networks}}' | grep -iE 'fritter|caddy'
+docker network ls | grep -E 'fritter|seedbox'
+dig +short post.fritter.lol; dig +short board.fritter.lol
 ```
 
-(Don't print passwords.) If the board directory, container or role doesn't
-exist, the board isn't deployed. Do Part A, skip Part B, and report.
+Also find out:
+
+- how Caddy runs (a container or systemd) and where its config file is: the
+  file that holds the `post.fritter.lol` site block;
+- how Fritter Post's database is backed up today, if it is.
 
 ## Part A — Fritter Post
 
-A1. **Make sure the switch drops nothing.** The branch was cut from `main` at
-`4a4a876`. Whatever the box is on now must be contained in it:
+A1. **Make sure switching branches drops nothing.** The branch was cut from
+`main` at `4a4a876`. Whatever the box is on now must be contained in it:
 
 ```bash
 cd /srv/fritter-post
@@ -100,7 +139,8 @@ docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB
   SELECT COUNT(*) AS source_links FROM published.article_sources;"'
 ```
 
-Take the first `id` and the latest paper's first `ref` from that output:
+Use the first `id` from that output as `<id>` below, and the ref of today's
+first piece as `<ref>`:
 
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' https://post.fritter.lol/                  # 200
@@ -109,27 +149,57 @@ curl -s -o /dev/null -w '%{http_code}\n' https://post.fritter.lol/story/<ref>   
 curl -s -o /dev/null -w '%{http_code}\n' https://post.fritter.lol/article/999999999 # 404
 ```
 
-`BOARD_URL` is still unset at this point, so no page should contain
-"Discuss on the board" yet.
+No page should contain "Discuss on the board" yet.
 
-## Part B — Fritter Board (only if it's deployed)
+## Part B — Fritter Board, first deploy
 
-B1. **Grant the board's role the `published` schema and nothing else.**
-Replace `fritter_post` in the last statement if `POSTGRES_USER` is different;
-it has to be the role that owns the views, which is the one that ran the
-migration.
+B1. **DNS.** `board.fritter.lol` has to resolve to the same address as
+`post.fritter.lol` (step 0's `dig`). If it doesn't, **stop Part B here** and
+report it. The DNS record is John's to add. Part A stands on its own.
+
+B2. **Clone:**
 
 ```bash
+cd /srv
+git clone -b claude/fritter-board-phase-three-wmh6tj https://github.com/john-fritter/fritter-board.git
+cd fritter-board && git log --oneline -1                    # expect 6cd98b3 or later
+```
+
+Use the same method and credentials you use for Fritter Post. If the clone is
+refused, report it: the repo may need a deploy key.
+
+B3. **Network name.** The board's `docker-compose.yml` joins
+`fritter-post_internal`, which assumes Fritter Post's compose project is named
+`fritter-post`. Check it against `docker network ls` from step 0. If Fritter
+Post's internal network has a different name, stop and report it. Don't edit
+the compose file.
+
+B4. **Database role.** The board gets its own login role. It can create its
+own `board` schema, and it can read Fritter Post's `published` views and
+nothing else.
+
+Generate the password on the box. Keep it URL-safe, because it goes into a
+connection string:
+
+```bash
+BOARD_DB_PW=$(openssl rand -base64 32 | tr -d '/+=' | cut -c1-32)
 cd /srv/fritter-post
-docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1' <<'SQL'
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -v pw="'"$BOARD_DB_PW"'"' <<'SQL'
+CREATE ROLE fritter_board LOGIN PASSWORD :'pw';
+GRANT CREATE ON DATABASE fritter_post TO fritter_board;
 GRANT USAGE ON SCHEMA published TO fritter_board;
 GRANT SELECT ON ALL TABLES IN SCHEMA published TO fritter_board;
 ALTER DEFAULT PRIVILEGES FOR ROLE fritter_post IN SCHEMA published GRANT SELECT ON TABLES TO fritter_board;
 SQL
 ```
 
-Then prove the boundary. The first statement must succeed and the second must
-fail with `permission denied for table article_texts`:
+The SQL uses `fritter_post` twice: in `GRANT CREATE ON DATABASE fritter_post`
+it is `POSTGRES_DB`, and in `FOR ROLE fritter_post` it is `POSTGRES_USER`,
+the role that ran migration 046 and owns the views. If step 0 showed different
+values, substitute them.
+
+Now prove the boundary. The first `SELECT` must return a number. The second
+must fail with `permission denied for table article_texts`:
 
 ```bash
 docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
@@ -139,51 +209,96 @@ SELECT COUNT(*) FROM public.article_texts;
 SQL
 ```
 
-B2. Deploy the board. Run the same ancestor check first:
+B5. **The board's `.env`.** Write it in the same shell, so `$BOARD_DB_PW` is
+still set. Substitute the database name if it differs.
 
 ```bash
 cd /srv/fritter-board
-git fetch origin claude/fritter-board-phase-three-wmh6tj
-git merge-base --is-ancestor HEAD origin/claude/fritter-board-phase-three-wmh6tj && echo SAFE || echo STOP
-git checkout claude/fritter-board-phase-three-wmh6tj && git pull --ff-only
-git log --oneline -1                                        # expect 6cd98b3 or later
-```
-
-Add two lines to `/srv/fritter-board/.env`. `FP_DATABASE_URL` is the **same
-value as the existing `DATABASE_URL`**: same database, same role. Copy it; don't
-retype the password.
-
-```
-FP_DATABASE_URL=<same as DATABASE_URL>
+umask 077
+cat > .env <<EOF
+DATABASE_URL=postgresql://fritter_board:${BOARD_DB_PW}@postgres:5432/fritter_post
+FP_DATABASE_URL=postgresql://fritter_board:${BOARD_DB_PW}@postgres:5432/fritter_post
+PUBLIC_URL=https://board.fritter.lol
 FP_PUBLIC_URL=https://post.fritter.lol
+PORT=3100
+EOF
+chmod 600 .env
 ```
+
+`DATABASE_URL` and `FP_DATABASE_URL` are deliberately the same: same database,
+same role. The board opens the second one as a separate, read-only
+connection. An `https://` `PUBLIC_URL` also turns on secure cookies, and the
+board rejects form posts whose Origin doesn't match it, so it must be exactly
+`https://board.fritter.lol`.
+
+B6. **Build, migrate, create John's admin account:**
 
 ```bash
 docker compose up -d --build
-docker compose exec -T app npx tsx scripts/migrate.ts       # expect 004_fp_link.sql applied
-docker ps --format '{{.Names}}\t{{.Networks}}' | grep fritter-board   # expect fritter-post_internal and seedbox_default
+docker compose exec -T app npx tsx scripts/migrate.ts
+docker compose logs --tail=20 app                           # expect "Fritter Board listening on :3100"
+docker ps --format '{{.Names}}\t{{.Networks}}' | grep fritter-board
 ```
 
-The board's compose file declares `seedbox_default` itself, so it doesn't need
-the manual reconnect. If the network is missing anyway, run
-`docker network connect seedbox_default fritter-board-app-1`.
+- `migrate.ts` should report applying `001_board_schema.sql` through
+  `004_fp_link.sql`.
+- The last command should list both `fritter-post_internal` and
+  `seedbox_default`. If `seedbox_default` is missing, run
+  `docker network connect seedbox_default fritter-board-app-1`.
 
-B3. Board checks. `<board>` is the board's `PUBLIC_URL` and `<id>` is from A3.
+John's account is created with a temporary password. John changes it himself
+at Settings after he first logs in:
 
 ```bash
-curl -s -o /dev/null -w '%{http_code}\n' <board>/                      # 200
-curl -s <board>/article/<id> | grep -c 'fp-card'                       # 1
-curl -s <board>/article/<id> | grep -o 'https://post.fritter.lol/article/[0-9]*' | head -1
-curl -s -o /dev/null -w '%{http_code}\n' <board>/article/999999999     # 404
-docker compose logs --tail=50 app | grep -i error                      # expect nothing new
+ADMIN_PW=$(openssl rand -base64 18 | tr -d '/+=')
+docker compose exec -T -e ADMIN_PASSWORD="$ADMIN_PW" app npx tsx scripts/create-admin.ts John
+( umask 077; printf 'Fritter Board admin\nusername: John\ntemporary password: %s\nChange it at https://board.fritter.lol/settings after logging in.\n' "$ADMIN_PW" > /root/fritter-board-admin.txt )
 ```
 
-B4. **Turn on the link from the paper.** Only do this after B3 passes. Add
-this to `/srv/fritter-post/.env`, where `<board>` is the board's `PUBLIC_URL`
-with no trailing slash:
+Tell John the password is in `/root/fritter-board-admin.txt`, or give it to him
+directly, but not in the report.
+
+B7. **Caddy.** Back up the config file you found in step 0. Then add a site
+block for the board beside the one for `post.fritter.lol`, following that
+block's conventions (encoding, logging, headers):
 
 ```
-BOARD_URL=<board>
+board.fritter.lol {
+	reverse_proxy fritter-board-app-1:3100
+}
+```
+
+Use `reverse_proxy`, not `handle_path`: the board serves from `/`. Validate and
+reload the way this box's Caddy is run, for example `caddy validate` then
+`caddy reload` inside the Caddy container, or `systemctl reload caddy`. Caddy
+gets the TLS certificate on the first request. **Don't remove or reorder
+anything else in the file.**
+
+B8. **Checks.** `<id>` is from A3.
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' https://board.fritter.lol/                   # 200
+curl -sI https://board.fritter.lol/ | grep -i content-security-policy                 # default-src 'none'; …
+curl -s https://board.fritter.lol/ | grep -o '<title>[^<]*'                           # Fritter Board
+curl -s -o /dev/null -w '%{http_code}\n' https://board.fritter.lol/b/back-room        # 404 (hidden from visitors)
+curl -s https://board.fritter.lol/article/<id> | grep -c 'fp-card'                    # 1
+curl -s https://board.fritter.lol/article/<id> | grep -o 'https://post.fritter.lol/article/[0-9]*' | head -1
+curl -s -o /dev/null -w '%{http_code}\n' https://board.fritter.lol/article/999999999  # 404
+curl -s -o /dev/null -w '%{http_code}\n' https://post.fritter.lol/                    # still 200
+cd /srv/fritter-board && docker compose logs --tail=50 app | grep -i error            # expect nothing
+```
+
+B9. **Backups.** The board lives inside Fritter Post's database, so a
+whole-database dump already covers it. Report whether the existing backup is a
+whole-database dump or is limited to particular schemas or tables. Don't
+change it; just say what it covers.
+
+## Part C — turn on the link from the paper
+
+Only do this after B8 passes. Add this line to `/srv/fritter-post/.env`:
+
+```
+BOARD_URL=https://board.fritter.lol
 ```
 
 ```bash
@@ -191,15 +306,20 @@ cd /srv/fritter-post
 docker compose up -d --force-recreate app
 docker network connect seedbox_default fritter-post-app-1   # again: recreating drops it
 curl -s https://post.fritter.lol/article/<id> | grep -o 'href="[^"]*/article/[0-9]*">Discuss on the board'
+curl -s -o /dev/null -w '%{http_code}\n' https://post.fritter.lol/                  # 200
 ```
 
-The last command should print the board's `/article/<id>` link.
+The `grep` should print `href="https://board.fritter.lol/article/<id>">Discuss on the board`.
 
 ## Report back
 
-- Everything from step 0.
-- Exact output of A1, A2 (migrate and test lines), A3, and B1 through B4, or
-  where you stopped and why.
-- One real article id, and its board URL and paper URL, so John can click
+- Everything from step 0, including how Caddy runs, the config file path, and
+  what the backups cover.
+- The exact output of A1–A3, B1–B9 and C, or where you stopped and why.
+- The Caddy site block you added, as written.
+- One real article id with its paper URL and board URL, so John can click
   through and start the first thread himself.
 - Anything that differed from what this task expected.
+- For John: where his temporary admin password is, and a reminder to change
+  it at Settings, then post the draft site rules (`docs/site-rules.md` in the
+  board repo) as a sticky thread in Site Business.
