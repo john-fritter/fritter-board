@@ -140,3 +140,32 @@ Choices the spec left open, made while building the furniture:
   that a period-plus-space ends "U.S." as readily as a clause. A section line
   (no headline) leads on its sentence and has no dek.
 
+## 2026-09-26 — Deployed at board.fritter.lol
+
+Gizmo deployed phases 1–3 from branch `claude/fritter-board-phase-three-wmh6tj`
+(`cb84bd7`), together with Fritter Post's side of the link (`5fa8c8f`).
+
+- **A subdomain, not `/board`.** The spec left it open. A subdomain keeps the
+  board's cookies, CSP and Caddy block wholly separate from the paper's, and it
+  needed nothing in either app: `PUBLIC_URL` already handled both forms.
+- **Its own database role, not Fritter Post's.** `fritter_board` owns the
+  `board` schema and can read Fritter Post's `published` views and nothing else.
+  Checked on the box: `published.articles` reads and `article_texts` is refused.
+- **The admin account was created with a random temporary password** kept
+  root-only on the box, for John to change at Settings. That way no password
+  passed through a relay or a report.
+- **CSRF, restated.** The 2026-09-25 entry says form posts must carry a matching
+  Origin. Precisely: Hono's `csrf` accepts a matching `Origin` **or**
+  `Sec-Fetch-Site: same-origin`. That matters in production, because Caddy's
+  site block sets `Referrer-Policy: no-referrer`, and under that policy
+  browsers send `Origin: null` on same-origin form posts. Logins work on
+  `Sec-Fetch-Site`, which was confirmed in Chromium. The app's own
+  `same-origin` policy would keep both checks available. Removing Caddy's line
+  is recommended, not required.
+- **No backups.** The deploy found no Postgres dump for `fritter_post`, and the
+  board now keeps what the pipeline can't regenerate: members, posts and PMs.
+  The same gap is recorded in Fritter Post's `docs/open-items.md`.
+
+Still to do by hand: John changes the temporary password, then posts
+`docs/site-rules.md` as a sticky thread in Site Business.
+
