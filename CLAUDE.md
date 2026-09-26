@@ -26,7 +26,8 @@ you make a choice that isn't obvious from the code.
   or view alone.
 - **The private board must not leak.** Any query that lists or searches posts
   or threads filters with `visibleBoardsSql(viewer)` / `canSeeBoard`. The mod
-  log redacts Back Room targets; RSS is always built as an anonymous visitor. Hidden
+  log redacts Back Room targets; RSS is always built as an anonymous visitor; the
+  article page (`/article/<id>`) only redirects to a thread the viewer can see. Hidden
   things are 404, not 403. The integration test checks this; extend it for any
   new listing (search, RSS, feeds, sitemaps).
 - **Denormalized counts** (`users.post_count`, `boards.thread_count/post_count`,
@@ -40,6 +41,12 @@ you make a choice that isn't obvious from the code.
   actions.
 - **Role checks:** `isModerator`/`isAdmin` return booleans; use
   `asModerator`/`asAdmin` in guard clauses when you need `viewer` narrowed.
+- **Fritter Post is read-only and read through its views.** `src/fp/` queries
+  only Fritter Post's `published` schema (`articles`, `article_sources`),
+  through its own read-only pool (`FP_DATABASE_URL`). Never query Fritter
+  Post's own tables, and never copy article text into the board. An article id
+  is Fritter Post's `writer_pieces.id`; it can stop resolving, so every card
+  handles "no longer in the paper" and "couldn't be loaded".
 - **Markup:** `src/markup/bbcode.ts` escapes all text and emits only tags it
   writes. Keep it that way; don't add an "allow raw HTML" path. Bump
   `MARKUP_VERSION` if output changes.
@@ -64,7 +71,23 @@ schema there and refuses to run against `DATABASE_URL`.
 
 ## Production
 
+Live at https://board.fritter.lol since 2026-09-26. The README's Production
+section records the setup: `/srv/fritter-board`, the `fritter_board` role and
+its grants, `.env`, and the Caddy block.
+
 Deployment and ops are Gizmo's job (the agent on fritter.lol); this session
-can't reach the box. Deliver Gizmo tasks as a file, written for an agent with
-no context, with exact commands. The board container joins Fritter Post's
-internal network to reach its Postgres, plus `seedbox_default` for Caddy.
+can't reach the box, and the egress proxy blocks the site too. Deliver Gizmo
+tasks as a file, written for an agent with no context, with exact commands. The
+board container joins Fritter Post's internal network to reach its Postgres,
+plus `seedbox_default` for Caddy. Both are declared in its compose file, so
+unlike Fritter Post's container it needs no manual reconnect.
+
+- **Never have Gizmo run the test suite on the box,** and never set
+  `TEST_DATABASE_URL` there. It drops the `board` and `published` schemas.
+- **A Gizmo task that deploys both repos** must still include Fritter Post's
+  `docker network connect seedbox_default fritter-post-app-1` after every
+  rebuild or recreate of that container. `docs/gizmo-phase3-deploy-prompt.md`
+  is the worked example.
+- **Caddy overrides `Referrer-Policy` to `no-referrer`**, so form posts arrive
+  with `Origin: null` and pass CSRF on `Sec-Fetch-Site` alone. Anything that
+  changes the CSRF check needs a real browser login test under that header.

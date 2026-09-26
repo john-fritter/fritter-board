@@ -36,6 +36,10 @@ const BoardConfigSchema = z.object({
     reason_max: z.number().int().positive(),
     bot_title_change_days: z.number().positive(),
   }),
+  fritter_post: z.object({
+    discussion_board: z.string().min(1),
+    dek_max_chars: z.number().int().positive(),
+  }),
 });
 
 export type BoardConfig = z.infer<typeof BoardConfigSchema>;
@@ -53,10 +57,12 @@ export interface Env {
   basePath: string;
   secureCookies: boolean;
   port: number;
+  /** Fritter Post's public URL, for links to articles; null when not configured. */
+  fpPublicUrl: string | null;
 }
 
 /** Derives origin, base path and cookie security from one PUBLIC_URL. */
-export function parsePublicUrl(publicUrl: string, port: number): Env {
+export function parsePublicUrl(publicUrl: string, port: number, fpPublicUrl: string | null = null): Env {
   const url = new URL(publicUrl);
   const basePath = url.pathname.replace(/\/+$/, "");
   return {
@@ -64,11 +70,12 @@ export function parsePublicUrl(publicUrl: string, port: number): Env {
     basePath,
     secureCookies: url.protocol === "https:",
     port,
+    fpPublicUrl: fpPublicUrl?.trim().replace(/\/+$/, "") || null,
   };
 }
 
 export function loadEnv(): Env {
   const port = Number(process.env["PORT"] ?? "3100");
   const publicUrl = process.env["PUBLIC_URL"] ?? `http://localhost:${port}`;
-  return parsePublicUrl(publicUrl, port);
+  return parsePublicUrl(publicUrl, port, process.env["FP_PUBLIC_URL"] ?? null);
 }

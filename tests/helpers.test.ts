@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { LoginLimiter } from "../src/auth/login-limiter.js";
 import { parsePublicUrl } from "../src/config.js";
 import { ForumError } from "../src/forum/errors.js";
+import { articleDek, articleTitle, clip, formatEditionDate } from "../src/fp/articles.js";
 import { validateUsername, validateUserTitle } from "../src/forum/validate.js";
 import { AVATAR_COLORS, avatarColor, avatarInitial } from "../src/lib/avatar.js";
 import { pageOf, paginate } from "../src/lib/pagination.js";
@@ -74,11 +75,34 @@ function testPublicUrl() {
     basePath: "",
     secureCookies: true,
     port: 3100,
+    fpPublicUrl: null,
   });
+  assert.equal(parsePublicUrl("https://board.fritter.lol", 3100, "https://post.fritter.lol/").fpPublicUrl, "https://post.fritter.lol");
+  assert.equal(parsePublicUrl("https://board.fritter.lol", 3100, " ").fpPublicUrl, null);
   const sub = parsePublicUrl("https://fritter.lol/board/", 3100);
   assert.equal(sub.origin, "https://fritter.lol");
   assert.equal(sub.basePath, "/board");
   assert.equal(parsePublicUrl("http://localhost:3100", 3100).secureCookies, false);
+}
+
+function testArticleCards() {
+  const piece = { headline: "Council approves bridge", body: "The U.S. and the city agreed.\n\nMore detail." };
+  assert.equal(articleTitle(piece), "Council approves bridge");
+  assert.equal(articleDek(piece, 240), "The U.S. and the city agreed.", "the whole first paragraph, not a first 'sentence'");
+  const line = { headline: null, body: "  Crews held the line\novernight. " };
+  assert.equal(articleTitle(line), "Crews held the line overnight.", "a section line leads on its sentence");
+  assert.equal(articleDek(line, 240), null, "and has no dek to repeat it");
+  assert.equal(articleDek({ headline: "  ", body: "x" }, 240), null, "a blank headline is no headline");
+
+  assert.equal(clip("short", 10), "short");
+  assert.equal(clip("The council voted on Tuesday", 20), "The council voted…");
+  assert.ok(clip("The council voted on Tuesday", 20).length <= 20);
+  assert.equal(clip("Supercalifragilistic expialidocious", 10), "Supercali…", "no word boundary in reach: cut the word");
+  assert.equal(clip("One, two, three, four", 12), "One, two…", "no dangling punctuation before the ellipsis");
+
+  assert.equal(formatEditionDate("2026-09-24"), "Thursday, September 24, 2026");
+  assert.equal(formatEditionDate("2026-01-01"), "Thursday, January 1, 2026");
+  assert.equal(formatEditionDate("nope"), "nope");
 }
 
 testUsernames();
@@ -88,4 +112,5 @@ testAvatars();
 testLoginLimiter();
 testSafeNext();
 testPublicUrl();
+testArticleCards();
 console.log("helpers: all tests passed");

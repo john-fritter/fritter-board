@@ -5,6 +5,7 @@ import { createApp } from "../src/app.js";
 import { parsePublicUrl } from "../src/config.js";
 import { createPool } from "../src/db/index.js";
 import { migrate } from "../src/db/migrate.js";
+import { createFpPool } from "../src/fp/articles.js";
 import { renderBBCode } from "../src/markup/bbcode.js";
 
 // Shared setup for the integration suites: the real app over a real Postgres.
@@ -17,8 +18,9 @@ export function testDatabaseUrl(suite: string): string {
     console.log(`${suite}: skipped (TEST_DATABASE_URL not set)`);
     process.exit(0);
   }
-  if (url === process.env["DATABASE_URL"]) {
-    console.error("TEST_DATABASE_URL must not be the same as DATABASE_URL.");
+  if (url === process.env["DATABASE_URL"] || url === process.env["FP_DATABASE_URL"]) {
+    // Suites drop the board schema, and the phase 3 suite the published schema.
+    console.error("TEST_DATABASE_URL must not be the same as DATABASE_URL or FP_DATABASE_URL.");
     process.exit(1);
   }
   return url;
@@ -33,11 +35,20 @@ export interface Res {
   text: string;
 }
 
-export function setup(suite: string) {
-  const pool = createPool(testDatabaseUrl(suite));
+export const FP_ORIGIN = "http://post.test";
+
+/**
+ * With `fp`, the app also reads Fritter Post articles, from a `published`
+ * schema in the test database that the suite fills with fixtures (tables with
+ * the columns of Fritter Post's views), through the real read-only pool.
+ */
+export function setup(suite: string, opts: { fp?: boolean } = {}) {
+  const url = testDatabaseUrl(suite);
+  const pool = createPool(url);
+  const fp = opts.fp ? createFpPool(url) : null;
   const limiter = new LoginLimiter(3, 60_000);
-  const app = createApp({ pool, env: parsePublicUrl(ORIGIN, 0), limiter });
-  const forum = { pool, renderMarkup: (b: string) => renderBBCode(b, { postUrl: (id) => `/p/${id}` }) };
+  const app = createApp({ pool, env: parsePublicUrl(ORIGIN, 0, opts.fp ? FP_ORIGIN : null), limiter, fp });
+  const forum = { pool, renderMarkup: (b: string) => renderBBCode(b, { postUrl: (id) => `/p/${id}` }), fp };
 
   async function reset(): Promise<void> {
     await pool.query("DROP SCHEMA IF EXISTS board CASCADE");
@@ -76,7 +87,7 @@ export function setup(suite: string) {
     return res.cookie!;
   }
 
-  return { pool, app, forum, limiter, reset, req, login };
+  return { pool, fp, app, forum, limiter, reset, req, login };
 }
 
 export function threadIdFrom(location: string | null): number {
@@ -85,13 +96,13 @@ export function threadIdFrom(location: string | null): number {
   return Number(m[1]);
 }
 
-/** Runs a suite and always closes the pool. */
-export function run(suite: string, pool: { end(): Promise<void> }, main: () => Promise<void>): void {
+/** Runs a suite and always closes the pools. */
+export function run(suite: string, pool: { end(): Promise<void> }, main: () => Promise<void>, ...more: ({ end(): Promise<void> } | null)[]): void {
   main()
     .then(() => console.log(`${suite}: all tests passed`))
     .catch((err) => {
       console.error(err);
       process.exitCode = 1;
     })
-    .finally(() => pool.end());
+    .finally(() => Promise.all([pool.end(), ...more.map((p) => p?.end())]));
 }

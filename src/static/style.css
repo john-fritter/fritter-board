@@ -239,6 +239,30 @@ a.badge-new:visited { color: #b8420f; }
   border: 1px solid var(--border);
   margin: 12px 0;
 }
+
+/* A Fritter Post article card, at the top of the thread that discusses it. */
+.fp-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--bar);
+  padding: 8px 12px 9px;
+  margin: 8px 0 12px;
+  overflow-wrap: anywhere;
+}
+.fp-kicker {
+  margin: 0 0 3px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.fp-headline { margin: 0 0 4px; font-family: Georgia, "Times New Roman", serif; font-size: 18px; line-height: 1.25; }
+.fp-headline.fp-line { font-size: 15px; font-weight: normal; }
+.fp-headline a { color: var(--text); text-decoration: none; }
+.fp-headline a:hover { text-decoration: underline; }
+.fp-dek { margin: 0 0 5px; font-family: Georgia, "Times New Roman", serif; font-size: 13px; line-height: 1.45; }
+.fp-card .meta { margin: 0; }
 .panel-head {
   background: var(--bar);
   color: var(--bar-text);
