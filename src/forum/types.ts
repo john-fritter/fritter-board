@@ -81,6 +81,8 @@ export interface Thread {
   sticky: boolean;
   locked: boolean;
   createdAt: Date;
+  /** The Fritter Post article this thread discusses, if any. */
+  fpArticleId: number | null;
 }
 
 export interface Post {

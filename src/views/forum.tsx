@@ -1,3 +1,4 @@
+import type { Child } from "hono/jsx";
 import { raw } from "hono/html";
 import { config } from "../config.js";
 import { canEditPost, canReply, canSeeEditHistory, isMember, isModerator } from "../forum/permissions.js";
@@ -324,6 +325,8 @@ export function ThreadPage(props: {
   canReply: boolean;
   /** Boards a moderator can move this thread to; empty for everyone else. */
   moveTargets: { slug: string; name: string }[];
+  /** The Fritter Post article card, for a thread that discusses one. */
+  articleCard?: Child;
 }) {
   const { ctx, thread } = props;
   return (
@@ -334,6 +337,7 @@ export function ThreadPage(props: {
         {thread.locked && <span class="badge badge-locked">Locked</span>}
         {thread.title}
       </h1>
+      {props.articleCard}
       <div class="toolbar">
         {props.canReply && (
           <a class="button" href={ctx.url(`/t/${thread.id}/reply`)}>
@@ -384,29 +388,42 @@ export const MARKUP_HELP =
 
 export function ComposePage(props: {
   ctx: PageCtx;
-  mode: "thread" | "reply";
+  /** "article" starts the thread for a Fritter Post article, shown above the form. */
+  mode: "thread" | "reply" | "article";
   board: Board;
   thread?: Thread;
+  article?: { id: number; card: Child };
   title: string;
   body: string;
   previewHtml: string | null;
   error: string | null;
 }) {
-  const { ctx, board, thread } = props;
-  const heading = props.mode === "thread" ? `New thread in ${board.name}` : `Reply to “${thread!.title}”`;
-  const action = props.mode === "thread" ? `/b/${board.slug}/new` : `/t/${thread!.id}/reply`;
-  const trail =
+  const { ctx, board, thread, article } = props;
+  const startsThread = props.mode !== "reply";
+  const heading =
     props.mode === "thread"
-      ? [{ label: board.name, href: `/b/${board.slug}` }, { label: "New thread" }]
-      : [
-          { label: board.name, href: `/b/${board.slug}` },
-          { label: thread!.title, href: `/t/${thread!.id}` },
-          { label: "Reply" },
-        ];
+      ? `New thread in ${board.name}`
+      : props.mode === "article"
+        ? `Start the discussion in ${board.name}`
+        : `Reply to “${thread!.title}”`;
+  const action =
+    props.mode === "thread"
+      ? `/b/${board.slug}/new`
+      : props.mode === "article"
+        ? `/article/${article!.id}`
+        : `/t/${thread!.id}/reply`;
+  const trail = startsThread
+    ? [{ label: board.name, href: `/b/${board.slug}` }, { label: "New thread" }]
+    : [
+        { label: board.name, href: `/b/${board.slug}` },
+        { label: thread!.title, href: `/t/${thread!.id}` },
+        { label: "Reply" },
+      ];
   return (
     <Layout ctx={ctx} title={heading}>
       <Crumbs ctx={ctx} trail={trail} />
       <h1 class="page-title">{heading}</h1>
+      {article?.card}
       <ErrorNote message={props.error} />
       {props.previewHtml !== null && (
         <section class="panel preview">
@@ -415,7 +432,7 @@ export function ComposePage(props: {
         </section>
       )}
       <form method="post" action={ctx.url(action)} class="compose">
-        {props.mode === "thread" && (
+        {startsThread && (
           <label>
             Title
             <input type="text" name="title" value={props.title} required maxlength={config.limits.thread_title_max} />
@@ -430,7 +447,7 @@ export function ComposePage(props: {
         <p class="hint">{MARKUP_HELP}</p>
         <div class="form-actions">
           <button type="submit" name="action" value="post">
-            {props.mode === "thread" ? "Post thread" : "Post reply"}
+            {startsThread ? "Post thread" : "Post reply"}
           </button>
           <button type="submit" name="action" value="preview" class="secondary">
             Preview

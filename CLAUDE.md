@@ -26,7 +26,8 @@ you make a choice that isn't obvious from the code.
   or view alone.
 - **The private board must not leak.** Any query that lists or searches posts
   or threads filters with `visibleBoardsSql(viewer)` / `canSeeBoard`. The mod
-  log redacts Back Room targets; RSS is always built as an anonymous visitor. Hidden
+  log redacts Back Room targets; RSS is always built as an anonymous visitor; the
+  article page (`/article/<id>`) only redirects to a thread the viewer can see. Hidden
   things are 404, not 403. The integration test checks this; extend it for any
   new listing (search, RSS, feeds, sitemaps).
 - **Denormalized counts** (`users.post_count`, `boards.thread_count/post_count`,
@@ -40,6 +41,12 @@ you make a choice that isn't obvious from the code.
   actions.
 - **Role checks:** `isModerator`/`isAdmin` return booleans; use
   `asModerator`/`asAdmin` in guard clauses when you need `viewer` narrowed.
+- **Fritter Post is read-only and read through its views.** `src/fp/` queries
+  only Fritter Post's `published` schema (`articles`, `article_sources`),
+  through its own read-only pool (`FP_DATABASE_URL`). Never query Fritter
+  Post's own tables, and never copy article text into the board. An article id
+  is Fritter Post's `writer_pieces.id`; it can stop resolving, so every card
+  handles "no longer in the paper" and "couldn't be loaded".
 - **Markup:** `src/markup/bbcode.ts` escapes all text and emits only tags it
   writes. Keep it that way; don't add an "allow raw HTML" path. Bump
   `MARKUP_VERSION` if output changes.

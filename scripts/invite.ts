@@ -29,7 +29,7 @@ async function main() {
     const admin = rows[0];
     if (!admin) throw new Error("No admin exists yet. Run `npm run create-admin -- <username>` first.");
     const code = await createInvite(
-      { pool, renderMarkup: (b) => renderBBCode(b, { postUrl: (id) => `/p/${id}` }) },
+      { pool, renderMarkup: (b) => renderBBCode(b, { postUrl: (id) => `/p/${id}` }), fp: null },
       { id: admin.id, username: admin.username, role: "admin", status: "active", isBot: false },
       values.note ?? "",
       days
