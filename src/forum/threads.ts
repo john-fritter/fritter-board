@@ -5,7 +5,8 @@ import { MARKUP_VERSION } from "../markup/bbcode.js";
 import { pageOf, paginate, type Page } from "../lib/pagination.js";
 import { authorColumns, toAuthor, type AuthorRow } from "./authors.js";
 import type { ForumContext } from "./context.js";
-import { forbidden, notFound } from "./errors.js";
+import { requireArticle } from "./articles.js";
+import { ForumError, forbidden, notFound } from "./errors.js";
 import { canPost, canReply, canSeeBoard } from "./permissions.js";
 import type { Post, Thread, Viewer } from "./types.js";
 import { validatePostBody, validateThreadTitle } from "./validate.js";
@@ -18,6 +19,7 @@ interface ThreadRow {
   sticky: boolean;
   locked: boolean;
   created_at: Date;
+  fp_article_id: number | null;
   board_id: number;
   board_slug: string;
   board_name: string;
@@ -28,7 +30,7 @@ interface ThreadRow {
 
 const THREAD_SELECT = `
   SELECT t.id, t.title, t.author_id, t.reply_count, t.sticky, t.locked, t.created_at,
-         b.id AS board_id, b.slug AS board_slug, b.name AS board_name,
+         t.fp_article_id, b.id AS board_id, b.slug AS board_slug, b.name AS board_name,
          b.description AS board_description, b.members_only AS board_members_only,
          b.thread_count AS board_thread_count
     FROM threads t
@@ -44,6 +46,7 @@ function toThread(r: ThreadRow): Thread {
     sticky: r.sticky,
     locked: r.locked,
     createdAt: r.created_at,
+    fpArticleId: r.fp_article_id,
     board: {
       id: r.board_id,
       slug: r.board_slug,
@@ -133,11 +136,14 @@ export async function createThread(
   viewer: Viewer | null,
   boardId: number,
   rawTitle: string,
-  rawBody: string
+  rawBody: string,
+  opts: { fpArticleId?: number } = {}
 ): Promise<{ threadId: number; postId: number }> {
   if (!canPost(viewer)) throw forbidden("Only members can start threads.");
   const title = validateThreadTitle(rawTitle);
   const body = validatePostBody(rawBody);
+  const fpArticleId = opts.fpArticleId ?? null;
+  if (fpArticleId !== null) await requireArticle(ctx, fpArticleId);
 
   return withTransaction(ctx.pool, async (client) => {
     const { rows: boards } = await client.query<{ members_only: boolean }>(
@@ -147,11 +153,16 @@ export async function createThread(
     const board = boards[0];
     if (!board || !canSeeBoard(viewer, { membersOnly: board.members_only })) throw notFound("That board");
 
+    // One thread per article: the unique index decides a race, and the loser
+    // is told the discussion already exists.
     const { rows } = await client.query<{ id: number }>(
-      "INSERT INTO threads (board_id, author_id, title) VALUES ($1, $2, $3) RETURNING id",
-      [boardId, viewer.id, title]
+      `INSERT INTO threads (board_id, author_id, title, fp_article_id) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (fp_article_id) WHERE fp_article_id IS NOT NULL AND deleted_at IS NULL DO NOTHING
+       RETURNING id`,
+      [boardId, viewer.id, title, fpArticleId]
     );
-    const threadId = rows[0]!.id;
+    if (!rows[0]) throw new ForumError(409, "That article already has a thread.");
+    const threadId = rows[0].id;
     const post = await insertPost(ctx, client, { threadId, boardId, authorId: viewer.id, body });
     await client.query(
       `UPDATE threads SET first_post_id = $2, last_post_id = $2, last_post_at = $3, created_at = $3

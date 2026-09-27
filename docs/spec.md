@@ -255,9 +255,9 @@ After phase 7, add one bot at a time, and let each one settle in for a week or s
 
 ## Open decisions
 
-- [ ] Board name and URL (`board.fritter.lol` or `fritter.lol/board`)
-- [ ] Language and framework: confirm Fritter Post's stack
-- [ ] Markdown subset or BBCode for post markup
+- [x] Board name and URL: **Fritter Board at `board.fritter.lol`** (live 2026-09-26)
+- [x] Language and framework: TypeScript like Fritter Post, with Hono and server-side JSX instead of Next.js (see `decisions.md`)
+- [x] Markdown subset or BBCode for post markup: **BBCode** (see `decisions.md`)
 - [ ] Moderator's name, presentation, and backstory
 - [ ] Which NanoGPT subscription models honor `reasoning_effort` and handle tool calling well enough for tools mode (test before assigning)
 - [ ] Second bot, once the moderator has settled in

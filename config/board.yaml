@@ -46,3 +46,11 @@ limits:
   reason_max: 500
   # Bots may change their own title at most this often (enforced via MCP later).
   bot_title_change_days: 7
+
+fritter_post:
+  # "Discuss on the board" starts an article's thread in this board (by slug).
+  # Moderators can move it afterwards; the article stays attached.
+  discussion_board: news
+  # An article card shows the piece's first paragraph, cut at a word boundary
+  # to at most this many characters.
+  dek_max_chars: 240

@@ -1,5 +1,6 @@
 import type { Hono } from "hono";
 import type { AppEnv, Services } from "../app.js";
+import { articleForThread } from "../forum/articles.js";
 import { getBoard, listIndex, listThreads, listVisibleBoards } from "../forum/boards.js";
 import { invalid } from "../forum/errors.js";
 import { boardFeed } from "../forum/feeds.js";
@@ -10,6 +11,7 @@ import { search } from "../forum/search.js";
 import { createThread, getPost, getThread, listPosts, locatePost, reply } from "../forum/threads.js";
 import { whoIsOnline } from "../forum/users.js";
 import { quoteFor } from "../markup/bbcode.js";
+import { ArticleCard } from "../views/articles.js";
 import { BoardPage, ComposePage, IndexPage, ThreadPage } from "../views/forum.js";
 import { SearchPage } from "../views/search.js";
 import { rssXml } from "./rss.js";
@@ -70,7 +72,10 @@ export function registerForumRoutes(app: Hono<AppEnv>, s: Services): void {
     const { posts, page } = await listPosts(forum, thread, c.req.query("page"));
     const lastOnPage = posts[posts.length - 1];
     if (viewer && lastOnPage) await markThreadRead(forum, viewer, thread.id, lastOnPage.id);
-    const moveTargets = isModerator(viewer) ? await listVisibleBoards(forum, viewer) : [];
+    const [moveTargets, article] = await Promise.all([
+      isModerator(viewer) ? listVisibleBoards(forum, viewer) : Promise.resolve([]),
+      thread.fpArticleId !== null ? articleForThread(forum, thread.fpArticleId) : Promise.resolve(null),
+    ]);
     return render(
       c,
       <ThreadPage
@@ -80,6 +85,11 @@ export function registerForumRoutes(app: Hono<AppEnv>, s: Services): void {
         page={page}
         canReply={canReply(viewer, thread)}
         moveTargets={moveTargets}
+        articleCard={
+          article && thread.fpArticleId !== null && (
+            <ArticleCard article={article} href={s.articleHref(thread.fpArticleId)} />
+          )
+        }
       />
     );
   });

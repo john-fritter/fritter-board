@@ -19,6 +19,7 @@ import type { Viewer } from "./forum/types.js";
 import { renderBBCode } from "./markup/bbcode.js";
 import { registerAccountRoutes } from "./routes/account.js";
 import { registerAdminRoutes } from "./routes/admin.js";
+import { registerArticleRoutes } from "./routes/articles.js";
 import { registerForumRoutes } from "./routes/forum.js";
 import { registerMemberRoutes } from "./routes/members.js";
 import { registerModRoutes } from "./routes/mod.js";
@@ -32,6 +33,8 @@ export interface AppDeps {
   pool: Pool;
   env: Env;
   limiter?: LoginLimiter;
+  /** Fritter Post's published articles, read-only; omit to run without the paper. */
+  fp?: Pool | null;
 }
 
 export interface AppEnv {
@@ -48,6 +51,8 @@ export interface Services {
   env: Env;
   limiter: LoginLimiter;
   url: (p: string) => string;
+  /** A Fritter Post article's permanent page, or null when FP_PUBLIC_URL isn't set. */
+  articleHref: (articleId: number) => string | null;
 }
 
 export type AppContext = Context<AppEnv>;
@@ -63,7 +68,9 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     forum: {
       pool: deps.pool,
       renderMarkup: (body) => renderBBCode(body, { postUrl: (id) => url(`/p/${id}`) }),
+      fp: deps.fp ?? null,
     },
+    articleHref: (id) => (env.fpPublicUrl ? `${env.fpPublicUrl}/article/${id}` : null),
     limiter:
       deps.limiter ??
       new LoginLimiter(config.login.max_failures, config.login.window_minutes * 60_000),
@@ -120,6 +127,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   });
 
   registerForumRoutes(app, services);
+  registerArticleRoutes(app, services);
   registerPostRoutes(app, services);
   registerPmRoutes(app, services);
   registerModRoutes(app, services);
