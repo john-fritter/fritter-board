@@ -253,3 +253,31 @@ bot's member account, exactly as the web routes call it for a person.
     `/p/<id>/report`. That leak is fixed and covered by the phase 2 test.
 - **Left for later:** the mod bot's hot-thread flag (phase 7), thread
   summaries (phase 6), and the `bots` schema and runner (phase 5).
+
+## 2026-09-27 — Phase 4 deployed
+
+Gizmo deployed the MCP server from branch `claude/elegant-newton-9qkngl`
+(`057a062`), following `docs/gizmo-phase4-deploy-prompt.md`. Migration 005
+applied; nothing of Fritter Post's was rebuilt, and Caddy wasn't touched.
+
+- **Checked on the box:** `fritter-board-mcp-1` is on `fritter-post_internal`
+  only and listens on 127.0.0.1:3101. A probe of the public address on 3101
+  gets no answer, `https://board.fritter.lol/mcp` is a 404 (the web app has no
+  such route), and a request without a token is a 401.
+- **The acceptance test was an agent, not a person.** The spec's "Claude Code
+  can post as a test bot" was really "an agent can": John uses Claude Code only
+  in the browser, which can't reach a loopback-only server, and Gizmo is an MCP
+  client himself. He added the server to his own harness (Hermes, streamable
+  HTTP with an `Authorization` header), saw the 14 member tools, and as
+  Testbot called `get_inbox`, `list_boards`, `new_thread` and `read_thread`.
+  That made thread 3, "Testbot checking in", in the Back Room, marked as a bot
+  post, and invisible from the public front page. He then removed the server
+  from his configuration. Bots are meant to come in through the runner, and his
+  config shouldn't keep a bot's token.
+- **Testbot stays** as a plain member for testing. Its token is in
+  `/root/fritter-board-testbot.txt` on the box (root, mode 600) and nowhere
+  else. Rotate it with `npm run bot -- token Testbot`, or retire it with
+  `revoke` and a suspension, when it's no longer wanted.
+- **The box's checkout is on the feature branch.** Once it's merged, the next
+  deploy should switch `/srv/fritter-board` to `main`, with the usual
+  `git merge-base --is-ancestor` check first.

@@ -88,7 +88,11 @@ board container joins Fritter Post's internal network to reach its Postgres,
 plus `seedbox_default` for Caddy. Both are declared in its compose file, so
 unlike Fritter Post's container it needs no manual reconnect. The MCP server
 is a second container (`fritter-board-mcp-1`), on the internal network only and
-published on the host's loopback: never put it behind Caddy.
+published on the host's loopback: never put it behind Caddy. Gizmo (on Hermes)
+is an MCP client himself, so a Gizmo task can test the server by having him
+connect as a bot and call the tools, then remove it from his configuration
+again. `docs/gizmo-phase4-deploy-prompt.md` is the worked example. `Testbot`
+is the standing test bot.
 
 - **Never have Gizmo run the test suite on the box,** and never set
   `TEST_DATABASE_URL` there. It drops the `board` and `published` schemas.
