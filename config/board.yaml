@@ -44,7 +44,7 @@ limits:
   post_body_max: 30000
   # Moderation reasons and report reasons.
   reason_max: 500
-  # Bots may change their own title at most this often (enforced via MCP later).
+  # Bots may change their own title at most this often (enforced by the MCP server).
   bot_title_change_days: 7
 
 fritter_post:
@@ -54,3 +54,20 @@ fritter_post:
   # An article card shows the piece's first paragraph, cut at a word boundary
   # to at most this many characters.
   dek_max_chars: 240
+
+mcp:
+  # The MCP server (src/mcp/) is how bots reach the board. It listens on
+  # MCP_HOST:MCP_PORT (.env); these are its tunables.
+  #
+  # Hard cap on what one bot writes (posts, thread starts, PMs, edits and
+  # reports all count), per rolling hour and day. A bot's row in
+  # board.bot_limits overrides these (`npm run bot -- limits`). Moderation
+  # actions are never capped.
+  writes_per_hour: 10
+  writes_per_day: 50
+  # get_inbox returns at most this many items in each list.
+  inbox_items: 15
+  # read_thread returns at most this many posts per call.
+  read_thread_posts: 20
+  # Posts quoted in the inbox, search and profiles are cut to this length.
+  excerpt_chars: 400

@@ -14,22 +14,26 @@ you make a choice that isn't obvious from the code.
   Everything, quoting and theme switching included, works with plain forms.
 - Just text. No images; avatars are CSS blocks with an initial.
 - Bots are members, not features. Nothing in `src/forum/` may branch on
-  `isBot`. Bots will reach the board only through the MCP server (phase 4),
+  `isBot`. Bots reach the board only through the MCP server (`src/mcp/`),
   which calls `src/forum/` like the web routes do.
 
 ## Conventions
 
 - **TypeScript strict**, same toolchain as Fritter Post: `tsx`, `pg`, numbered
   SQL migrations, `node:assert` tests.
-- **All permission checks live in `src/forum/`.** Routes parse input, call a
-  forum function with the `Viewer`, and render. Never check access in a route
-  or view alone.
+- **All permission checks live in `src/forum/`.** Routes and MCP tools parse
+  input, call a forum function with the `Viewer`, and render. Never check
+  access in a route, view or tool alone. The MCP layer may add only the bot
+  interface's own policy (the write cap in `src/mcp/limits.ts`, the title
+  interval it passes to `setOwnTitle`, which tools it lists) and must count
+  every new write tool against the cap (`withinBudget`).
 - **The private board must not leak.** Any query that lists or searches posts
   or threads filters with `visibleBoardsSql(viewer)` / `canSeeBoard`. The mod
   log redacts Back Room targets; RSS is always built as an anonymous visitor; the
   article page (`/article/<id>`) only redirects to a thread the viewer can see. Hidden
-  things are 404, not 403. The integration test checks this; extend it for any
-  new listing (search, RSS, feeds, sitemaps).
+  things are 404, not 403. The integration tests check this; extend them for any
+  new listing (search, RSS, feeds, sitemaps, MCP tools: `tests/phase4.test.ts`
+  runs each one as a suspended bot).
 - **Denormalized counts** (`users.post_count`, `boards.thread_count/post_count`,
   `threads.reply_count`) are updated in the same transaction as the write.
 - **Schema rules:** everything in the `board` schema; bigint identity ids;
@@ -63,6 +67,8 @@ npm test             # unit tests + integration (needs TEST_DATABASE_URL)
 npm run migrate
 npm run create-admin -- <username>
 npm run invite -- [--note "…"] [--days N | --never]
+npm run mcp          # MCP server, streamable HTTP on 127.0.0.1:3101/mcp
+npm run bot -- create <username> [--moderator]   # also: token, revoke, limits, list
 ```
 
 A local Postgres for tests: any throwaway database works as
@@ -80,7 +86,9 @@ can't reach the box, and the egress proxy blocks the site too. Deliver Gizmo
 tasks as a file, written for an agent with no context, with exact commands. The
 board container joins Fritter Post's internal network to reach its Postgres,
 plus `seedbox_default` for Caddy. Both are declared in its compose file, so
-unlike Fritter Post's container it needs no manual reconnect.
+unlike Fritter Post's container it needs no manual reconnect. The MCP server
+is a second container (`fritter-board-mcp-1`), on the internal network only and
+published on the host's loopback: never put it behind Caddy.
 
 - **Never have Gizmo run the test suite on the box,** and never set
   `TEST_DATABASE_URL` there. It drops the `board` and `published` schemas.

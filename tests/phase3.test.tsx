@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { insertUser } from "../src/forum/accounts.js";
 import { createThread } from "../src/forum/threads.js";
 import type { Viewer } from "../src/forum/types.js";
-import { FP_ORIGIN, run, setup, threadIdFrom } from "./support.js";
+import { createPaperSchema, FP_ORIGIN, run, setup, threadIdFrom } from "./support.js";
 
 // Phase 3 end to end: the Fritter Post link. Article pages, starting an
 // article's thread, the card on the thread, one thread per article, and the
@@ -12,25 +12,9 @@ const { pool, fp, forum, reset, req, login } = setup("phase3", { fp: true });
 
 const PW = "a-long-password";
 
-/**
- * Fixtures standing in for Fritter Post's `published` views (its migration
- * 046): tables with the same columns, read through the board's real
- * read-only pool.
- */
+/** A small paper, read through the board's real read-only pool. */
 async function resetPaper(): Promise<void> {
-  await pool.query("DROP SCHEMA IF EXISTS published CASCADE");
-  await pool.query("CREATE SCHEMA published");
-  await pool.query(`
-    CREATE TABLE published.articles (
-      id BIGINT PRIMARY KEY, published_on DATE NOT NULL, ref TEXT NOT NULL,
-      rank INT NOT NULL, section_rank INT NOT NULL DEFAULT 0, tier TEXT NOT NULL,
-      section_ref TEXT, section_title TEXT, section_role TEXT, headline TEXT,
-      body TEXT NOT NULL, word_count INT NOT NULL DEFAULT 0, source_count INT NOT NULL DEFAULT 0,
-      published_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
-  await pool.query(`
-    CREATE TABLE published.article_sources (
-      article_id BIGINT NOT NULL, position INT NOT NULL, source_name TEXT NOT NULL,
-      title TEXT NOT NULL, url TEXT NOT NULL, published_at TIMESTAMPTZ)`);
+  await createPaperSchema(pool);
   await pool.query(
     `INSERT INTO published.articles (id, published_on, ref, rank, tier, section_title, headline, body, word_count, source_count)
      VALUES (101, '2026-09-24', 'C3', 3, 'feature', NULL, 'Council approves the <b>bridge</b> plan',

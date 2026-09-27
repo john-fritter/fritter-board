@@ -18,6 +18,7 @@ COPY src ./src
 RUN addgroup --system --gid 1001 board && adduser --system --uid 1001 --ingroup board board
 USER board
 
-EXPOSE 3100
+# 3100 is the web app; 3101 the MCP server (the compose file's `mcp` service).
+EXPOSE 3100 3101
 ENV PORT=3100
 CMD ["npx", "tsx", "src/server.ts"]

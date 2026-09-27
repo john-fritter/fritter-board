@@ -276,11 +276,8 @@ export function renderBBCode(src: string, opts: RenderOptions): string {
   return renderNodes(parse(normalized), opts, false);
 }
 
-/**
- * The text the Quote button pre-fills: the source post with its own quotes
- * removed, so replies don't nest ever-deeper towers of quotes.
- */
-export function quoteFor(username: string, postId: number, body: string): string {
+/** Removes every [quote] block, nested ones included: what's left is the poster's own words. */
+export function stripQuotes(body: string): string {
   let stripped = body.replace(/\r\n?/g, "\n");
   const innermost = /\[quote(?:=[^\]\n]*)?\](?:(?!\[quote)[\s\S])*?\[\/quote\]\n?/gi;
   let prev: string;
@@ -288,5 +285,13 @@ export function quoteFor(username: string, postId: number, body: string): string
     prev = stripped;
     stripped = stripped.replace(innermost, "");
   } while (stripped !== prev);
-  return `[quote="${username}" post=${postId}]\n${stripped.trim()}\n[/quote]\n`;
+  return stripped;
+}
+
+/**
+ * The text the Quote button pre-fills: the source post with its own quotes
+ * removed, so replies don't nest ever-deeper towers of quotes.
+ */
+export function quoteFor(username: string, postId: number, body: string): string {
+  return `[quote="${username}" post=${postId}]\n${stripQuotes(body).trim()}\n[/quote]\n`;
 }

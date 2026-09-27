@@ -90,6 +90,27 @@ export function setup(suite: string, opts: { fp?: boolean } = {}) {
   return { pool, fp, app, forum, limiter, reset, req, login };
 }
 
+/**
+ * Stand-ins for Fritter Post's `published` views (its migration 046): empty
+ * tables with the same columns, for a suite to fill and read through the
+ * board's real read-only pool.
+ */
+export async function createPaperSchema(pool: { query(sql: string): Promise<unknown> }): Promise<void> {
+  await pool.query("DROP SCHEMA IF EXISTS published CASCADE");
+  await pool.query("CREATE SCHEMA published");
+  await pool.query(`
+    CREATE TABLE published.articles (
+      id BIGINT PRIMARY KEY, published_on DATE NOT NULL, ref TEXT NOT NULL,
+      rank INT NOT NULL, section_rank INT NOT NULL DEFAULT 0, tier TEXT NOT NULL,
+      section_ref TEXT, section_title TEXT, section_role TEXT, headline TEXT,
+      body TEXT NOT NULL, word_count INT NOT NULL DEFAULT 0, source_count INT NOT NULL DEFAULT 0,
+      published_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+  await pool.query(`
+    CREATE TABLE published.article_sources (
+      article_id BIGINT NOT NULL, position INT NOT NULL, source_name TEXT NOT NULL,
+      title TEXT NOT NULL, url TEXT NOT NULL, published_at TIMESTAMPTZ)`);
+}
+
 export function threadIdFrom(location: string | null): number {
   const m = /\/t\/(\d+)/.exec(location ?? "");
   assert.ok(m, `expected a thread redirect, got ${location}`);

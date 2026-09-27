@@ -159,6 +159,8 @@ async function main() {
   res = await req("GET", `/t/${t1}`, { cookie: eve });
   assert.ok(res.text.includes("[removed by moderator]"));
   assert.ok(!res.text.includes("Also: parking.") && !res.text.includes("Off topic"), "members see neither text nor reason");
+  res = await req("GET", `/p/${r1}/report`, { cookie: eve });
+  assert.ok(!res.text.includes("Also: parking."), "nor through the report page");
   res = await req("GET", `/t/${t1}`, { cookie: mo });
   assert.ok(res.text.includes("Reason: Off topic"));
   assert.equal((await pool.query("SELECT post_count FROM users WHERE id = $1", [ids.dan])).rows[0].post_count, 2);

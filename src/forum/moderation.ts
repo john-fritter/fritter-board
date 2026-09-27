@@ -282,6 +282,8 @@ export interface OpenReport {
   threadId: number;
   threadTitle: string;
   postAuthorName: string;
+  /** The post's markup as written. */
+  postBody: string;
   postBodyHtml: string;
   postRemoved: boolean;
   reporterName: string;
@@ -297,6 +299,7 @@ export async function listOpenReports(ctx: ForumContext, viewer: Viewer | null):
     thread_id: number;
     thread_title: string;
     post_author: string;
+    body: string;
     body_html: string;
     removed: boolean;
     reporter: string;
@@ -304,7 +307,7 @@ export async function listOpenReports(ctx: ForumContext, viewer: Viewer | null):
     created_at: Date;
   }>(
     `SELECT r.id, r.post_id, p.thread_id, t.title AS thread_title, pa.username AS post_author,
-            p.body_html, p.deleted_at IS NOT NULL AS removed, ru.username AS reporter,
+            p.body, p.body_html, p.deleted_at IS NOT NULL AS removed, ru.username AS reporter,
             r.reason, r.created_at
        FROM reports r
        JOIN posts p ON p.id = r.post_id
@@ -320,6 +323,7 @@ export async function listOpenReports(ctx: ForumContext, viewer: Viewer | null):
     threadId: r.thread_id,
     threadTitle: r.thread_title,
     postAuthorName: r.post_author,
+    postBody: r.body,
     postBodyHtml: r.body_html,
     postRemoved: r.removed,
     reporterName: r.reporter,

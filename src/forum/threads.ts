@@ -6,8 +6,8 @@ import { pageOf, paginate, type Page } from "../lib/pagination.js";
 import { authorColumns, toAuthor, type AuthorRow } from "./authors.js";
 import type { ForumContext } from "./context.js";
 import { requireArticle } from "./articles.js";
-import { ForumError, forbidden, notFound } from "./errors.js";
-import { canPost, canReply, canSeeBoard } from "./permissions.js";
+import { ForumError, forbidden, invalid, notFound } from "./errors.js";
+import { canPost, canReply, canSeeBoard, isModerator } from "./permissions.js";
 import type { Post, Thread, Viewer } from "./types.js";
 import { validatePostBody, validateThreadTitle } from "./validate.js";
 
@@ -68,10 +68,39 @@ export async function getThread(ctx: ForumContext, viewer: Viewer | null, thread
 /** Posts in a thread, flat and chronological. Removed posts keep their slot. */
 export async function listPosts(
   ctx: ForumContext,
+  viewer: Viewer | null,
   thread: Thread,
   rawPage: string | number | undefined
 ): Promise<{ posts: Post[]; page: Page }> {
   const page = paginate(rawPage, thread.replyCount + 1, config.pagination.posts_per_page);
+  return { page, posts: await selectPosts(ctx, viewer, thread, page.offset, page.perPage) };
+}
+
+/**
+ * Up to `limit` posts starting at the 1-based position `from`, for readers
+ * that page by post rather than by page (the MCP server).
+ */
+export async function listPostsFrom(
+  ctx: ForumContext,
+  viewer: Viewer | null,
+  thread: Thread,
+  from: number,
+  limit: number
+): Promise<Post[]> {
+  return selectPosts(ctx, viewer, thread, Math.max(0, from - 1), limit);
+}
+
+/**
+ * A removed post keeps its slot, but its text is gone for everyone and its
+ * reason is for moderators only.
+ */
+async function selectPosts(
+  ctx: ForumContext,
+  viewer: Viewer | null,
+  thread: Thread,
+  offset: number,
+  limit: number
+): Promise<Post[]> {
   const { rows } = await ctx.pool.query<
     AuthorRow & {
       id: number;
@@ -93,24 +122,25 @@ export async function listPosts(
       WHERE p.thread_id = $1
       ORDER BY p.id
       LIMIT $2 OFFSET $3`,
-    [thread.id, page.perPage, page.offset]
+    [thread.id, limit, offset]
   );
-  return {
-    page,
-    posts: rows.map((r, i) => ({
+  const seesReasons = isModerator(viewer);
+  return rows.map((r, i) => {
+    const deleted = r.deleted_at !== null;
+    return {
       id: r.id,
       threadId: thread.id,
-      number: page.offset + i + 1,
+      number: offset + i + 1,
       author: toAuthor(r),
-      body: r.body,
-      bodyHtml: r.body_html,
+      body: deleted ? "" : r.body,
+      bodyHtml: deleted ? "" : r.body_html,
       createdAt: r.created_at,
       editedAt: r.edited_at,
       editedByName: r.edited_by_name,
-      deleted: r.deleted_at !== null,
-      deleteReason: r.delete_reason,
-    })),
-  };
+      deleted,
+      deleteReason: deleted && seesReasons ? r.delete_reason : null,
+    };
+  });
 }
 
 /** Writes a post and keeps every denormalized count in step, in the caller's transaction. */
@@ -146,12 +176,17 @@ export async function createThread(
   if (fpArticleId !== null) await requireArticle(ctx, fpArticleId);
 
   return withTransaction(ctx.pool, async (client) => {
-    const { rows: boards } = await client.query<{ members_only: boolean }>(
-      "SELECT members_only FROM boards WHERE id = $1 AND deleted_at IS NULL FOR UPDATE",
+    const { rows: boards } = await client.query<{ slug: string; members_only: boolean }>(
+      "SELECT slug, members_only FROM boards WHERE id = $1 AND deleted_at IS NULL FOR UPDATE",
       [boardId]
     );
     const board = boards[0];
     if (!board || !canSeeBoard(viewer, { membersOnly: board.members_only })) throw notFound("That board");
+    // An article's discussion starts where everyone can find it; a moderator
+    // may move it afterwards, in the log.
+    if (fpArticleId !== null && board.slug !== config.fritter_post.discussion_board) {
+      throw invalid(`Threads about an article start in the ${config.fritter_post.discussion_board} board.`);
+    }
 
     // One thread per article: the unique index decides a race, and the loser
     // is told the discussion already exists.
@@ -225,7 +260,10 @@ export interface VisiblePost {
   position: number;
 }
 
-/** A single post, if the viewer may see the thread it's in. */
+/**
+ * A single post, if the viewer may see the thread it's in. A removed post's
+ * text is for moderators and its author only, its reason for moderators.
+ */
 export async function getPost(ctx: ForumContext, viewer: Viewer | null, postId: number): Promise<VisiblePost> {
   const { rows } = await ctx.pool.query<{
     id: number;
@@ -260,6 +298,8 @@ export async function getPost(ctx: ForumContext, viewer: Viewer | null, postId: 
   );
   const r = rows[0];
   if (!r || !canSeeBoard(viewer, { membersOnly: r.members_only })) throw notFound("That post");
+  const deleted = r.deleted_at !== null;
+  const seesText = !deleted || isModerator(viewer) || viewer?.id === r.author_id;
   return {
     id: r.id,
     threadId: r.thread_id,
@@ -271,11 +311,11 @@ export async function getPost(ctx: ForumContext, viewer: Viewer | null, postId: 
     boardName: r.board_name,
     authorId: r.author_id,
     authorName: r.author_name,
-    body: r.body,
-    bodyHtml: r.body_html,
+    body: seesText ? r.body : "",
+    bodyHtml: seesText ? r.body_html : "",
     createdAt: r.created_at,
-    deleted: r.deleted_at !== null,
-    deleteReason: r.delete_reason,
+    deleted,
+    deleteReason: deleted && isModerator(viewer) ? r.delete_reason : null,
     position: r.position,
   };
 }

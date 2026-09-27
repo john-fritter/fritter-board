@@ -10,13 +10,12 @@ import type { Pool } from "pg";
 import { LoginLimiter } from "./auth/login-limiter.js";
 import { viewerForSession } from "./auth/sessions.js";
 import { config, type Env } from "./config.js";
-import type { ForumContext } from "./forum/context.js";
+import { createForumContext, type ForumContext } from "./forum/context.js";
 import { openReportCount } from "./forum/moderation.js";
 import { isModerator } from "./forum/permissions.js";
 import { unreadConversationCount } from "./forum/pms.js";
 import { ForumError } from "./forum/errors.js";
 import type { Viewer } from "./forum/types.js";
-import { renderBBCode } from "./markup/bbcode.js";
 import { registerAccountRoutes } from "./routes/account.js";
 import { registerAdminRoutes } from "./routes/admin.js";
 import { registerArticleRoutes } from "./routes/articles.js";
@@ -65,11 +64,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   const services: Services = {
     env,
     url,
-    forum: {
-      pool: deps.pool,
-      renderMarkup: (body) => renderBBCode(body, { postUrl: (id) => url(`/p/${id}`) }),
-      fp: deps.fp ?? null,
-    },
+    forum: createForumContext(deps.pool, env.basePath, deps.fp ?? null),
     articleHref: (id) => (env.fpPublicUrl ? `${env.fpPublicUrl}/article/${id}` : null),
     limiter:
       deps.limiter ??
