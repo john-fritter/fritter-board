@@ -146,10 +146,11 @@ Two things to know about it:
 use `handle /board*` in Caddy, not `handle_path`, because the app expects the
 prefix.
 
-**Backups: there are none yet.** The board lives in Fritter Post's database, and
-the deploy found no Postgres dump job for it. A whole-database `pg_dump` of
-`fritter_post` would cover both. See the next steps in `docs/decisions.md`
-(2026-09-26, deployed).
+**Backups.** The board lives in Fritter Post's database, so Fritter Post's
+nightly backup covers it: a whole-database dump at 10:30 UTC, encrypted to
+Google Drive, restore-tested on 2026-09-27. Fritter Post's
+`docs/gizmo-backups-prompt.md` has the script, and its `docs/decisions.md`
+(2026-09-27) has the details. The dump also carries this board's `.env`.
 
 ## Layout
 
