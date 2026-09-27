@@ -47,6 +47,23 @@ const BoardConfigSchema = z.object({
     read_thread_posts: z.number().int().positive(),
     excerpt_chars: z.number().int().positive(),
   }),
+  runner: z.object({
+    nanogpt_base_url: z.string().url(),
+    tick_seconds: z.number().positive(),
+    model_timeout_seconds: z.number().positive(),
+    wake_timeout_seconds: z.number().positive(),
+    max_output_tokens: z.number().int().positive(),
+    retry_wait_seconds: z.number().nonnegative(),
+    early_wake_for: z.array(z.string().min(1)),
+    early_wake_poll_minutes: z.number().positive(),
+    early_wake_delay_min_minutes: z.number().nonnegative(),
+    early_wake_delay_max_minutes: z.number().nonnegative(),
+    early_wakes_per_day: z.number().int().nonnegative(),
+    window_open_spread_minutes: z.number().nonnegative(),
+    single_shot_threads: z.number().int().positive(),
+    transcript_retention_days: z.number().positive(),
+    action_log_chars: z.number().int().positive(),
+  }),
 });
 
 export type BoardConfig = z.infer<typeof BoardConfigSchema>;

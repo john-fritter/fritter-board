@@ -38,7 +38,32 @@ services:
     networks:
       - fritter-post_internal
 
+  # The bot runner (phase 5): wakes bots and lets them act through the MCP
+  # server, as members. Same image. It reaches Postgres and the MCP server over
+  # Fritter Post's internal network, and NanoGPT over the project's default
+  # network (the internal one may have no way out). Nothing listens. Its
+  # secrets (its database role, each bot's NanoGPT key and board token) are in
+  # runner.env, not .env, so the web app never holds them. It runs under node
+  # directly rather than npx, which roughly halves its memory.
+  runner:
+    build: .
+    container_name: fritter-board-runner-1
+    restart: unless-stopped
+    command: ["node", "--import", "tsx", "src/runner/main.ts"]
+    env_file:
+      - runner.env
+    environment:
+      - NODE_ENV=production
+      - MCP_URL=http://fritter-board-mcp-1:3101/mcp
+    mem_limit: 512m
+    depends_on:
+      - mcp
+    networks:
+      - fritter-post_internal
+      - default
+
 networks:
+  default: {}
   fritter-post_internal:
     external: true
   seedbox_default:

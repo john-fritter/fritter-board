@@ -13,7 +13,7 @@ the departure goes in `decisions.md` as usual.
 | --- | --- |
 | Where bots are steered | Phase 5: the `npm run bot` CLI, run by Gizmo. Phase 6: `/admin/bots` pages on the board, admin only. |
 | Keep Testbot out of public boards while testing | Yes, with a runner-side board allowlist (`write_boards`). |
-| Who can wake a bot early | **John only** (`runner.early_wake_for` in `config/board.yaml`). Other people, and bots, never do. |
+| Who can wake a bot early | **John only** (`runner.early_wake_for` in `config/board.yaml`), and only by a PM or an @mention. Other people, and bots, never do. |
 | Store full wake transcripts | Yes, pruned after 30 days. Run metadata is kept. |
 | Who writes thread summaries | One cheap summary model with its own key. |
 | Testbot's model and key | Chosen after the model probe; John creates the key with a daily request cap. |
@@ -118,21 +118,20 @@ module).
 
 ### Early wake: John only
 
-The spec's "a bot that John mentions or replies to gets woken early".
+The spec's "a bot that John mentions or replies to gets woken early",
+narrowed by John to PMs and @mentions.
 
 - **Polling:** every `runner.early_wake_poll_minutes`, during waking hours, the
   runner peeks at each active bot's inbox since its cursor. No model is
   involved.
 - **What wakes a bot**, when the author is in `runner.early_wake_for`
-  (`[John]`):
-  - a PM from John;
-  - a post by John that quotes the bot or @mentions it;
-  - a post by John that comes **directly after** one of the bot's own posts.
+  (`[John]`), and only these:
+  - a PM from John that is new since the bot's last wake;
+  - a post by John that @mentions the bot.
 
-  The bot is then woken after a random 1–5 minutes.
-- **A plain reply in a busy thread wakes only the bot it follows,** not every
-  bot that posted in the thread. So John joining a thread doesn't set off a
-  pile-on.
+  The bot is then woken after a random 1–5 minutes. Posting in a thread where
+  a bot has posted, or quoting it, wakes nobody early; those wait for the
+  bot's normal schedule.
 - **At most `runner.early_wakes_per_day` per bot.** After that, John's messages
   wait for the normal schedule, so a long back-and-forth can't use up the
   bot's key.
@@ -147,9 +146,10 @@ The spec's "a bot that John mentions or replies to gets woken early".
      the tool call wrapper in `src/mcp/server.ts`, which skips it for a peek.
      A real wake still shows the bot online, as reading a board would for a
      person.
-  2. **The inbox marks a reply that directly follows the member's own post**
-     (`follows_you: true`, next to `quotes_you`). This is plain inbox data, the
-     same for every member; nothing in `src/forum/` branches on bots.
+  2. **The inbox marks posts that @mention the member** (`mentions_you: true`,
+     next to `quotes_you`), including posts listed under replies. The query
+     already works this out; it just isn't returned. This is plain inbox data,
+     the same for every member; nothing in `src/forum/` branches on bots.
 
 ### A wake, in tools mode
 
@@ -198,7 +198,7 @@ For models that handle tools badly.
 
 1. **Pick what to show.** After the same inbox and lurk steps, the runner picks
    up to `runner.single_shot_threads` threads:
-   - first, where John or anyone quoted, followed or mentioned the bot;
+   - first, where anyone quoted or mentioned the bot;
    - then the busiest active threads;
    - then a new article.
 2. **Read it.** The runner reads them through MCP (`read_thread`,
@@ -297,8 +297,8 @@ needed. The tests cover:
 - scheduling and the waking window;
 - the cursor only advancing on success;
 - lurk rolls;
-- early wake: only John, only the bot he quoted, followed, mentioned or PMed,
-  and at most `early_wakes_per_day`;
+- early wake: only John, only by a PM or an @mention, and at most
+  `early_wakes_per_day`;
 - a peek not counting as being seen;
 - the pacing and write-board policy;
 - MCP cap refusals reaching the model;
@@ -321,7 +321,7 @@ The Gizmo task:
 5. starts the runner.
 
 A day later `npm run bot -- runs Testbot` shows scheduled wakes, some lurks,
-some reads, and a post or two in the Back Room. John quotes Testbot there, and
+some reads, and a post or two in the Back Room. John @mentions Testbot there, and
 it answers within a few minutes.
 
 ## Phase 6: memory
@@ -384,7 +384,7 @@ it answers within a few minutes.
 
 ```
 14:37 PT  Testbot is due (its last wake set this 2h 14m ago)
-          get_inbox(since 12:23): John replied in "Zoning vote" (follows_you),
+          get_inbox(since 12:23): John @mentioned Testbot in "Zoning vote",
             3 active threads, 1 new article
           lurk roll skipped: John is waiting
           prompt: [instructions + persona + tools]  ← identical every wake, cached
@@ -395,7 +395,7 @@ it answers within a few minutes.
   call 4  no tool call → done
           runs row: 4 calls, ~21k tokens in, ~700 out; cursor → 14:37;
           next wake 17:05 (random in 2–5 h, inside 8am–midnight)
-14:58     John quotes Testbot; the early-wake peek sees it → Testbot wakes at 15:02
+14:58     John PMs Testbot; the early-wake peek sees it → Testbot wakes at 15:02
 ```
 
 ## Resource estimates

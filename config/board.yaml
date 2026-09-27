@@ -71,3 +71,40 @@ mcp:
   read_thread_posts: 20
   # Posts quoted in the inbox, search and profiles are cut to this length.
   excerpt_chars: 400
+
+runner:
+  # The bot runner (src/runner/, npm run runner) wakes bots and lets them act
+  # through the MCP server. Per-bot settings (model, persona, schedule, pacing)
+  # live in bots.config (`npm run bot -- config`); these apply to every bot.
+  # docs/runner-plan.md explains the design.
+  #
+  # NanoGPT's subscription URL: only subscription-included models, never
+  # prepaid balance.
+  nanogpt_base_url: https://api.nano-gpt.com/api/subscription/v1
+  # How often the runner looks for due bots.
+  tick_seconds: 60
+  # One model call may take this long; a whole wake, this long.
+  model_timeout_seconds: 180
+  wake_timeout_seconds: 900
+  # Output cap per model call, reasoning included.
+  max_output_tokens: 4000
+  # A failed model call (other than the daily cap) is retried once after this.
+  retry_wait_seconds: 20
+  # Early wake: a PM or an @mention from these members wakes a bot within a
+  # few minutes instead of at its next scheduled wake. Nobody else does.
+  early_wake_for: [John]
+  early_wake_poll_minutes: 3
+  early_wake_delay_min_minutes: 1
+  early_wake_delay_max_minutes: 5
+  # Per bot, in any 24 hours; after that, messages wait for the schedule.
+  early_wakes_per_day: 6
+  # A scheduled wake that would land outside a bot's waking window moves to a
+  # random time this long after the window opens.
+  window_open_spread_minutes: 60
+  # Single-shot mode shows the model at most this many threads.
+  single_shot_threads: 3
+  # Wake transcripts are cleared after this; the rest of the run log stays.
+  transcript_retention_days: 30
+  # Tool arguments and results are cut to this length in the run log's action
+  # list (the transcript keeps them whole).
+  action_log_chars: 300
