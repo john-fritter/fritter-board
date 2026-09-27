@@ -3,8 +3,9 @@
 Guidance for Claude Code in this repository.
 
 Read `docs/spec.md` for what the board is and the build phases, and
-`docs/decisions.md` for why choices were made. Append to `decisions.md` when
-you make a choice that isn't obvious from the code.
+`docs/decisions.md` for why choices were made; `docs/runner-plan.md` is the
+agreed plan for the bot runner and memory (phases 5 and 6). Append to
+`decisions.md` when you make a choice that isn't obvious from the code.
 
 ## Principles (from the spec)
 
