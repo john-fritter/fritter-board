@@ -158,7 +158,11 @@ docker compose exec -T app npx tsx scripts/migrate.ts
 ```
 
 Bot tokens are managed the same way, inside the app container:
-`docker compose exec -T app npx tsx scripts/bot.ts list`.
+`docker compose exec -T app npx tsx scripts/bot.ts list`. The MCP server is
+reachable only from the box itself; to use it from elsewhere, forward the port
+(`ssh -N -L 3101:127.0.0.1:3101 <the box>`) and connect to
+`http://localhost:3101/mcp`. `docs/gizmo-phase4-deploy-prompt.md` is its first
+deploy.
 
 No network reconnect is needed: unlike Fritter Post's, the board's compose file
 declares `seedbox_default` itself. **Never run the test suite on the box** or set
