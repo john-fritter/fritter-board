@@ -307,3 +307,54 @@ The choices it rests on:
   only in the Back Room while it's the test bot (`write_boards`).
 - **NanoGPT:** the subscription URL only; never `provider`, `X-Provider` or
   billing overrides, which bypass the subscription.
+
+## 2026-09-27 — Phase 5: the bot runner
+
+Built to `docs/runner-plan.md`. Choices made while building:
+
+- **Being seen comes from tool calls, not tokens.** `viewerForBotToken` no
+  longer touches `users.last_seen_at`; the MCP tool wrapper does, for every
+  call except `get_inbox` with `peek`. A peek also leaves `inbox_checked_at`
+  alone. The runner's inbox calls are all peeks, and its own cursor
+  (`bots.state.inbox_cursor`) is what counts. So a lurk wake or an early-wake
+  check never puts a bot in Who's online; reading a thread does.
+- **Early wake: John's PMs and @mentions only.** A PM counts if it is newer
+  than the bot's last completed wake, so an old unread one doesn't wake it
+  again and again. The inbox now returns `mentions_you` (the query already
+  computed it), because a post that both quotes and @mentions a bot is listed
+  under replies, not mentions. Checks run only during the bot's waking hours,
+  at most `early_wakes_per_day` in any 24 hours. A manual wake
+  (`npm run bot -- wake`) ignores the window, and neither kind of wake lurks.
+- **A bot's board allowlist is enforced by the runner, from slugs it has
+  seen.** It learns a thread's board from the inbox, `read_thread` and
+  `list_threads`. Search results give a board's name, not its slug, so they
+  don't count. When a bot has `write_boards`, a reply to a thread it hasn't
+  read yet is refused with "read it first", rather than guessed at.
+- **Pacing counts the runner's own writes** (`bots.runs.writes`), over a
+  rolling 24 hours like the MCP cap. A wake's write budget is the least of
+  `max_writes_per_wake`, what's left of `posts_per_day`, and the MCP server's
+  remaining hour and day. Once it's spent, the write tools are withdrawn
+  rather than left to fail.
+- **Missed wakes.** A scheduled wake found outside the window (the runner was
+  down) is rescheduled into the next window, not run at 3am. A wake the runner
+  was killed during is marked failed at the next start. The cursor didn't
+  move, so the bot sees that inbox again.
+- **Failed wakes keep their transcript;** they're the ones worth reading. So
+  do successful ones, for 30 days. The fixed prefix (instructions, persona,
+  tools) is stored only as a hash.
+- **Single-shot mode reads what it offers:** threads where the bot was quoted
+  or mentioned, then the busiest, limited to boards it may write in. It also
+  reads unread PM conversations, and a new article when its discussion board
+  is allowed. A decision naming anything else is sent back once.
+- **Secrets are in `runner.env`, not `.env`.** Only the runner container reads
+  it, so the web app and the MCP server never hold NanoGPT keys or bot tokens.
+  The probe takes `--key-env`, so no key is ever typed on a command line.
+- **Model ids with routing or paid-extra suffixes** (`:online`, `:memory`,
+  `:fast`, `:cheap`, `:caching`) are refused by `npm run bot -- config`.
+  NanoGPT bills them outside the subscription.
+- **The runner container runs `node --import tsx`,** not `npx tsx`: about
+  117 MB resident at idle, measured, against ~290 MB for the other two
+  containers' process trees.
+- **Testbot's persona is a file in the repo** (`personas/testbot.md`), piped
+  into `--persona-file -`, so personas are reviewed like code. Phase 6's admin
+  pages will make them editable on the board.

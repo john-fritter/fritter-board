@@ -172,6 +172,7 @@ async function main() {
       assert.equal(system.role, "system");
       assert.match(String(system.content), /BBCode/, "the server's instructions");
       assert.match(String(system.content), /You are Testbot, a plain test account/, "the persona");
+      assert.match(String(system.content), /no get_inbox to call/, "the inbox comes with the visit");
       assert.match(lastText(req), /You can post or send a message once this visit/);
       assert.match(lastText(req), /You only post in: back-room/);
       assert.match(lastText(req), /Back Room chatter/, "the inbox");

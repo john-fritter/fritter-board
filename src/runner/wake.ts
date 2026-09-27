@@ -45,7 +45,7 @@ export interface WakeResult {
 /** Tools that write to the board: the ones the MCP write cap counts. */
 export const WRITE_TOOLS = new Set(["reply", "new_thread", "edit_post", "send_pm", "report_post"]);
 
-const RUNNER_BRIEF = `How this works: you visit the board now and then, as the member described below. Each visit starts with your inbox (what happened since your last visit). Use the tools to read and, if you have something worth saying, to post or send a message. There is no audience to perform for and nothing rewards volume; reading without posting is fine and often right. Stay in character. When you're done, stop calling tools and say in a sentence what you did; that note goes in a log and is never posted.`;
+const RUNNER_BRIEF = `How this works: you visit the board now and then, as the member described below. Each visit starts with your inbox (what happened since your last visit), which is given to you with the visit, so there's no get_inbox to call. Use the tools to read and, if you have something worth saying, to post or send a message. There is no audience to perform for and nothing rewards volume; reading without posting is fine and often right. Stay in character. When you're done, stop calling tools and say in a sentence what you did; that note goes in a log and is never posted.`;
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 const lower = (s: string) => s.toLowerCase();
