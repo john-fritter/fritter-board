@@ -190,6 +190,51 @@ export async function listAllConversations(
   return { page, items: rows.map(toInboxItem) };
 }
 
+export interface UnreadConversation {
+  id: number;
+  subject: string;
+  with: string[];
+  lastMessageAt: Date;
+  /** Messages from others the member hasn't read. */
+  unreadCount: number;
+}
+
+/** The member's conversations with unread messages, newest first. */
+export async function listUnreadConversations(
+  ctx: ForumContext,
+  viewer: Viewer,
+  limit: number
+): Promise<UnreadConversation[]> {
+  const { rows } = await ctx.pool.query<{
+    id: number;
+    subject: string;
+    names: string[];
+    last_message_at: Date;
+    unread_count: number;
+  }>(
+    `SELECT c.id, c.subject, c.last_message_at,
+            (SELECT COUNT(*)::int FROM pm_messages m
+              WHERE m.conversation_id = c.id AND m.author_id <> pp.user_id
+                AND m.deleted_at IS NULL AND m.id > COALESCE(pp.last_read_message_id, 0)) AS unread_count,
+            ARRAY(SELECT u.username FROM pm_participants o JOIN users u ON u.id = o.user_id
+                   WHERE o.conversation_id = c.id AND o.user_id <> pp.user_id
+                   ORDER BY LOWER(u.username)) AS names
+       FROM pm_participants pp
+       JOIN pm_conversations c ON c.id = pp.conversation_id
+      WHERE pp.user_id = $1 AND pp.deleted_at IS NULL AND ${UNREAD_SQL}
+      ORDER BY c.last_message_at DESC, c.id DESC
+      LIMIT $2`,
+    [viewer.id, limit]
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    subject: r.subject,
+    with: r.names,
+    lastMessageAt: r.last_message_at,
+    unreadCount: r.unread_count,
+  }));
+}
+
 /** How many conversations have something the member hasn't read. */
 export async function unreadConversationCount(ctx: ForumContext, viewer: Viewer): Promise<number> {
   const { rows } = await ctx.pool.query<{ n: number }>(
@@ -203,6 +248,8 @@ export async function unreadConversationCount(ctx: ForumContext, viewer: Viewer)
 export interface PmMessage {
   id: number;
   author: Author;
+  /** The markup as written. */
+  body: string;
   bodyHtml: string;
   createdAt: Date;
 }
@@ -247,8 +294,8 @@ export async function readConversation(
   const perPage = config.pagination.posts_per_page;
   const total = count[0]!.n;
   const page = paginate(rawPage ?? Math.max(1, Math.ceil(total / perPage)), total, perPage);
-  const { rows } = await ctx.pool.query<AuthorRow & { id: number; body_html: string; created_at: Date }>(
-    `SELECT m.id, m.body_html, m.created_at, ${authorColumns("a")}
+  const { rows } = await ctx.pool.query<AuthorRow & { id: number; body: string; body_html: string; created_at: Date }>(
+    `SELECT m.id, m.body, m.body_html, m.created_at, ${authorColumns("a")}
        FROM pm_messages m JOIN users a ON a.id = m.author_id
       WHERE m.conversation_id = $1 AND m.deleted_at IS NULL
       ORDER BY m.id
@@ -273,6 +320,12 @@ export async function readConversation(
     readingAsAdmin: !isParticipant,
     isParticipant,
     page,
-    messages: rows.map((r) => ({ id: r.id, author: toAuthor(r), bodyHtml: r.body_html, createdAt: r.created_at })),
+    messages: rows.map((r) => ({
+      id: r.id,
+      author: toAuthor(r),
+      body: r.body,
+      bodyHtml: r.body_html,
+      createdAt: r.created_at,
+    })),
   };
 }

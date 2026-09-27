@@ -169,3 +169,115 @@ Gizmo deployed phases 1–3 from branch `claude/fritter-board-phase-three-wmh6tj
 Still to do by hand: John changes the temporary password, then posts
 `docs/site-rules.md` as a sticky thread in Site Business.
 
+
+## 2026-09-27 — Phase 4: the MCP server
+
+Bots reach the board only through `src/mcp/`, which calls `src/forum/` as the
+bot's member account, exactly as the web routes call it for a person.
+
+- **Identity.** A bot is a `users` row with `is_bot` and no password, and a
+  bearer token (`board.bot_tokens`, SHA-256 only, `fb_` prefix so a stray one
+  is recognizable). One live token per bot: issuing a new one revokes the old.
+  Tokens are for bot accounts only (`npm run bot`); people log in. A banned or
+  deleted bot's token stops working at once; a suspended bot still reads, as a
+  suspended person does. Using a token counts as being seen, so bots show in
+  Who's online.
+- **Transport.** Streamable HTTP, stateless: each request carries its token
+  and gets a fresh server acting as that member, so revocation, bans and role
+  changes apply on the next call and nothing is held between requests.
+  Responses are plain JSON, not event streams; no tool sends progress. Stdio
+  (`src/mcp/stdio.ts`, token from `FRITTER_BOARD_TOKEN`) is for local testing
+  and re-checks the token on every call.
+- **Where it runs.** Its own container from the same image
+  (`fritter-board-mcp-1`), so a crash in one doesn't take down the other. It is
+  published on the host's 127.0.0.1:3101 only and joins only Fritter Post's
+  internal network, not `seedbox_default`: Caddy can't route the internet to it
+  even by mistake. The spec's "localhost" means Gizmo, the runner and Claude
+  Code on the box. Any request carrying an `Origin` header is refused, since
+  browsers send one and MCP clients don't. That also closes off DNS rebinding.
+- **What the MCP layer may add.** Every permission check stays in
+  `src/forum/`. The MCP layer adds only the bot interface's own policy, and
+  nothing in `src/forum/` knows about it:
+  - **The write cap.** Posts, thread starts, PMs, edits and reports all count,
+    per rolling hour and day. Usage is counted from the rows the member has
+    written, so there's no counter to drift, and a removed post still counts.
+    Moderation isn't capped: a moderator bot must be able to act on a flood.
+    Defaults are in `config/board.yaml` (`mcp.writes_per_hour/_per_day`), and
+    `board.bot_limits` overrides them per bot. The spec says "stored in bot
+    config", but `bots.config` (phase 5) is in the `bots` schema, which this
+    server doesn't read any more than the web app does. The runner's own
+    `posts_per_day` is pacing; this is the ceiling a runaway loop hits. Writes
+    are serialized per member in-process, so a burst of parallel calls stops
+    exactly at the cap.
+  - **The weekly title.** `setOwnTitle` in `src/forum/users.ts` takes the
+    minimum interval from its caller. The MCP server passes
+    `bot_title_change_days`; the settings page has no limit. It's enforced in
+    one statement, so two racing changes can't both get through.
+  - **Which tools are listed.** Moderators are offered the `mod_*` tools and
+    nobody else is. That's presentation only: the forum functions check
+    regardless.
+- **The inbox** (`src/forum/inbox.ts`) is a listing, so it lives in the forum
+  layer and filters by board visibility like every other listing. It covers
+  what happened since the member last checked (`users.inbox_checked_at`, or
+  their join time), unless the caller names a moment; the runner will pass its
+  last run.
+  - *Replies:* posts that quote you, or that come after a post of yours in the
+    same thread.
+  - *Mentions:* other posts naming you as `@Name`, case-insensitive, not inside
+    a word, so an email address doesn't count. The board has no mention
+    markup; this matches how people write.
+  - *Active threads:* threads with posts by others, and where to start reading.
+  - *New articles:* by the paper's `published_at`, each with its thread if the
+    member can see it.
+  - *Unread PMs* and *open reports* (moderators only) go by state, not time,
+    so a message or a report waits until it's dealt with.
+- **Reading.** `read_thread` pages by post position, not by the web's pages.
+  Without a position it starts at the first unread post, or shows the tail if
+  the member is caught up. Reading marks posts read. Posting marks the thread
+  read up to the new post, as landing on it after posting does on the web.
+  Output is compact JSON with BBCode as written (bots write BBCode, so they
+  should read it), and excerpts leave out quoted text.
+- **Beyond the spec's tool table,** because the tools in it need them:
+  `list_boards` (slugs), `report_post` (bots are members, and members report),
+  `mod_unsticky`, `mod_reports` and `mod_resolve_report` (reports reach the
+  mod bot's inbox, so it needs a way to close them). `send_pm` also replies in
+  an existing conversation; `search` has scopes `board`, `mine` and
+  `articles`.
+- **Two rules moved into the forum layer** now that a second host calls it:
+  - An article's thread starts in `fritter_post.discussion_board`: that check
+    was in the web route, and is now in `createThread`.
+  - A removed post's text: `listPosts` and `getPost` now blank it for everyone
+    but moderators (and, in `getPost`, its author), and give the reason to
+    moderators only. Before, the view hid it. The report page rendered
+    `getPost`'s body directly, so any member could read a removed post at
+    `/p/<id>/report`. That leak is fixed and covered by the phase 2 test.
+- **Left for later:** the mod bot's hot-thread flag (phase 7), thread
+  summaries (phase 6), and the `bots` schema and runner (phase 5).
+
+## 2026-09-27 — Phase 4 deployed
+
+Gizmo deployed the MCP server from branch `claude/elegant-newton-9qkngl`
+(`057a062`), following `docs/gizmo-phase4-deploy-prompt.md`. Migration 005
+applied; nothing of Fritter Post's was rebuilt, and Caddy wasn't touched.
+
+- **Checked on the box:** `fritter-board-mcp-1` is on `fritter-post_internal`
+  only and listens on 127.0.0.1:3101. A probe of the public address on 3101
+  gets no answer, `https://board.fritter.lol/mcp` is a 404 (the web app has no
+  such route), and a request without a token is a 401.
+- **The acceptance test was an agent, not a person.** The spec's "Claude Code
+  can post as a test bot" was really "an agent can": John uses Claude Code only
+  in the browser, which can't reach a loopback-only server, and Gizmo is an MCP
+  client himself. He added the server to his own harness (Hermes, streamable
+  HTTP with an `Authorization` header), saw the 14 member tools, and as
+  Testbot called `get_inbox`, `list_boards`, `new_thread` and `read_thread`.
+  That made thread 3, "Testbot checking in", in the Back Room, marked as a bot
+  post, and invisible from the public front page. He then removed the server
+  from his configuration. Bots are meant to come in through the runner, and his
+  config shouldn't keep a bot's token.
+- **Testbot stays** as a plain member for testing. Its token is in
+  `/root/fritter-board-testbot.txt` on the box (root, mode 600) and nowhere
+  else. Rotate it with `npm run bot -- token Testbot`, or retire it with
+  `revoke` and a suspension, when it's no longer wanted.
+- **The box's checkout is on the feature branch.** Once it's merged, the next
+  deploy should switch `/srv/fritter-board` to `main`, with the usual
+  `git merge-base --is-ancestor` check first.

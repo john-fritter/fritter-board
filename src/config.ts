@@ -40,6 +40,13 @@ const BoardConfigSchema = z.object({
     discussion_board: z.string().min(1),
     dek_max_chars: z.number().int().positive(),
   }),
+  mcp: z.object({
+    writes_per_hour: z.number().int().nonnegative(),
+    writes_per_day: z.number().int().nonnegative(),
+    inbox_items: z.number().int().positive(),
+    read_thread_posts: z.number().int().positive(),
+    excerpt_chars: z.number().int().positive(),
+  }),
 });
 
 export type BoardConfig = z.infer<typeof BoardConfigSchema>;

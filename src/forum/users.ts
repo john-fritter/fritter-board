@@ -4,7 +4,7 @@ import { sha256 } from "../auth/tokens.js";
 import { paginate, type Page } from "../lib/pagination.js";
 import { authorColumns, toAuthor, type AuthorRow } from "./authors.js";
 import type { ForumContext } from "./context.js";
-import { forbidden, invalid, notFound } from "./errors.js";
+import { ForumError, forbidden, invalid, notFound } from "./errors.js";
 import { isMember, visibleBoardsSql } from "./permissions.js";
 import type { Author, UserStatus, Viewer } from "./types.js";
 import { validateBio, validatePassword, validateUserTitle } from "./validate.js";
@@ -13,6 +13,7 @@ export interface Profile {
   author: Author;
   /** The member's own title, separate from the rank fallback in author.displayTitle. */
   customTitle: string | null;
+  titleChangedAt: Date | null;
   bio: string;
   bioHtml: string;
   lastSeenAt: Date | null;
@@ -21,9 +22,15 @@ export interface Profile {
 
 export async function getProfile(ctx: ForumContext, username: string): Promise<Profile> {
   const { rows } = await ctx.pool.query<
-    AuthorRow & { title: string | null; bio: string; last_seen_at: Date | null; status: UserStatus }
+    AuthorRow & {
+      title: string | null;
+      title_changed_at: Date | null;
+      bio: string;
+      last_seen_at: Date | null;
+      status: UserStatus;
+    }
   >(
-    `SELECT a.title, a.bio, a.last_seen_at, a.status, ${authorColumns("a")}
+    `SELECT a.title, a.title_changed_at, a.bio, a.last_seen_at, a.status, ${authorColumns("a")}
        FROM users a
       WHERE LOWER(a.username) = LOWER($1) AND a.deleted_at IS NULL`,
     [username]
@@ -33,6 +40,7 @@ export async function getProfile(ctx: ForumContext, username: string): Promise<P
   return {
     author: toAuthor(r),
     customTitle: r.title,
+    titleChangedAt: r.title_changed_at,
     bio: r.bio,
     bioHtml: r.bio === "" ? "" : ctx.renderMarkup(r.bio),
     lastSeenAt: r.last_seen_at,
@@ -46,6 +54,8 @@ export interface RecentPost {
   threadTitle: string;
   boardName: string;
   createdAt: Date;
+  /** The markup as written. */
+  body: string;
   bodyHtml: string;
 }
 
@@ -57,9 +67,10 @@ export async function recentPosts(ctx: ForumContext, viewer: Viewer | null, user
     thread_title: string;
     board_name: string;
     created_at: Date;
+    body: string;
     body_html: string;
   }>(
-    `SELECT p.id, p.thread_id, t.title AS thread_title, b.name AS board_name, p.created_at, p.body_html
+    `SELECT p.id, p.thread_id, t.title AS thread_title, b.name AS board_name, p.created_at, p.body, p.body_html
        FROM posts p
        JOIN threads t ON t.id = p.thread_id
        JOIN boards b ON b.id = t.board_id
@@ -75,6 +86,7 @@ export async function recentPosts(ctx: ForumContext, viewer: Viewer | null, user
     threadTitle: r.thread_title,
     boardName: r.board_name,
     createdAt: r.created_at,
+    body: r.body,
     bodyHtml: r.body_html,
   }));
 }
@@ -130,6 +142,45 @@ export async function updateProfile(
       WHERE id = $1`,
     [viewer.id, bio, title]
   );
+}
+
+/**
+ * Sets the member's own title; an empty one falls back to their rank. With
+ * `minDays`, a change is refused until that long after the last one (the MCP
+ * server holds bots to once a week; the settings page has no limit). Setting
+ * the title it already has is not a change. Returns when the next change is
+ * allowed, or null if any time.
+ */
+export async function setOwnTitle(
+  ctx: ForumContext,
+  viewer: Viewer | null,
+  rawTitle: string,
+  opts: { minDays?: number } = {}
+): Promise<{ title: string | null; nextChangeAt: Date | null }> {
+  if (!isMember(viewer)) throw forbidden();
+  const title = validateUserTitle(rawTitle);
+  const minDays = opts.minDays ?? 0;
+  // One statement, so two changes racing can't both slip under the limit.
+  const { rows } = await ctx.pool.query<{ changed: boolean; unchanged: boolean; next_change_at: Date | null }>(
+    `WITH cur AS (SELECT title, title_changed_at FROM users WHERE id = $1 FOR UPDATE),
+          upd AS (
+            UPDATE users u SET title = $2, title_changed_at = NOW()
+              FROM cur
+             WHERE u.id = $1 AND cur.title IS DISTINCT FROM $2
+               AND (cur.title_changed_at IS NULL OR cur.title_changed_at <= NOW() - $3::float8 * INTERVAL '1 day')
+            RETURNING u.title_changed_at)
+     SELECT EXISTS (SELECT 1 FROM upd) AS changed,
+            (SELECT title IS NOT DISTINCT FROM $2 FROM cur) AS unchanged,
+            COALESCE((SELECT title_changed_at FROM upd), (SELECT title_changed_at FROM cur))
+              + $3::float8 * INTERVAL '1 day' AS next_change_at`,
+    [viewer.id, title, minDays]
+  );
+  const r = rows[0]!;
+  const nextChangeAt = minDays > 0 && r.next_change_at && r.next_change_at > new Date() ? r.next_change_at : null;
+  if (!r.changed && !r.unchanged) {
+    throw new ForumError(429, `You can change your title again after ${nextChangeAt?.toISOString() ?? "a while"}.`);
+  }
+  return { title, nextChangeAt };
 }
 
 /** Changes the viewer's password and ends every other session they have. */

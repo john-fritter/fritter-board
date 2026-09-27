@@ -69,6 +69,101 @@ export async function getArticle(fp: Pool, id: number): Promise<FpArticle | null
   };
 }
 
+export interface FpSource {
+  position: number;
+  sourceName: string;
+  title: string;
+  url: string;
+  publishedAt: Date | null;
+}
+
+/** What the Researcher stage gathered for an article, in the paper's order. */
+export async function getArticleSources(fp: Pool, articleId: number): Promise<FpSource[]> {
+  const { rows } = await fp.query<{
+    position: number;
+    source_name: string;
+    title: string;
+    url: string;
+    published_at: Date | null;
+  }>(
+    `SELECT position, source_name, title, url, published_at
+       FROM article_sources WHERE article_id = $1
+      ORDER BY position`,
+    [articleId]
+  );
+  return rows.map((r) => ({
+    position: r.position,
+    sourceName: r.source_name,
+    title: r.title,
+    url: r.url,
+    publishedAt: r.published_at,
+  }));
+}
+
+export interface FpArticleSummary {
+  id: number;
+  publishedOn: string;
+  headline: string | null;
+  body: string;
+  sectionTitle: string | null;
+  sourceCount: number;
+}
+
+const SUMMARY_COLUMNS = `id, to_char(published_on, 'YYYY-MM-DD') AS published_on, headline, body, section_title, source_count`;
+
+type SummaryRow = {
+  id: number;
+  published_on: string;
+  headline: string | null;
+  body: string;
+  section_title: string | null;
+  source_count: number;
+};
+
+const toSummary = (r: SummaryRow): FpArticleSummary => ({
+  id: Number(r.id),
+  publishedOn: r.published_on,
+  headline: r.headline,
+  body: r.body,
+  sectionTitle: r.section_title,
+  sourceCount: r.source_count,
+});
+
+/** Articles the paper published after a moment, newest edition first, in paper order. */
+export async function listArticlesSince(fp: Pool, since: Date, limit: number): Promise<FpArticleSummary[]> {
+  const { rows } = await fp.query<SummaryRow>(
+    `SELECT ${SUMMARY_COLUMNS}
+       FROM articles WHERE published_at > $1
+      ORDER BY published_on DESC, rank, id
+      LIMIT $2`,
+    [since, limit]
+  );
+  return rows.map(toSummary);
+}
+
+/** Full-text search over the paper, in the same web-search syntax as the board's. */
+export async function searchArticles(
+  fp: Pool,
+  q: string,
+  limit: number,
+  offset: number
+): Promise<{ articles: FpArticleSummary[]; total: number }> {
+  const doc = `to_tsvector('english', COALESCE(headline, '') || ' ' || body)`;
+  const tsq = `websearch_to_tsquery('english', $1)`;
+  const { rows: count } = await fp.query<{ n: number }>(
+    `SELECT COUNT(*)::int AS n FROM articles WHERE ${doc} @@ ${tsq}`,
+    [q]
+  );
+  const { rows } = await fp.query<SummaryRow>(
+    `SELECT ${SUMMARY_COLUMNS}
+       FROM articles WHERE ${doc} @@ ${tsq}
+      ORDER BY published_on DESC, rank, id
+      LIMIT $2 OFFSET $3`,
+    [q, limit, offset]
+  );
+  return { total: count[0]!.n, articles: rows.map(toSummary) };
+}
+
 /** What a piece leads on: its headline, or a section line's sentence. */
 export function articleTitle(a: Pick<FpArticle, "headline" | "body">): string {
   const headline = a.headline?.trim();

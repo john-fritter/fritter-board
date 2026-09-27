@@ -18,6 +18,26 @@ services:
       - fritter-post_internal
       - seedbox_default
 
+  # The MCP server: how bots reach the board. Same image, its own process. It
+  # is published on the host's loopback only (Gizmo, the bot runner and Claude
+  # Code on the box use http://localhost:3101/mcp), and it stays off
+  # seedbox_default, so Caddy can't route the internet to it even by mistake.
+  mcp:
+    build: .
+    container_name: fritter-board-mcp-1
+    restart: unless-stopped
+    command: ["npx", "tsx", "src/mcp/http.ts"]
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=3101
+    ports:
+      - "127.0.0.1:3101:3101"
+    networks:
+      - fritter-post_internal
+
 networks:
   fritter-post_internal:
     external: true

@@ -19,6 +19,8 @@ export interface SearchHit {
   threadId: number;
   threadTitle: string;
   boardName: string;
+  /** 1-based position in the thread. */
+  number: number;
   authorName: string;
   createdAt: Date;
   /** Escaped excerpt with matches wrapped in <mark>. */
@@ -96,11 +98,13 @@ export async function search(
     thread_id: number;
     title: string;
     board_name: string;
+    number: number;
     username: string;
     created_at: Date;
     snippet: string;
   }>(
-    `SELECT p.id, p.thread_id, t.title, b.name AS board_name, u.username, p.created_at, ${snippet} AS snippet
+    `SELECT p.id, p.thread_id, t.title, b.name AS board_name, u.username, p.created_at, ${snippet} AS snippet,
+            (SELECT COUNT(*) FROM posts q WHERE q.thread_id = p.thread_id AND q.id <= p.id) AS number
      ${from}
      ORDER BY ${order}
      LIMIT ${param(page.perPage)} OFFSET ${param(page.offset)}`,
@@ -114,6 +118,7 @@ export async function search(
       threadId: r.thread_id,
       threadTitle: r.title,
       boardName: r.board_name,
+      number: r.number,
       authorName: r.username,
       createdAt: r.created_at,
       snippetHtml: snippetToHtml(r.snippet),

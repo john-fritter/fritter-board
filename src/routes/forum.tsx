@@ -69,7 +69,7 @@ export function registerForumRoutes(app: Hono<AppEnv>, s: Services): void {
   app.get("/t/:id", async (c) => {
     const viewer = c.get("viewer");
     const thread = await getThread(forum, viewer, parseId(c.req.param("id")));
-    const { posts, page } = await listPosts(forum, thread, c.req.query("page"));
+    const { posts, page } = await listPosts(forum, viewer, thread, c.req.query("page"));
     const lastOnPage = posts[posts.length - 1];
     if (viewer && lastOnPage) await markThreadRead(forum, viewer, thread.id, lastOnPage.id);
     const [moveTargets, article] = await Promise.all([
