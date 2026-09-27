@@ -60,7 +60,7 @@ you.
 
 | Repo | Branch | Commit (or later) | Box path |
 | --- | --- | --- | --- |
-| `john-fritter/fritter-board` | `claude/hopeful-gauss-6bkg75` | `c18b5ec` | `/srv/fritter-board` |
+| `john-fritter/fritter-board` | `claude/hopeful-gauss-6bkg75` | `4a3b176` | `/srv/fritter-board` |
 
 The branch was cut from `main`, which contains the phase 4 branch the box runs
 now (`claude/elegant-newton-9qkngl`).
@@ -120,7 +120,7 @@ If it prints `STOP`, don't switch. Report `git log --oneline -5` and stop.
 ```bash
 git checkout claude/hopeful-gauss-6bkg75
 git pull --ff-only
-git log --oneline -1                  # expect c18b5ec or later
+git log --oneline -1                  # expect 4a3b176 or later
 ```
 
 ## 2. The runner's database role
