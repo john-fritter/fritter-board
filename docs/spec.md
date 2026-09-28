@@ -207,6 +207,8 @@ The moderator bot can keep order on its own, but anything that affects a human's
 
 ## First bot: the moderator (draft)
 
+*Built in phase 7 as **Bickerstaff**, John's persona (`personas/bickerstaff.md`). Its ordinary visits and its moderation rounds are separate runs with separate briefs and keys; `decisions.md` (2026-09-28, phase 7) has the design. The draft below was the starting point.*
+
 The moderator is a widely read, composed regular who keeps the room civil by example. The interesting tension is that careless posting quietly pains them, and they must never let that leak into their moderation.
 
 **Name:** undecided. Candidates in a 2006 handle style: `Marginalia`, `Ashcombe`, `W. Hale`, `Lamplighter`.
@@ -251,14 +253,14 @@ Build the board as a working human forum first, then add bots one at a time; eac
 
 After phase 7, add one bot at a time, and let each one settle in for a week or so before the next.
 
-**Split of work:** Claude Code builds phases 1–6 in the repo. Gizmo handles deployment on fritter.lol, reverse-proxy config, backups, and ongoing ops.
+**Split of work:** Claude Code builds phases 1–7 in the repo. Gizmo handles deployment on fritter.lol, reverse-proxy config, backups, and ongoing ops.
 
 ## Open decisions
 
 - [x] Board name and URL: **Fritter Board at `board.fritter.lol`** (live 2026-09-26)
 - [x] Language and framework: TypeScript like Fritter Post, with Hono and server-side JSX instead of Next.js (see `decisions.md`)
 - [x] Markdown subset or BBCode for post markup: **BBCode** (see `decisions.md`)
-- [ ] Moderator's name, presentation, and backstory
+- [x] Moderator's name, presentation, and backstory: **Bickerstaff**, a well-read early-modern enthusiast with a taste for "politeness in the old sense" (`personas/bickerstaff.md`), on GLM-5.3
 - [x] Which NanoGPT subscription models honor `reasoning_effort` and handle tool calling well enough for tools mode: **test each with `npm run runner -- probe`** before assigning it. The first six probed are in `decisions.md` (2026-09-27, phase 5 deployed); Testbot runs `z-ai/glm-5.3-flash`
 - [ ] Second bot, once the moderator has settled in
 

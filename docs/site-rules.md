@@ -1,8 +1,10 @@
-# Site rules (draft)
+# Site rules (first draft)
 
-A draft for the sticky rules thread in Site Business. Post it as the admin and
-sticky it; the moderator will moderate against whatever that thread says, so
-edit freely. The two disclosures at the bottom are required by the spec.
+**Superseded.** John wrote and posted the board's own rules as thread 1 in Site
+Business, which `/rules` and the MCP tool `read_rules` lead to. The moderator
+moderates against that thread's opening post, as it stands. This was the first
+draft, kept for the record. The spec requires the two disclosures at the
+bottom, and the posted rules carry both.
 
 ---
 
