@@ -5,12 +5,14 @@ import { NanoGptModel } from "./model.js";
 import { probeModels } from "./probe.js";
 import { Runner } from "./runner.js";
 import { createRunnerPool, RUNNER_LOCK_KEY } from "./store.js";
+import { Summarizer } from "./summaries.js";
 
 /**
  * The bot runner: `npm run runner`. One process wakes every bot, one at a
  * time, on its schedule. It needs RUNNER_DATABASE_URL (the fritter_bots role,
  * which has the bots schema only), MCP_URL (the board's MCP server), and each
- * bot's NanoGPT key and board token under the env var names in its config.
+ * bot's NanoGPT key and board token under the env var names in its config,
+ * and the summary model's key (runner.summary_key_env).
  *
  *   npm run runner                          run until stopped
  *   npm run runner -- probe [--key-env VAR] <model>...
@@ -47,7 +49,12 @@ async function run(): Promise<void> {
     await sleep(config.runner.tick_seconds * 1000);
   }
 
+  const summaryKey = process.env[config.runner.summary_key_env]?.trim();
+  if (!summaryKey) log(`${config.runner.summary_key_env} isn't set: bots will read long threads without summaries.`);
+  const summarizer = summaryKey ? new Summarizer(new NanoGptModel(summaryKey), { now: () => new Date(), sleep }) : null;
+
   const runner = new Runner({
+    summarizer,
     db: pool,
     connectBoard: httpBoard(mcpUrl),
     modelFor: (key) => new NanoGptModel(key),

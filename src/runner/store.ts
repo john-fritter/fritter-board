@@ -19,6 +19,7 @@ export function createRunnerPool(url: string): Pool {
 export type Db = Pick<Pool, "query">;
 export type Trigger = "schedule" | "early" | "manual";
 export type Outcome = "done" | "lurked" | "skipped" | "failed";
+export type RunKind = "wake" | "compaction";
 
 export interface Bot {
   userId: number;
@@ -42,6 +43,7 @@ export interface Bot {
   earlyWakeTrigger: "early" | "manual" | null;
   inboxCursor: Date | null;
   pausedUntil: Date | null;
+  compactRequestedAt: Date | null;
 }
 
 interface BotRow {
@@ -68,10 +70,12 @@ interface BotRow {
   early_wake_trigger: "early" | "manual" | null;
   inbox_cursor: Date | null;
   paused_until: Date | null;
+  compact_requested_at: Date | null;
 }
 
 const BOT_SQL = `
-  SELECT c.*, s.next_wake_at, s.early_wake_at, s.early_wake_trigger, s.inbox_cursor, s.paused_until
+  SELECT c.*, s.next_wake_at, s.early_wake_at, s.early_wake_trigger, s.inbox_cursor, s.paused_until,
+         s.compact_requested_at
     FROM bots.config c
     LEFT JOIN bots.state s ON s.user_id = c.user_id`;
 
@@ -102,6 +106,7 @@ function toBot(r: BotRow): Bot {
     earlyWakeTrigger: r.early_wake_trigger,
     inboxCursor: r.inbox_cursor,
     pausedUntil: r.paused_until,
+    compactRequestedAt: r.compact_requested_at,
   };
 }
 
@@ -126,6 +131,7 @@ export interface StatePatch {
   earlyWakeTrigger?: "early" | "manual" | null;
   inboxCursor?: Date | null;
   pausedUntil?: Date | null;
+  compactRequestedAt?: Date | null;
 }
 
 const STATE_COLUMNS: Record<keyof StatePatch, string> = {
@@ -134,6 +140,7 @@ const STATE_COLUMNS: Record<keyof StatePatch, string> = {
   earlyWakeTrigger: "early_wake_trigger",
   inboxCursor: "inbox_cursor",
   pausedUntil: "paused_until",
+  compactRequestedAt: "compact_requested_at",
 };
 
 /** Updates a bot's schedule state; fields left out are unchanged. */
@@ -147,11 +154,11 @@ export async function updateState(db: Db, userId: number, patch: StatePatch): Pr
   ]);
 }
 
-export async function startRun(db: Db, bot: Bot, trigger: Trigger): Promise<number> {
+export async function startRun(db: Db, bot: Bot, trigger: Trigger, kind: RunKind = "wake"): Promise<number> {
   const { rows } = await db.query<{ id: number }>(
-    `INSERT INTO bots.runs (user_id, trigger, mode, model, reasoning_effort)
-     VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-    [bot.userId, trigger, bot.mode, bot.model, bot.reasoningEffort]
+    `INSERT INTO bots.runs (user_id, kind, trigger, mode, model, reasoning_effort)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+    [bot.userId, kind, trigger, bot.mode, bot.model, bot.reasoningEffort]
   );
   return rows[0]!.id;
 }
@@ -178,6 +185,14 @@ export interface RunRecord {
   error?: string | null;
   prefixHash?: string | null;
   transcript?: unknown[] | null;
+  /** Calls to the summary model this wake made for long threads. */
+  summary?: SummaryUsage;
+}
+
+export interface SummaryUsage {
+  calls: number;
+  promptTokens: number;
+  completionTokens: number;
 }
 
 export async function finishRun(db: Db, runId: number, r: RunRecord): Promise<void> {
@@ -185,7 +200,7 @@ export async function finishRun(db: Db, runId: number, r: RunRecord): Promise<vo
     `UPDATE bots.runs SET outcome = $2, finished_at = NOW(), inbox_since = $3, inbox_until = $4,
             model_calls = $5, prompt_tokens = $6, completion_tokens = $7, reasoning_tokens = $8,
             cached_tokens = $9, writes = $10, actions = $11, note = $12, error = $13, prefix_hash = $14,
-            transcript = $15
+            transcript = $15, summary_calls = $16, summary_prompt_tokens = $17, summary_completion_tokens = $18
       WHERE id = $1`,
     [
       runId,
@@ -203,6 +218,9 @@ export async function finishRun(db: Db, runId: number, r: RunRecord): Promise<vo
       r.error ?? null,
       r.prefixHash ?? null,
       r.transcript ? JSON.stringify(r.transcript) : null,
+      r.summary?.calls ?? 0,
+      r.summary?.promptTokens ?? 0,
+      r.summary?.completionTokens ?? 0,
     ]
   );
 }
@@ -211,7 +229,7 @@ export async function finishRun(db: Db, runId: number, r: RunRecord): Promise<vo
 export async function writesLastDay(db: Db, userId: number): Promise<number> {
   const { rows } = await db.query<{ n: number }>(
     `SELECT COALESCE(SUM(writes), 0)::int AS n FROM bots.runs
-      WHERE user_id = $1 AND started_at > NOW() - INTERVAL '1 day'`,
+      WHERE user_id = $1 AND kind = 'wake' AND started_at > NOW() - INTERVAL '1 day'`,
     [userId]
   );
   return rows[0]!.n;

@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { config } from "../config.js";
-import { callJson, type BoardSession, type ConnectBoard, type InboxJson } from "./board.js";
+import { callJson, type BoardSession, type ConnectBoard, type InboxJson, type ToolResult } from "./board.js";
+import { currentStanding, insertNote, memoryText, noteLine, notesAbout, recallNotes, recentNotes } from "./memory.js";
 import {
   ModelError,
+  nextUtcMidnight,
   type ChatMessage,
   type ChatModel,
   type ChatRequest,
@@ -11,7 +13,18 @@ import {
   type ToolCall,
   type ToolDefinition,
 } from "./model.js";
-import { finishRun, startRun, writesLastDay, type Action, type Bot, type Db, type Outcome, type Trigger } from "./store.js";
+import {
+  finishRun,
+  startRun,
+  writesLastDay,
+  type Action,
+  type Bot,
+  type Db,
+  type Outcome,
+  type SummaryUsage,
+  type Trigger,
+} from "./store.js";
+import { summarizedRead, type Summarizer, type ThreadJson } from "./summaries.js";
 
 /**
  * One wake of one bot. The runner reads the bot's inbox itself, may let the
@@ -19,7 +32,9 @@ import { finishRun, startRun, writesLastDay, type Action, type Bot, type Db, typ
  * board's tools (tools mode), or a few pre-read threads and a single decision
  * to make (single-shot mode). Everything the bot does goes through the MCP
  * server as the bot. The runner adds only its own pacing: writes per wake and
- * per day, and the boards a bot may write in.
+ * per day, and the boards a bot may write in; and the bot's memory: its
+ * notebook at the start of the wake, the `remember` and `recall` tools, its
+ * notes on the people in a thread it reads, and summaries of long threads.
  */
 
 export interface WakeDeps {
@@ -31,6 +46,8 @@ export interface WakeDeps {
   now(): Date;
   random(): number;
   sleep(ms: number): Promise<void>;
+  /** Writes summaries of long threads; without it, bots read them page by page. */
+  summarizer?: Summarizer | null;
 }
 
 export interface WakeResult {
@@ -45,7 +62,45 @@ export interface WakeResult {
 /** Tools that write to the board: the ones the MCP write cap counts. */
 export const WRITE_TOOLS = new Set(["reply", "new_thread", "edit_post", "send_pm", "report_post"]);
 
-const RUNNER_BRIEF = `How this works: you visit the board now and then, as the member described below. Each visit starts with your inbox (what happened since your last visit), which is given to you with the visit, so there's no get_inbox to call. Use the tools to read and, if you have something worth saying, to post or send a message. There is no audience to perform for and nothing rewards volume; reading without posting is fine and often right. Stay in character. When you're done, stop calling tools and say in a sentence what you did; that note goes in a log and is never posted.`;
+const RUNNER_BRIEF = `How this works: you visit the board now and then, as the member described below. Each visit starts with your inbox (what happened since your last visit), which is given to you with the visit, so there's no get_inbox to call. Use the tools to read and, if you have something worth saying, to post or send a message. There is no audience to perform for and nothing rewards volume; reading without posting is fine and often right. Stay in character. You keep a private notebook: your standing notes and your recent notes come with each visit, your notes on the people in a thread come with it when you read it, remember writes a new note, and recall searches all of them. When you're done, stop calling tools and say in a sentence what you did; that note goes in a log and is never posted.`;
+
+/** The runner's own tools, next to the board's: the bot's notebook. */
+export const MEMORY_TOOLS: ToolDefinition[] = [
+  {
+    type: "function",
+    function: {
+      name: "remember",
+      description: `Write a note to yourself for later visits: one fact, impression or position worth keeping, about a member, a thread, or what you think. Only you ever see your notes. The ones from the last ${config.runner.recent_notes_days} days come with every visit; older ones are folded into your standing notes. At most ${config.runner.note_max_chars} characters, and ${config.runner.notes_per_wake} notes a visit.`,
+      parameters: {
+        type: "object",
+        properties: {
+          text: { type: "string", maxLength: config.runner.note_max_chars },
+          about: { type: "string", description: "A member's username, if the note is about someone." },
+          thread_id: { type: "integer", description: "The thread it came from, if any." },
+        },
+        required: ["text"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "recall",
+      description:
+        "Search all your notes, old and folded ones included, newest first. Give words to look for, a member's username, or both; with neither, your latest notes.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: 'Words to look for: words, "exact phrase", -excluded, or.' },
+          about: { type: "string", description: "Only notes about this member." },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+];
+const MEMORY_TOOL_NAMES = new Set(MEMORY_TOOLS.map((t) => t.function.name));
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 const lower = (s: string) => s.toLowerCase();
@@ -66,41 +121,22 @@ export function earlyWakeReason(inbox: InboxJson, since: Date | null, names: str
   return null;
 }
 
-class DailyCapReached extends Error {
+export class DailyCapReached extends Error {
   constructor(readonly until: Date) {
     super("The bot's NanoGPT key reached its daily cap.");
   }
 }
 
-/** The next midnight UTC, when NanoGPT's per-key daily counters reset. */
-function nextUtcMidnight(now: Date): Date {
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
-}
-
-/** The pieces of a wake both modes share. */
-class WakeSession {
+/** A bot's own model, counting its calls and tokens: for wakes and compactions. */
+export class MeteredModel {
   modelCalls = 0;
   usage = { promptTokens: 0, completionTokens: 0, reasoningTokens: 0, cachedTokens: 0 };
-  writes = 0;
-  actions: Action[] = [];
-  /** Board slug by thread and by post, learned from what the bot has read. */
-  threadBoards = new Map<number, string>();
-  postBoards = new Map<number, string>();
-  /** The conversation so far, kept here so a failed wake still logs it. */
-  messages: ChatMessage[] = [];
 
   constructor(
     readonly deps: WakeDeps,
     readonly bot: Bot,
-    readonly board: BoardSession,
-    readonly model: ChatModel,
-    readonly writeBudget: number,
-    readonly deadline: number
+    readonly model: ChatModel
   ) {}
-
-  get timedOut(): boolean {
-    return this.deps.now().getTime() > this.deadline;
-  }
 
   /** One model call, retried once if the failure looks passing. */
   async complete(req: Omit<ChatRequest, "model" | "reasoningEffort">): Promise<ChatResponse> {
@@ -128,6 +164,37 @@ class WakeSession {
         throw err;
       }
     }
+  }
+}
+
+/** The pieces of a wake both modes share. */
+class WakeSession extends MeteredModel {
+  writes = 0;
+  actions: Action[] = [];
+  /** Board slug by thread and by post, learned from what the bot has read. */
+  threadBoards = new Map<number, string>();
+  postBoards = new Map<number, string>();
+  /** The conversation so far, kept here so a failed wake still logs it. */
+  messages: ChatMessage[] = [];
+  notesWritten = 0;
+  /** Notes already in front of the bot this wake, so none is shown twice. */
+  shownNotes = new Set<number>();
+  summaryUsage: SummaryUsage = { calls: 0, promptTokens: 0, completionTokens: 0 };
+
+  constructor(
+    deps: WakeDeps,
+    bot: Bot,
+    model: ChatModel,
+    readonly board: BoardSession,
+    readonly runId: number,
+    readonly writeBudget: number,
+    readonly deadline: number
+  ) {
+    super(deps, bot, model);
+  }
+
+  get timedOut(): boolean {
+    return this.deps.now().getTime() > this.deadline;
   }
 
   learnFromInbox(inbox: InboxJson): void {
@@ -223,12 +290,110 @@ class WakeSession {
       const refusal = this.writeRefusal(name, args);
       if (refusal) return this.record(name, rawArgs, false, refusal);
     }
-    const res = await this.board.call(name, args);
-    if (res.ok) {
-      this.learn(name, args, res.text);
-      if (WRITE_TOOLS.has(name)) this.writes++;
+    let res: ToolResult;
+    if (name === "remember") res = await this.remember(args);
+    else if (name === "recall") res = await this.recall(args);
+    else if (name === "read_thread") res = await this.readThread(args);
+    else {
+      res = await this.board.call(name, args);
+      if (res.ok) {
+        this.learn(name, args, res.text);
+        if (WRITE_TOOLS.has(name)) this.writes++;
+      }
     }
     return this.record(name, JSON.stringify(args), res.ok, res.text);
+  }
+
+  /**
+   * read_thread, as the bot. A long thread read from where the bot left off
+   * comes back as a summary of the earlier posts plus the latest in full, and
+   * the bot's notes on the people posting come with it.
+   */
+  async readThread(args: Record<string, unknown>): Promise<ToolResult> {
+    const res = await this.board.call("read_thread", args);
+    if (!res.ok) return res;
+    let json = JSON.parse(res.text) as ThreadJson;
+    if (args["from_post"] === undefined && this.deps.summarizer) {
+      try {
+        const summarized = await summarizedRead(
+          { db: this.deps.db, board: this.board, summarizer: this.deps.summarizer, now: this.deps.now(), usage: this.summaryUsage },
+          json
+        );
+        if (summarized) json = summarized;
+      } catch (err) {
+        this.record("summary", JSON.stringify({ thread_id: args["thread_id"] }), false, err instanceof Error ? err.message : String(err));
+      }
+    }
+    const text = JSON.stringify(json);
+    this.learn("read_thread", args, text);
+    const notes = await this.notesOnPeople(json);
+    return { ok: true, text: notes ? JSON.stringify({ ...json, your_notes: notes }) : text };
+  }
+
+  /** "your_notes": the bot's notes on the people posting, latest posters first. */
+  private async notesOnPeople(json: ThreadJson): Promise<Record<string, string[]> | null> {
+    const names: string[] = [];
+    const me = lower(this.bot.username);
+    for (const p of [...json.posts].reverse()) {
+      const name = p.author.name;
+      if (lower(name) !== me && !names.some((n) => lower(n) === lower(name))) names.push(name);
+    }
+    const found = await notesAbout(this.deps.db, this.bot.userId, names.slice(0, config.runner.noted_people_per_read), [...this.shownNotes]);
+    if (found.size === 0) return null;
+    const out: Record<string, string[]> = {};
+    for (const [name, notes] of found) {
+      out[name] = notes.map((n) => noteLine(n, { about: false }));
+      for (const n of notes) this.shownNotes.add(n.id);
+    }
+    return out;
+  }
+
+  /** `remember`: a note in the bot's notebook. Single-shot mode clips a long note rather than refusing it. */
+  async remember(args: Record<string, unknown>, opts: { clip?: boolean } = {}): Promise<ToolResult> {
+    const max = config.runner.note_max_chars;
+    let text = typeof args["text"] === "string" ? args["text"].trim() : "";
+    if (!text) return { ok: false, text: "The note is empty." };
+    if (text.length > max) {
+      if (!opts.clip) return { ok: false, text: `That note is ${text.length} characters; keep it under ${max}.` };
+      text = clip(text, max);
+    }
+    if (this.notesWritten >= config.runner.notes_per_wake) {
+      return { ok: false, text: `You've written ${config.runner.notes_per_wake} notes this visit; that's enough for now.` };
+    }
+    let about: string | null = null;
+    const rawAbout = typeof args["about"] === "string" ? args["about"].trim().replace(/^@/, "") : "";
+    if (rawAbout) {
+      // The runner can't see the board's members, so it asks the board, as the bot.
+      const who = await this.board.call("get_user", { username: rawAbout });
+      if (!who.ok) return { ok: false, text: `There's no member called ${rawAbout}. Check the name, or leave "about" out.` };
+      about = (JSON.parse(who.text) as { name: string }).name;
+    }
+    const threadId = Number.isSafeInteger(args["thread_id"]) && (args["thread_id"] as number) > 0 ? (args["thread_id"] as number) : null;
+    const id = await insertNote(this.deps.db, this.bot.userId, { body: text, about, threadId, runId: this.runId });
+    this.notesWritten++;
+    this.shownNotes.add(id);
+    return { ok: true, text: JSON.stringify({ remembered: true, note_id: id, ...(about ? { about } : {}) }) };
+  }
+
+  /** `recall`: a search of the bot's notes. */
+  async recall(args: Record<string, unknown>): Promise<ToolResult> {
+    const query = typeof args["query"] === "string" ? args["query"].trim() : "";
+    const about = typeof args["about"] === "string" ? args["about"].trim().replace(/^@/, "") : "";
+    const notes = await recallNotes(this.deps.db, this.bot.userId, query, about);
+    for (const n of notes) this.shownNotes.add(n.id);
+    return {
+      ok: true,
+      text: JSON.stringify({
+        notes: notes.map((n) => ({
+          at: n.createdAt,
+          ...(n.about ? { about: n.about } : {}),
+          ...(n.threadId ? { thread_id: n.threadId } : {}),
+          text: n.body,
+          ...(n.archivedAt ? { folded_into_standing: true } : {}),
+        })),
+        ...(notes.length === 0 ? { note: "Nothing found." } : {}),
+      }),
+    };
   }
 
   private record(tool: string, args: string, ok: boolean, result: string): string {
@@ -272,15 +437,16 @@ const hash = (s: string) => createHash("sha256").update(s).digest("hex").slice(0
 
 // ── Tools mode ─────────────────────────────────────────────────────────────
 
-async function toolsMode(s: WakeSession, inbox: InboxJson, header: string) {
-  const offeredTools = s.board.tools.filter((t) => t.name !== "get_inbox");
-  const offered = new Set(offeredTools.map((t) => t.name));
-  const allTools = offeredTools.map(toolDefinition);
+async function toolsMode(s: WakeSession, inbox: InboxJson, header: string, memory: string) {
+  // The runner's own tools go last, so the board's tools come first in the cached prefix either way.
+  const offeredTools = s.board.tools.filter((t) => t.name !== "get_inbox" && !MEMORY_TOOL_NAMES.has(t.name));
+  const allTools = [...offeredTools.map(toolDefinition), ...MEMORY_TOOLS];
+  const offered = new Set(allTools.map((t) => t.function.name));
   const readTools = allTools.filter((t) => !WRITE_TOOLS.has(t.function.name));
   const system = systemPrompt(s.board, s.bot);
   const messages: ChatMessage[] = [
     { role: "system", content: system },
-    { role: "user", content: `${header}\n\nYour inbox since your last visit:\n${JSON.stringify(inbox)}` },
+    { role: "user", content: `${header}\n\n${memory}\n\nYour inbox since your last visit:\n${JSON.stringify(inbox)}` },
   ];
   s.messages = messages;
   let note: string | null = null;
@@ -324,8 +490,17 @@ const DECISION_SCHEMA = {
     conversation_id: { type: ["integer", "null"] },
     body: { type: ["string", "null"] },
     reason: { type: ["string", "null"] },
+    remember: {
+      type: ["array", "null"],
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: { text: { type: "string" }, about: { type: ["string", "null"] } },
+        required: ["text", "about"],
+      },
+    },
   },
-  required: ["action", "thread_id", "board", "title", "fp_article_id", "to", "conversation_id", "body", "reason"],
+  required: ["action", "thread_id", "board", "title", "fp_article_id", "to", "conversation_id", "body", "reason", "remember"],
 };
 
 const Decision = z.object({
@@ -338,6 +513,7 @@ const Decision = z.object({
   conversation_id: z.number().int().nullish(),
   body: z.string().nullish(),
   reason: z.string().nullish(),
+  remember: z.array(z.object({ text: z.string(), about: z.string().nullish() })).nullish(),
 });
 type Decision = z.infer<typeof Decision>;
 
@@ -353,7 +529,7 @@ export function extractJson(text: string): unknown {
   }
 }
 
-async function singleShotMode(s: WakeSession, inbox: InboxJson, header: string) {
+async function singleShotMode(s: WakeSession, inbox: InboxJson, header: string, memory: string) {
   const system = systemPrompt(s.board, s.bot);
   const prefixHash = hash(system + JSON.stringify(DECISION_SCHEMA));
   if (s.writeBudget === 0) {
@@ -372,11 +548,8 @@ async function singleShotMode(s: WakeSession, inbox: InboxJson, header: string) 
 
   const threads: unknown[] = [];
   for (const id of picks) {
-    const res = await s.board.call("read_thread", { thread_id: id });
-    if (res.ok) {
-      s.learn("read_thread", { thread_id: id }, res.text);
-      threads.push(JSON.parse(res.text));
-    }
+    const res = await s.readThread({ thread_id: id });
+    if (res.ok) threads.push(JSON.parse(res.text));
   }
   const conversations: unknown[] = [];
   for (const pm of inbox.unread_pms.slice(0, limit)) {
@@ -396,6 +569,7 @@ async function singleShotMode(s: WakeSession, inbox: InboxJson, header: string) 
 
   const task = [
     header,
+    memory,
     `Your inbox since your last visit:\n${JSON.stringify(inbox)}`,
     threads.length ? `Threads you've just read:\n${JSON.stringify(threads)}` : "No threads to show you this time.",
     conversations.length ? `Your unread private messages:\n${JSON.stringify(conversations)}` : "",
@@ -405,7 +579,8 @@ async function singleShotMode(s: WakeSession, inbox: InboxJson, header: string) 
 - {"action":"new_thread","board":"<slug>","title":"…","body":"…"}${article ? `, or with "fp_article_id":${article.fp_article_id} to start the article's thread` : ""}
 - {"action":"pm","to":"<username>","body":"…"} or {"action":"pm","conversation_id":<one above>,"body":"…"}
 - {"action":"nothing","reason":"…"}
-Set every other field to null. Doing nothing is a fine choice.`,
+Set every other field to null. Doing nothing is a fine choice.
+Whatever you decide, you may keep up to ${config.runner.notes_per_wake} private notes for later visits, each under ${config.runner.note_max_chars} characters: "remember":[{"text":"…","about":"<username, or null>"}]. Otherwise "remember" is null.`,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -466,6 +641,11 @@ Set every other field to null. Doing nothing is a fine choice.`,
   }
   const last = s.actions[s.actions.length - 1];
   if (decision.action !== "nothing" && last && !last.ok) note = `Tried, and was refused: ${last.result}`;
+  for (const n of (decision.remember ?? []).slice(0, config.runner.notes_per_wake)) {
+    const args = { text: n.text, ...(n.about ? { about: n.about } : {}) };
+    const res = await s.remember(args, { clip: true });
+    s.actions.push({ tool: "remember", args: clip(JSON.stringify(args), config.runner.action_log_chars), ok: res.ok, result: clip(res.text, config.runner.action_log_chars) });
+  }
   return { note, prefixHash, transcript: messages.slice(1) };
 }
 
@@ -493,6 +673,13 @@ function decisionProblem(
 }
 
 // ── A wake ─────────────────────────────────────────────────────────────────
+
+/** The notebook a wake starts with: the standing document and recent notes. */
+async function loadMemory(db: Db, bot: Bot, now: Date, shown: Set<number>): Promise<string> {
+  const [standing, recent] = await Promise.all([currentStanding(db, bot.userId), recentNotes(db, bot.userId, now)]);
+  for (const n of recent) shown.add(n.id);
+  return memoryText(standing?.body ?? null, recent);
+}
 
 export async function runWake(deps: WakeDeps, bot: Bot, trigger: Trigger): Promise<WakeResult> {
   const runId = await startRun(deps.db, bot, trigger);
@@ -554,11 +741,13 @@ export async function runWake(deps: WakeDeps, bot: Bot, trigger: Trigger): Promi
       )
     );
     const deadline = deps.now().getTime() + config.runner.wake_timeout_seconds * 1000;
-    session = new WakeSession(deps, bot, board, deps.modelFor(apiKey), budget, deadline);
+    session = new WakeSession(deps, bot, deps.modelFor(apiKey), board, runId, budget, deadline);
     session.learnFromInbox(inbox);
     const header = wakeHeader(bot, deps.now(), budget) + (waiting ? ` (You're up early: ${waiting}.)` : "");
+    const memory = await loadMemory(deps.db, bot, deps.now(), session.shownNotes);
 
-    const out = bot.mode === "tools" ? await toolsMode(session, inbox, header) : await singleShotMode(session, inbox, header);
+    const out =
+      bot.mode === "tools" ? await toolsMode(session, inbox, header, memory) : await singleShotMode(session, inbox, header, memory);
     await finishRun(deps.db, runId, {
       outcome: "done",
       ...times,
@@ -569,6 +758,7 @@ export async function runWake(deps: WakeDeps, bot: Bot, trigger: Trigger): Promi
       note: out.note,
       prefixHash: out.prefixHash,
       transcript: out.transcript,
+      summary: session.summaryUsage,
     });
     return result("done", { cursor: new Date(inbox.now) });
   } catch (err) {
@@ -582,6 +772,7 @@ export async function runWake(deps: WakeDeps, bot: Bot, trigger: Trigger): Promi
             writes: session.writes,
             actions: session.actions,
             transcript: session.messages.length ? session.messages.slice(1) : null,
+            summary: session.summaryUsage,
           }
         : {}),
       outcome: "failed",
