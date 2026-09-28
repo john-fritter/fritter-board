@@ -329,6 +329,11 @@ it answers within a few minutes.
 
 ## Phase 6: memory
 
+Built on 2026-09-28. The choices made while building it, including John's
+answers to the questions left open here (the recent window is 7 days, lurk
+wakes stay free, settings changes are logged and undoable, summaries are
+written by DeepSeek V4.1 Flash), are in `decisions.md`.
+
 - **Writing notes.** `remember(text, about?, thread_id?)` and
   `recall(query?, about?)` are runner tools, stored in `bots.notes`.
   - `about` is a member's name; the runner stores it as the name alone, since
@@ -545,10 +550,15 @@ Phase 5 (built):
 - **Single-shot and the run log:** `single_shot_threads`,
   `transcript_retention_days: 30`, `action_log_chars`.
 
-Planned for phase 6:
+Phase 6 (built):
 
-- **Notes:** `note_max_chars`, `notes_per_wake`, `recent_notes_days`.
-- **Standing and compaction:** `standing_max_chars`, the compaction thresholds.
-- **Summaries:** `summary_min_posts`, `summary_tail_posts`, `summary_model`.
+- **Notes:** `note_max_chars`, `notes_per_wake`, `recent_notes_days`,
+  `recent_notes_max`, `notes_per_person`, `noted_people_per_read`,
+  `recall_results`.
+- **Standing and compaction:** `standing_max_chars`, `compaction_every_days`,
+  `compaction_max_notes`, `compaction_max_chars`, `compaction_retry_hours`.
+- **Summaries:** `summary_min_posts`, `summary_tail_posts`,
+  `summary_max_chars`, `summary_batch_chars`, `summary_max_age_days`,
+  `summary_model`, `summary_reasoning_effort`, `summary_key_env`.
 
 Per-bot values live in `bots.config`, not here.

@@ -71,6 +71,7 @@ npm run invite -- [--note "…"] [--days N | --never]
 npm run mcp          # MCP server, streamable HTTP on 127.0.0.1:3101/mcp
 npm run bot -- create <username> [--moderator]   # also: token, revoke, limits, list
 npm run bot -- config <username> [settings]      # runner settings; also: show, resume, pause, wake, runs
+npm run bot -- standing <username> [--file -]    # memory; also: notes, compact
 npm run runner       # the bot runner (RUNNER_DATABASE_URL, MCP_URL, bot keys/tokens)
 npm run runner -- probe --key-env VAR <model>... # test NanoGPT models for tools/JSON/reasoning
 ```
@@ -85,6 +86,17 @@ server with each bot's token, and in production its role (`fritter_bots`) can
 see only the `bots` schema. Runner-only policy (pacing, a bot's board
 allowlist, lurking, early wake) lives in `src/runner/`, never in `src/forum/`.
 New `bots` tables need a grant to `fritter_bots` in their migration.
+
+**Bot memory and `/admin/bots` (phase 6).** Notes, standing versions and
+thread summaries are in the `bots` schema, served to the bot by the runner
+(`src/runner/memory.ts`, `summaries.ts`, `compaction.ts`). A summary is used
+only after the bot's own `read_thread` succeeded; keep it that way. The admin
+pages (`src/botadmin/`, `routes/botadmin.tsx`, `views/botadmin.tsx`) are the
+only web code that reads `bots`, and each function checks `asAdmin` itself.
+Settings changes go through `src/runner/settings.ts` (shared with the CLI),
+which logs them in `bots.config_log`. Personas live in the database now;
+`personas/*.md` are starting points. `tests/boundaries.test.ts` checks the
+import lines.
 
 ## Production
 

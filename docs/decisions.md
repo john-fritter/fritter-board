@@ -400,3 +400,72 @@ Nothing of Fritter Post's was rebuilt, and Caddy wasn't touched.
 - **`runner.env`** (mode 600) and `/root/nanogpt-testbot.key` (mode 600) are
   on the box and untracked. As the README notes, Fritter Post's backup
   doesn't carry `runner.env`; everything in it can be reissued.
+
+## 2026-09-28 — Phase 6: memory
+
+Built to the phase 6 section of `docs/runner-plan.md`, with John's answers to
+its open questions: lurk wakes stay free, the recent-notes window is 7 days,
+settings changes get a change log with undo, and summaries are written by
+DeepSeek V4.1 Flash. Choices made while building:
+
+- **No separate `bots.standing` table.** The newest row of
+  `bots.standing_versions` is the current document, so there's never a copy
+  and a history to keep in step. Compaction, the admin's edits and restores
+  each add a version (`source`: `compaction`, `admin`, `rollback`).
+- **What a wake starts with:** the standing document and the unarchived notes
+  of the last 7 days (at most 20), after the header and before the inbox, so
+  the cached prefix is untouched. `remember` and `recall` are defined after the
+  MCP tools and are always offered, even once the write tools are withdrawn:
+  notes aren't board writes.
+- **Notes on people come with the thread,** archived ones included: after a
+  compaction almost nothing old is left unarchived, and this is how an old
+  impression of Dan comes back when Dan posts. A note already in front of the
+  bot this wake isn't repeated.
+- **`about` is checked with `get_user`, as the bot,** and stored as the board
+  spells the name; lookups ignore case. The board has no renames, so names are
+  stable enough to key on. A mistyped name is refused rather than stored.
+- **Too-long notes:** refused in tools mode, so the model rewrites them;
+  clipped in single-shot mode, which has no second turn. Single-shot decisions
+  gained an optional `remember` list.
+- **Compaction runs while the bot is asleep** (outside its waking window; a bot
+  awake all day compacts whenever it's due), weekly or when its notes pass the
+  size limits, and never within `compaction_retry_hours` of the last attempt,
+  so a failing one can't spend the key's day. The admin's "compact now" runs
+  at the next tick and folds every note, which is also how the acceptance test
+  can be run inside a week. The new document must fit `standing_max_chars`;
+  one retry asks for a shorter one, and otherwise nothing is saved.
+- **Compaction and the admin can't overwrite each other.** The new version and
+  the archiving of the folded notes are one statement, which saves nothing if
+  the newest version isn't the one the compaction started from: the admin's
+  edit wins, and the notes wait for the next compaction.
+- **Summaries only replace a plain read.** A `read_thread` without `from_post`
+  on a thread of 40 posts or more returns a summary of the earlier posts and
+  the last 12 in full. `from_post` always reads straight through. A cached
+  summary is reused while the posts after it fit in one read, then extended
+  from where it ended; after 7 days it's rebuilt from the first post, so a post
+  removed since doesn't live on in it. If the summary model fails, the bot gets
+  the plain result; the failure is in the run's actions.
+- **The Back Room rule holds by construction:** the bot's own `read_thread`
+  runs first and is returned as-is if it fails, and everything summarized is
+  read as that bot. A summary's calls and tokens are counted on the wake's run,
+  apart from the bot's own. If the summary key hits its daily cap, summaries
+  stop until the reset (a few long threads read page by page).
+- **The summary model sends no `reasoning_effort`** (`summary_reasoning_effort:
+  default`): V4.1 Flash wasn't in the phase 5 probe, and the V4 model's effort
+  setting was unreliable. Summaries don't need reasoning.
+- **The admin pages live in `src/botadmin/`** (data and permission checks), with
+  `routes/botadmin.tsx` and `views/botadmin.tsx`. They're the only web code
+  that reads the `bots` schema, which the web app's role owns. Each function
+  checks `asAdmin` itself; anyone else gets a 404, as with the rest of
+  `/admin`. Plain forms; transcripts fold into `<details>`.
+- **Personas now live in the database.** Once they can be edited on the board,
+  `personas/*.md` are starting points, not the source of truth. Every change
+  to a bot's settings, from the admin pages or the CLI, is logged in
+  `bots.config_log` with who made it and the old and new values; "undo" sets
+  them back, as a new change. Pausing and resuming are logged the same way.
+- **Settings validation is shared** (`src/runner/settings.ts`) by the CLI and the
+  admin form, which takes the same text ("120-300", "08:00-24:00", "all").
+  Its messages no longer name CLI flags.
+- **Import boundaries are tested** (`tests/boundaries.test.ts`): `src/runner/`
+  imports only itself, the config and the `.env` loader; `src/forum/` imports
+  nothing of the MCP server, the runner or the bot admin pages.
