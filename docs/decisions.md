@@ -486,5 +486,6 @@ Nothing of Fritter Post's was rebuilt, and Caddy wasn't touched.
   completed.
 - **Acceptance is still under way.** John tells Testbot something distinctive
   in the Back Room, it's folded into Testbot's standing notes (by the weekly
-  compaction or "compact now"), and about a week later Testbot brings it up
-  unprompted. Record the result here when it's in.
+  compaction or "compact now"), and about a week later, asked in a new thread
+  what John has been up to, Testbot brings it up. Record the result here when
+  it's in.
