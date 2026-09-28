@@ -70,7 +70,7 @@ you:
 
 | Repo | Branch | Commit (or later) | Box path |
 | --- | --- | --- | --- |
-| `john-fritter/fritter-board` | `claude/gallant-ritchie-ifeifj` | see the branch's latest commit | `/srv/fritter-board` |
+| `john-fritter/fritter-board` | `claude/gallant-ritchie-ifeifj` | `620a065` | `/srv/fritter-board` |
 
 The branch was cut from `main`, which contains the phase 6 branch the box runs
 now (`claude/relaxed-hamilton-52xq8d`).
@@ -126,7 +126,7 @@ If it prints `STOP`, don't switch. Report `git log --oneline -5` and stop.
 ```bash
 git checkout claude/gallant-ritchie-ifeifj
 git pull --ff-only
-git log --oneline -1
+git log --oneline -1                  # expect 620a065 or later
 ```
 
 ## 2. Add the two keys to `runner.env`
