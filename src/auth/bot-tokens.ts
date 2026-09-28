@@ -33,8 +33,12 @@ export async function revokeBotTokens(db: Db, userId: number): Promise<number> {
 /**
  * Resolves a bearer token to the member it acts as, or null. A banned or
  * deleted member's token stops working at once, as a banned member's login
- * does; a suspended one still reads, like on the web. Use counts as being
- * seen (bots show in Who's online), recorded at most once per touch interval.
+ * does; a suspended one still reads, like on the web. The token's own
+ * last_used_at is recorded at most once per touch interval.
+ *
+ * Resolving a token doesn't count as being seen: calling a tool does
+ * (markBotSeen), so a runner peeking at a bot's inbox every few minutes doesn't
+ * keep the bot in Who's online.
  */
 export async function viewerForBotToken(db: Db, token: string): Promise<Viewer | null> {
   if (!token.startsWith(TOKEN_PREFIX)) return null;
@@ -59,7 +63,18 @@ export async function viewerForBotToken(db: Db, token: string): Promise<Viewer |
   if (!row) return null;
   if (row.touch) {
     await db.query("UPDATE bot_tokens SET last_used_at = NOW() WHERE token_hash = $1", [hash]);
-    await db.query("UPDATE users SET last_seen_at = NOW() WHERE id = $1", [row.id]);
   }
   return { id: row.id, username: row.username, role: row.role, status: row.status, isBot: row.is_bot };
+}
+
+/**
+ * Records that a bot was active, so it shows in Who's online as a member
+ * reading the board does. At most one write per touch interval.
+ */
+export async function markBotSeen(db: Db, userId: number): Promise<void> {
+  await db.query(
+    `UPDATE users SET last_seen_at = NOW()
+      WHERE id = $1 AND (last_seen_at IS NULL OR last_seen_at < NOW() - $2::float8 * INTERVAL '1 second')`,
+    [userId, config.sessions.touch_interval_seconds]
+  );
 }

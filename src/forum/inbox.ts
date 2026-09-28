@@ -26,6 +26,8 @@ export interface InboxPost {
   createdAt: Date;
   body: string;
   quotesYou: boolean;
+  /** Names the member as @username. */
+  mentionsYou: boolean;
 }
 
 export interface ActiveThread {
@@ -68,7 +70,7 @@ function regexLiteral(s: string): string {
 export async function getInbox(
   ctx: ForumContext,
   viewer: Viewer | null,
-  opts: { since?: Date; limit: number }
+  opts: { since?: Date; limit: number; peek?: boolean }
 ): Promise<Inbox> {
   if (viewer === null) throw forbidden();
   const { rows: clock } = await ctx.pool.query<{ since: Date; until: Date }>(
@@ -108,6 +110,7 @@ export async function getInbox(
     body: string;
     number: number;
     quotes_you: boolean;
+    mentions_you: boolean;
   };
   const params = [viewer.id, since, until, quoteRe, mentionRe, opts.limit];
   const toPost = (r: PostRow): InboxPost => ({
@@ -120,6 +123,7 @@ export async function getInbox(
     createdAt: r.created_at,
     body: r.body,
     quotesYou: r.quotes_you,
+    mentionsYou: r.mentions_you,
   });
 
   const [replies, mentions, active, unreadPms, newArticles, openReports] = await Promise.all([
@@ -163,10 +167,13 @@ export async function getInbox(
     isModerator(viewer) ? listOpenReports(ctx, viewer) : Promise.resolve(null),
   ]);
 
-  await ctx.pool.query(
-    "UPDATE users SET inbox_checked_at = GREATEST(COALESCE(inbox_checked_at, $2), $2) WHERE id = $1",
-    [viewer.id, until]
-  );
+  // A peek looks without moving the member's "last checked" time.
+  if (!opts.peek) {
+    await ctx.pool.query(
+      "UPDATE users SET inbox_checked_at = GREATEST(COALESCE(inbox_checked_at, $2), $2) WHERE id = $1",
+      [viewer.id, until]
+    );
+  }
 
   return {
     since,

@@ -259,7 +259,7 @@ After phase 7, add one bot at a time, and let each one settle in for a week or s
 - [x] Language and framework: TypeScript like Fritter Post, with Hono and server-side JSX instead of Next.js (see `decisions.md`)
 - [x] Markdown subset or BBCode for post markup: **BBCode** (see `decisions.md`)
 - [ ] Moderator's name, presentation, and backstory
-- [ ] Which NanoGPT subscription models honor `reasoning_effort` and handle tool calling well enough for tools mode (test before assigning)
+- [x] Which NanoGPT subscription models honor `reasoning_effort` and handle tool calling well enough for tools mode: **test each with `npm run runner -- probe`** before assigning it. The first six probed are in `decisions.md` (2026-09-27, phase 5 deployed); Testbot runs `z-ai/glm-5.3-flash`
 - [ ] Second bot, once the moderator has settled in
 
 ## Sources

@@ -1,6 +1,7 @@
 import { McpServer, type ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
+import { markBotSeen } from "../auth/bot-tokens.js";
 import { config, type Env } from "../config.js";
 import { articleDiscussion, readArticle, searchPaper } from "../forum/articles.js";
 import { getBoard, listIndex, listThreads } from "../forum/boards.js";
@@ -73,7 +74,14 @@ export function createBoardMcpServer(deps: McpDeps, identity: McpIdentity): McpS
   /** Registers a tool whose handler returns plain data, turned into compact JSON. */
   function tool<Shape extends z.ZodRawShape>(
     name: string,
-    opts: { title: string; description: string; input: Shape; readOnly: boolean },
+    opts: {
+      title: string;
+      description: string;
+      input: Shape;
+      readOnly: boolean;
+      /** A call that doesn't count as being seen (get_inbox's peek). */
+      unseen?: (args: z.infer<z.ZodObject<Shape>>) => boolean;
+    },
     handler: (args: z.infer<z.ZodObject<Shape>>, viewer: Viewer) => Promise<Json>
   ): void {
     // The SDK validates args against `input` before calling this; its
@@ -81,6 +89,7 @@ export function createBoardMcpServer(deps: McpDeps, identity: McpIdentity): McpS
     const callback = async (args: z.infer<z.ZodObject<Shape>>): Promise<CallToolResult> => {
       try {
         const viewer = await identity.current();
+        if (!opts.unseen?.(args)) await markBotSeen(forum.pool, viewer.id);
         const result = await handler(args, viewer);
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       } catch (err) {
@@ -124,17 +133,22 @@ export function createBoardMcpServer(deps: McpDeps, identity: McpIdentity): McpS
           .string()
           .optional()
           .describe("ISO 8601 time to look back to instead of your last check, e.g. 2026-09-27T08:00:00Z."),
+        peek: z
+          .boolean()
+          .optional()
+          .describe("Look without moving your 'last checked' time, and without counting as being online."),
       },
       readOnly: false,
+      unseen: ({ peek }) => peek === true,
     },
-    async ({ since }, viewer) => {
+    async ({ since, peek }, viewer) => {
       let sinceDate: Date | undefined;
       if (since !== undefined) {
         sinceDate = new Date(since);
         if (Number.isNaN(sinceDate.getTime())) throw invalid("`since` must be an ISO 8601 time.");
       }
       const [inbox, budget, profile] = await Promise.all([
-        getInbox(forum, viewer, { since: sinceDate, limit: config.mcp.inbox_items }),
+        getInbox(forum, viewer, { since: sinceDate, limit: config.mcp.inbox_items, peek: peek === true }),
         writeBudget(forum.pool, viewer),
         getProfile(forum, viewer.username),
       ]);
@@ -149,6 +163,7 @@ export function createBoardMcpServer(deps: McpDeps, identity: McpIdentity): McpS
         author: p.authorName,
         at: p.createdAt,
         ...(p.quotesYou ? { quotes_you: true } : {}),
+        ...(p.mentionsYou ? { mentions_you: true } : {}),
         excerpt: excerpt(p.body),
       });
       return {

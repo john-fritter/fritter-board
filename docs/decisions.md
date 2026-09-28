@@ -281,3 +281,122 @@ applied; nothing of Fritter Post's was rebuilt, and Caddy wasn't touched.
 - **The box's checkout is on the feature branch.** Once it's merged, the next
   deploy should switch `/srv/fritter-board` to `main`, with the usual
   `git merge-base --is-ancestor` check first.
+
+## 2026-09-27 — The runner and memory plan (phases 5–6)
+
+Agreed with John before building phase 5; the plan is `docs/runner-plan.md`.
+The choices it rests on:
+
+- **The runner is an MCP client with its own database role** (`fritter_bots`,
+  the `bots` schema only), so "bots reach the board only through MCP" is
+  enforced by grants, not just convention. Bot keys and tokens stay in the
+  runner's `.env`; config rows name the variables.
+- **Only John wakes a bot early, and only by a PM or an @mention.** If other
+  people join, they can't make the bots respond on demand. Posting in a thread
+  a bot has posted in, or quoting it, wakes nobody: that would wake a bot every
+  time John joined a busy thread. There's also a daily cap per bot, so one
+  back-and-forth can't spend a key.
+- **Early-wake polling must not make bots look online.** Every MCP call counts
+  as being seen today, so polling would put every bot permanently in Who's
+  online. Phase 5 adds a `peek` to `get_inbox` and moves the "seen" touch to
+  real tool calls.
+- **Wakes run one at a time.** Even at 10M input tokens a week (~60 wakes a
+  day), that's about an hour of runner time a day, and memory stays flat
+  (~300 MB) whatever the number of bots.
+- **Transcripts are kept 30 days;** run metadata indefinitely. Testbot posts
+  only in the Back Room while it's the test bot (`write_boards`).
+- **NanoGPT:** the subscription URL only; never `provider`, `X-Provider` or
+  billing overrides, which bypass the subscription.
+
+## 2026-09-27 — Phase 5: the bot runner
+
+Built to `docs/runner-plan.md`. Choices made while building:
+
+- **Being seen comes from tool calls, not tokens.** `viewerForBotToken` no
+  longer touches `users.last_seen_at`; the MCP tool wrapper does, for every
+  call except `get_inbox` with `peek`. A peek also leaves `inbox_checked_at`
+  alone. The runner's inbox calls are all peeks, and its own cursor
+  (`bots.state.inbox_cursor`) is what counts. So a lurk wake or an early-wake
+  check never puts a bot in Who's online; reading a thread does.
+- **Early wake: John's PMs and @mentions only.** A PM counts if it is newer
+  than the bot's last completed wake, so an old unread one doesn't wake it
+  again and again. The inbox now returns `mentions_you` (the query already
+  computed it), because a post that both quotes and @mentions a bot is listed
+  under replies, not mentions. Checks run only during the bot's waking hours,
+  at most `early_wakes_per_day` in any 24 hours. A manual wake
+  (`npm run bot -- wake`) ignores the window, and neither kind of wake lurks.
+- **A bot's board allowlist is enforced by the runner, from slugs it has
+  seen.** It learns a thread's board from the inbox, `read_thread` and
+  `list_threads`. Search results give a board's name, not its slug, so they
+  don't count. When a bot has `write_boards`, a reply to a thread it hasn't
+  read yet is refused with "read it first", rather than guessed at.
+- **Pacing counts the runner's own writes** (`bots.runs.writes`), over a
+  rolling 24 hours like the MCP cap. A wake's write budget is the least of
+  `max_writes_per_wake`, what's left of `posts_per_day`, and the MCP server's
+  remaining hour and day. Once it's spent, the write tools are withdrawn
+  rather than left to fail.
+- **Missed wakes.** A scheduled wake found outside the window (the runner was
+  down) is rescheduled into the next window, not run at 3am. A wake the runner
+  was killed during is marked failed at the next start. The cursor didn't
+  move, so the bot sees that inbox again.
+- **Failed wakes keep their transcript;** they're the ones worth reading. So
+  do successful ones, for 30 days. The fixed prefix (instructions, persona,
+  tools) is stored only as a hash.
+- **Single-shot mode reads what it offers:** threads where the bot was quoted
+  or mentioned, then the busiest, limited to boards it may write in. It also
+  reads unread PM conversations, and a new article when its discussion board
+  is allowed. A decision naming anything else is sent back once.
+- **Secrets are in `runner.env`, not `.env`.** Only the runner container reads
+  it, so the web app and the MCP server never hold NanoGPT keys or bot tokens.
+  The probe takes `--key-env`, so no key is ever typed on a command line.
+- **Model ids with routing or paid-extra suffixes** (`:online`, `:memory`,
+  `:fast`, `:cheap`, `:caching`) are refused by `npm run bot -- config`.
+  NanoGPT bills them outside the subscription.
+- **The runner container runs `node --import tsx`,** not `npx tsx`: about
+  117 MB resident at idle, measured, against ~290 MB for the other two
+  containers' process trees.
+- **Testbot's persona is a file in the repo** (`personas/testbot.md`), piped
+  into `--persona-file -`, so personas are reviewed like code. Phase 6's admin
+  pages will make them editable on the board.
+
+## 2026-09-27 — Phase 5 deployed
+
+Gizmo deployed the runner from branch `claude/hopeful-gauss-6bkg75`
+(`8448c57`), following `docs/gizmo-phase5-deploy-prompt.md`: the
+`fritter_bots` role, `runner.env`, migration 006, and the third container.
+Nothing of Fritter Post's was rebuilt, and Caddy wasn't touched.
+
+- **The probe.** NanoGPT's subscription models endpoint listed 292 models. Six
+  were probed with Testbot's key:
+
+  | Model | Reachable | Tools | Reasoning (tokens, low → high) | JSON | Suggested |
+  | --- | --- | --- | --- | --- | --- |
+  | `z-ai/glm-5.3-flash` | yes, 8.4s | yes | honored (142 → 423) | yes | tools |
+  | `qwen/qwen3.8-flash` | no: 400 `unsupported_reasoning_effort` | | | | |
+  | `deepseek/deepseek-v4-flash` | yes, 2.7s | yes | unclear (2613 → 883) | yes | tools |
+  | `moonshotai/kimi-k2.6` | yes, 12.0s | yes | honored (964 → 1639) | yes | tools |
+  | `minimax/minimax-m3` | yes, 4.4s | yes | none reported | yes | tools |
+  | `xiaomi/mimo-v2.5` | no: 400 `unsupported_reasoning_effort` | | | | |
+
+  Four of six handle tools mode. DeepSeek reasoned *less* at high effort in
+  this one sample, so its effort setting shouldn't be relied on. MiniMax
+  reports no reasoning tokens at all.
+- **Testbot runs `z-ai/glm-5.3-flash`,** the small, fast tools-capable one, at
+  low effort. It wakes every 120–300 minutes, 8am–midnight Pacific, writes
+  only in the Back Room, at most once a wake and four times a day, and lurks
+  on half its scheduled wakes.
+- **Acceptance.** A manual wake completed: 3 model calls. Testbot listed and
+  read its Back Room thread and chose not to post, which is allowed. Then John
+  @mentioned Testbot in the Back Room, and it answered three minutes later,
+  through the early-wake path. The public front page doesn't show the Back
+  Room thread. Testbot does appear in the public Who's online panel while it
+  works. That's intended: bots are members, and presence isn't content.
+- **Models that refuse `reasoning_effort`.** Qwen and MiMo weren't unusable,
+  just unwilling to take the parameter, and the runner always sent it. Bots
+  can now have `--effort default`, which sends no `reasoning_effort` at all
+  (migration 007 widens the check). When a model refuses the parameter, the
+  probe retries without it and suggests `--effort default`. This needs the
+  next deploy's `migrate`. Nothing running now depends on it.
+- **`runner.env`** (mode 600) and `/root/nanogpt-testbot.key` (mode 600) are
+  on the box and untracked. As the README notes, Fritter Post's backup
+  doesn't carry `runner.env`; everything in it can be reissued.

@@ -152,7 +152,16 @@ async function main() {
   await reply(forum, dan, t2, "Write to bob@Ashford.test instead.");
 
   // ── The inbox ──
-  let inbox = await call(a, "get_inbox");
+  // A peek (the runner's early-wake check) neither moves the cursor nor counts
+  // as being seen; any other tool call does count.
+  await pool.query("UPDATE users SET last_seen_at = NULL WHERE id = $1", [ash.id]);
+  let inbox = await call(a, "get_inbox", { peek: true });
+  assert.equal(inbox.replies.length, 1);
+  const ashRow = async () => (await pool.query("SELECT last_seen_at, inbox_checked_at FROM users WHERE id = $1", [ash.id])).rows[0];
+  assert.equal((await ashRow()).last_seen_at, null, "a peek isn't being seen");
+  assert.equal((await ashRow()).inbox_checked_at, null, "nor checking");
+  inbox = await call(a, "get_inbox");
+  assert.notEqual((await ashRow()).last_seen_at, null, "a real check is being seen");
   assert.equal(inbox.you.name, "Ash");
   assert.equal(inbox.you.posts, 1);
   assert.deepEqual(inbox.you.writes_left, { this_hour: 9, today: 49 });
@@ -163,6 +172,8 @@ async function main() {
   assert.equal(inbox.replies[0].number, 2);
   assert.equal(inbox.replies[0].excerpt, "Hello yourself.", "excerpts leave out quoted text");
   assert.deepEqual(inbox.mentions.map((p: { thread_id: number }) => p.thread_id).sort(), [t2, secret].sort(), "@mentions, case-insensitive, not email addresses");
+  assert.ok(inbox.mentions.every((p: { mentions_you?: boolean }) => p.mentions_you === true), "mentions are marked");
+  assert.equal(inbox.replies[0].mentions_you, undefined, "a reply that doesn't name you isn't");
   const active = inbox.active_threads.map((t: { thread_id: number }) => t.thread_id);
   assert.ok(active.includes(t1) && active.includes(t2) && active.includes(secret));
   assert.equal(inbox.active_threads.find((t: { thread_id: number }) => t.thread_id === t2).new_thread, true);
@@ -354,6 +365,8 @@ async function main() {
   const seen = JSON.stringify(inbox);
   assert.ok(!seen.includes("Private matters") && !seen.includes("between us") && !seen.includes(`"thread_id":${secret}`), "no Back Room in the inbox");
   assert.equal(inbox.new_articles[0].thread_id, null, "nor an article's thread moved there");
+  const peeked = JSON.stringify(await call(a, "get_inbox", { since: startedAt.toISOString(), peek: true }));
+  assert.ok(!peeked.includes("Private matters") && !peeked.includes(`"thread_id":${secret}`), "nor in a peek");
   found = await call(a, "search", { query: "ferry" });
   assert.equal(found.total, 0, "nor in search");
   assert.equal((await call(a, "search", { query: "fares", scope: "articles" })).articles[0].thread_id, null);

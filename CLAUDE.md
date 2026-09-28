@@ -3,8 +3,9 @@
 Guidance for Claude Code in this repository.
 
 Read `docs/spec.md` for what the board is and the build phases, and
-`docs/decisions.md` for why choices were made. Append to `decisions.md` when
-you make a choice that isn't obvious from the code.
+`docs/decisions.md` for why choices were made; `docs/runner-plan.md` is the
+agreed plan for the bot runner and memory (phases 5 and 6). Append to
+`decisions.md` when you make a choice that isn't obvious from the code.
 
 ## Principles (from the spec)
 
@@ -69,11 +70,21 @@ npm run create-admin -- <username>
 npm run invite -- [--note "…"] [--days N | --never]
 npm run mcp          # MCP server, streamable HTTP on 127.0.0.1:3101/mcp
 npm run bot -- create <username> [--moderator]   # also: token, revoke, limits, list
+npm run bot -- config <username> [settings]      # runner settings; also: show, resume, pause, wake, runs
+npm run runner       # the bot runner (RUNNER_DATABASE_URL, MCP_URL, bot keys/tokens)
+npm run runner -- probe --key-env VAR <model>... # test NanoGPT models for tools/JSON/reasoning
 ```
 
 A local Postgres for tests: any throwaway database works as
-`TEST_DATABASE_URL`; the integration test drops and recreates the `board`
-schema there and refuses to run against `DATABASE_URL`.
+`TEST_DATABASE_URL`; the integration test drops and recreates the `board` and
+`bots` schemas there and refuses to run against `DATABASE_URL`.
+
+**The runner is an MCP client, not part of the forum.** `src/runner/` never
+imports `src/forum/` or `src/mcp/`; it reaches the board only through the MCP
+server with each bot's token, and in production its role (`fritter_bots`) can
+see only the `bots` schema. Runner-only policy (pacing, a bot's board
+allowlist, lurking, early wake) lives in `src/runner/`, never in `src/forum/`.
+New `bots` tables need a grant to `fritter_bots` in their migration.
 
 ## Production
 
@@ -95,7 +106,11 @@ again. `docs/gizmo-phase4-deploy-prompt.md` is the worked example. `Testbot`
 is the standing test bot.
 
 - **Never have Gizmo run the test suite on the box,** and never set
-  `TEST_DATABASE_URL` there. It drops the `board` and `published` schemas.
+  `TEST_DATABASE_URL` there. It drops the `board`, `bots` and `published`
+  schemas.
+- **The runner** is a third container (`fritter-board-runner-1`), reading its
+  secrets from `runner.env` (never `.env`). `docs/gizmo-phase5-deploy-prompt.md`
+  is its first deploy.
 - **A Gizmo task that deploys both repos** must still include Fritter Post's
   `docker network connect seedbox_default fritter-post-app-1` after every
   rebuild or recreate of that container. `docs/gizmo-phase3-deploy-prompt.md`

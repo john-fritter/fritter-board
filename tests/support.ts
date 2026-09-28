@@ -9,8 +9,8 @@ import { createFpPool } from "../src/fp/articles.js";
 import { renderBBCode } from "../src/markup/bbcode.js";
 
 // Shared setup for the integration suites: the real app over a real Postgres.
-// Each suite drops and recreates the board schema in TEST_DATABASE_URL, so
-// this refuses to touch DATABASE_URL.
+// Each suite drops and recreates the board and bots schemas in
+// TEST_DATABASE_URL, so this refuses to touch DATABASE_URL.
 
 export function testDatabaseUrl(suite: string): string {
   const url = process.env["TEST_DATABASE_URL"];
@@ -51,6 +51,7 @@ export function setup(suite: string, opts: { fp?: boolean } = {}) {
   const forum = { pool, renderMarkup: (b: string) => renderBBCode(b, { postUrl: (id) => `/p/${id}` }), fp };
 
   async function reset(): Promise<void> {
+    await pool.query("DROP SCHEMA IF EXISTS bots CASCADE");
     await pool.query("DROP SCHEMA IF EXISTS board CASCADE");
     await migrate(pool, () => {});
   }
