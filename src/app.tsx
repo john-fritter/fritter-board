@@ -19,6 +19,7 @@ import type { Viewer } from "./forum/types.js";
 import { registerAccountRoutes } from "./routes/account.js";
 import { registerAdminRoutes } from "./routes/admin.js";
 import { registerArticleRoutes } from "./routes/articles.js";
+import { registerBotAdminRoutes } from "./routes/botadmin.js";
 import { registerForumRoutes } from "./routes/forum.js";
 import { registerMemberRoutes } from "./routes/members.js";
 import { registerModRoutes } from "./routes/mod.js";
@@ -129,6 +130,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   registerAccountRoutes(app, services);
   registerMemberRoutes(app, services);
   registerAdminRoutes(app, services);
+  registerBotAdminRoutes(app, services);
 
   app.notFound((c) =>
     render(c, <ErrorPage ctx={c.get("page")} status={404} message="That page doesn't exist." />, 404)

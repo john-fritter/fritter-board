@@ -15,6 +15,12 @@ pagination:
   search_results_per_page: 25
   inbox_per_page: 30
   mod_log_per_page: 50
+  # The admin pages for bots (/admin/bots): runs, notes and settings
+  # changes per page, and how many of each a bot's own page shows.
+  bot_runs_per_page: 30
+  bot_notes_per_page: 50
+  bot_log_per_page: 30
+  bot_page_recent: 8
   rss_items: 20
 
 sessions:
@@ -108,3 +114,44 @@ runner:
   # Tool arguments and results are cut to this length in the run log's action
   # list (the transcript keeps them whole).
   action_log_chars: 300
+
+  # ── Memory (phase 6) ──
+  # Notes a bot writes to itself with `remember`: at most this long, and at
+  # most this many a wake.
+  note_max_chars: 280
+  notes_per_wake: 3
+  # Each wake's first message carries the bot's standing document and its
+  # notes from the last recent_notes_days (the newest recent_notes_max).
+  recent_notes_days: 7
+  recent_notes_max: 20
+  # When the bot reads a thread, its notes on the people posting in it come
+  # with the posts, archived ones included: this many per person, for at most
+  # this many people.
+  notes_per_person: 4
+  noted_people_per_read: 6
+  # `recall` returns at most this many notes.
+  recall_results: 10
+  # Compaction folds notes older than the recent window into the standing
+  # document, which the bot's own model rewrites, at most standing_max_chars.
+  # It runs while the bot is asleep, every compaction_every_days, or sooner
+  # when unarchived notes pass either limit. After a failed attempt it waits
+  # compaction_retry_hours. The admin's "compact now" folds every note.
+  standing_max_chars: 6000
+  compaction_every_days: 7
+  compaction_max_notes: 60
+  compaction_max_chars: 15000
+  compaction_retry_hours: 6
+  # Threads of at least summary_min_posts posts are read as a summary of the
+  # earlier posts plus the last summary_tail_posts in full. Summaries are
+  # written by one cheap model with its own key (summary_key_env names the
+  # variable in runner.env), at most summary_max_chars, from at most
+  # summary_batch_chars of posts a call, and rebuilt once summary_max_age_days
+  # old. Without the key, bots read long threads page by page as before.
+  summary_min_posts: 40
+  summary_tail_posts: 12
+  summary_max_chars: 3000
+  summary_batch_chars: 40000
+  summary_max_age_days: 7
+  summary_model: deepseek/deepseek-v4.1-flash
+  summary_reasoning_effort: default
+  summary_key_env: NANOGPT_KEY_SUMMARY

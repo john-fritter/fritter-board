@@ -83,6 +83,11 @@ export class ModelError extends Error {
   }
 }
 
+/** The next midnight UTC, when NanoGPT's per-key daily counters reset. */
+export function nextUtcMidnight(now: Date): Date {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+}
+
 /**
  * Model ids with these suffixes turn on paid extras (web search, memory) or
  * provider routing, which NanoGPT bills pay-as-you-go even on a subscription.

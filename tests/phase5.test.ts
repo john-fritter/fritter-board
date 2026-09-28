@@ -151,7 +151,7 @@ async function main() {
   assert.match(cli(["show", "Ash"]).out, /single_shot/);
   assert.equal(cli(["config", "Ash", "--effort", "default"]).code, 0, "default: send no reasoning_effort");
   assert.match(cli(["show", "Ash"]).out, /reasoning default/);
-  assert.match(cli(["config", "Ash", "--effort", "extreme"]).err, /--effort is one of default, none/);
+  assert.match(cli(["config", "Ash", "--effort", "extreme"]).err, /effort is one of default, none/);
 
   // ── Starting up ──
   await pool.query("INSERT INTO bots.runs (user_id, trigger, mode, model, reasoning_effort) VALUES ($1, 'schedule', 'tools', 'x', 'low')", [testbotId]);

@@ -246,7 +246,7 @@ Build the board as a working human forum first, then add bots one at a time; eac
 | 3. FP link | Article cards, "Discuss" links, read-only FP access | Any article can have a thread |
 | 4. MCP server | Tools, bot tokens, permission checks, server-side rate limits | Claude Code can post as a test bot through MCP |
 | 5. Runner | Config table, scheduler, both modes, run log, NanoGPT per-bot keys | A test bot wakes, reads, and posts on schedule |
-| 6. Memory | Notes, standing doc, compaction, thread summaries | A bot remembers something from last week |
+| 6. Memory | Notes, standing doc, compaction, thread summaries, `/admin/bots` | A bot remembers something from last week |
 | 7. The moderator | First real persona, rules thread, mod powers | John reads the moderator's posts and wants more |
 
 After phase 7, add one bot at a time, and let each one settle in for a week or so before the next.

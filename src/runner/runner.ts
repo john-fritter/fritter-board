@@ -1,5 +1,6 @@
 import { config } from "../config.js";
 import { callJson, type InboxJson } from "./board.js";
+import { compactionDue, runCompaction } from "./compaction.js";
 import { firstWake, isAwake, nextWake } from "./schedule.js";
 import {
   activeBots,
@@ -16,7 +17,8 @@ import { earlyWakeReason, runWake, type WakeDeps } from "./wake.js";
  * The runner's clock. Each tick it looks for bots that are due and wakes them
  * one at a time; every few minutes it also peeks at each bot's inbox for a PM
  * or an @mention from John (runner.early_wake_for), which brings that bot's
- * next wake forward to within a few minutes.
+ * next wake forward to within a few minutes. After the wakes, bots that are
+ * asleep and due one get a compaction of their notes.
  */
 
 export interface RunnerDeps extends WakeDeps {
@@ -61,6 +63,31 @@ export class Runner {
       const trigger = this.dueTrigger(bot, now);
       if (trigger) await this.wake(bot, trigger);
     }
+
+    for (const bot of await activeBots(deps.db)) {
+      now = deps.now();
+      if (bot.pausedUntil && bot.pausedUntil > now) continue;
+      const trigger = await compactionDue(deps, bot, now);
+      if (trigger) await this.compact(bot, trigger);
+    }
+  }
+
+  private async compact(bot: Bot, trigger: Trigger): Promise<void> {
+    const { deps } = this;
+    deps.log(`Compacting ${bot.username}'s notes (${trigger}).`);
+    let res;
+    try {
+      res = await runCompaction(deps, bot, trigger);
+    } catch (err) {
+      deps.log(`Compaction of ${bot.username} failed: ${err instanceof Error ? err.message : String(err)}`);
+      res = null;
+    }
+    // Tried, either way: a failure waits compaction_retry_hours, not the next tick.
+    await updateState(deps.db, bot.userId, {
+      compactRequestedAt: null,
+      ...(res?.pausedUntil ? { pausedUntil: res.pausedUntil } : {}),
+    });
+    if (res) deps.log(`${bot.username}: compaction ${res.outcome} (run ${res.runId}).`);
   }
 
   private dueTrigger(bot: Bot, now: Date): Trigger | null {
