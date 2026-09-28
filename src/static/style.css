@@ -459,6 +459,16 @@ code { font: 12px "DejaVu Sans Mono", Consolas, Menlo, monospace; overflow-wrap:
 
 /* ── Footer ───────────────────────────────────────────────────── */
 
+/* Admin pages for bots */
+.pre-text { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px "DejaVu Sans Mono", Consolas, Menlo, monospace; margin: 2px 0; }
+.transcript { margin: 0; padding: 0 0 0 24px; }
+.transcript > li { border-bottom: 1px dotted var(--border); padding: 6px 0; }
+.transcript > li:last-child { border-bottom: 0; }
+.msg-role { font-weight: bold; font-size: 11px; text-transform: uppercase; color: var(--muted); cursor: pointer; }
+.outcome-failed { color: #b03a3a; font-weight: bold; }
+details > summary { cursor: pointer; }
+textarea.tall { min-height: 12em; }
+
 .footer { text-align: center; color: var(--muted); font-size: 11px; margin-top: 20px; }
 .theme-form { display: inline-flex; gap: 8px; align-items: baseline; }
 .footer p { margin: 6px 0 0; }

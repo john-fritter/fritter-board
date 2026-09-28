@@ -12,7 +12,7 @@ import { compactionDue } from "../src/runner/compaction.js";
 import { ModelError, type ChatModel, type ChatRequest, type ChatResponse } from "../src/runner/model.js";
 import { Runner } from "../src/runner/runner.js";
 import { localMinutes } from "../src/runner/schedule.js";
-import { writeStanding } from "../src/runner/settings.js";
+import { settingsText, writeStanding } from "../src/runner/settings.js";
 import { botByUserId } from "../src/runner/store.js";
 import { Summarizer } from "../src/runner/summaries.js";
 import { ORIGIN, run, setup, testDatabaseUrl } from "./support.js";
@@ -23,7 +23,7 @@ import { ORIGIN, run, setup, testDatabaseUrl } from "./support.js";
 // long threads, and the Back Room rule for them. The bot's model and the
 // summary model are scripted.
 
-const { pool, forum, reset } = setup("phase6");
+const { pool, forum, reset, req, login } = setup("phase6");
 const mcp = createMcpApp({ forum, env: parsePublicUrl(ORIGIN, 0) });
 const ROOT = path.join(import.meta.dirname, "..");
 const TSX = path.join(ROOT, "node_modules", ".bin", "tsx");
@@ -180,6 +180,10 @@ async function main() {
     ]
   );
   assert.equal(r.writes, 0, "notes aren't board writes");
+  c = cli(["notes", "Testbot", "--about", "dan"]);
+  assert.equal(c.code, 0, c.err);
+  assert.match(c.out, /#\d+  \d{4}-\d{2}-\d{2} · about Dan: Dan thinks tunnels are overrated\./);
+  assert.doesNotMatch(c.out, /Third note/);
 
   // ── Notes on the people in a thread, and recall ──
   await pool.query(
@@ -509,6 +513,167 @@ async function main() {
   assert.equal((await lastRun(testbotId)).outcome, "skipped", "a suspended bot reads nothing, summaries included");
   await pool.query("UPDATE users SET status = 'active' WHERE id = $1", [testbotId]);
   await notDue(testbotId);
+
+  // ── /admin/bots ──
+  await insertUser(pool, { username: "Mod", password: "a-long-password", role: "moderator" });
+  await insertUser(pool, { username: "Loner", password: null, isBot: true });
+  const johnCookie = await login("John", "a-long-password");
+  const danCookie = await login("Dan", "a-long-password");
+  const modCookie = await login("Mod", "a-long-password");
+  const cfgRow = () => one("SELECT * FROM bots.config WHERE user_id = $1", [testbotId]);
+  const form = async (over: Record<string, string>) => ({ ...settingsText(await cfgRow()), ...over }) as Record<string, string>;
+  const noInlineStyles = (html: string) => assert.doesNotMatch(html, /\sstyle=/, "no inline styles (CSP)");
+
+  for (const cookie of [null, danCookie, modCookie]) {
+    for (const path of ["/admin/bots", "/admin/bots/Testbot", "/admin/bots/Testbot/runs", `/admin/bots/Testbot/runs/${r.id}`,
+      "/admin/bots/Testbot/standing", "/admin/bots/Testbot/notes", "/admin/bots/Testbot/changes"]) {
+      assert.equal((await req("GET", path, { cookie })).status, 404, `${path} is hidden`);
+    }
+    for (const [path, f] of [
+      ["/admin/bots/Testbot/control", { action: "pause" }],
+      ["/admin/bots/Testbot/settings", await form({ lurk: "1" })],
+      ["/admin/bots/Testbot/standing", { body: "Hijacked." }],
+    ] as const) {
+      assert.equal((await req("POST", path, { cookie, form: f })).status, 404, `${path} refuses`);
+    }
+  }
+  assert.equal((await cfgRow()).active, true, "nothing changed");
+  assert.equal((await cfgRow()).lurk_bias, 0);
+  assert.notEqual((await standing(testbotId)).body, "Hijacked.");
+
+  let res = await req("GET", "/admin", { cookie: johnCookie });
+  assert.match(res.text, /href="\/admin\/bots"/);
+  res = await req("GET", "/admin/bots", { cookie: johnCookie });
+  assert.equal(res.status, 200);
+  assert.match(res.text, /href="\/admin\/bots\/Testbot"/);
+  assert.match(res.text, /href="\/admin\/bots\/Ash"/);
+  assert.match(res.text, /without runner settings: Loner/);
+  noInlineStyles(res.text);
+  assert.equal((await req("GET", "/admin/bots/Loner", { cookie: johnCookie })).status, 404);
+  assert.equal((await req("GET", "/admin/bots/Nobody", { cookie: johnCookie })).status, 404);
+
+  res = await req("GET", "/admin/bots/testbot", { cookie: johnCookie });
+  assert.equal(res.status, 200);
+  assert.match(res.text, /John edited this meanwhile\./, "the standing notes");
+  assert.match(res.text, /You are Testbot, a plain test account\./, "the persona");
+  assert.match(res.text, /Compact notes now/);
+  noInlineStyles(res.text);
+
+  // Settings, validated like the CLI's, and logged with who changed them.
+  res = await req("POST", "/admin/bots/Testbot/settings", { cookie: johnCookie, form: await form({ lurk: "2", model: "vendor/x-typed" }) });
+  assert.equal(res.status, 400);
+  assert.match(res.text, /Lurk is a number from 0 to 1/);
+  assert.match(res.text, /value="vendor\/x-typed"/, "what was typed stays in the form");
+  assert.equal((await cfgRow()).model, "vendor/model-a");
+  res = await req("POST", "/admin/bots/Testbot/settings", { cookie: johnCookie, form: await form({ model: "vendor/m:online" }) });
+  assert.match(res.text, /bills outside the subscription/);
+  res = await req("POST", "/admin/bots/Testbot/settings", {
+    cookie: johnCookie,
+    form: await form({ lurk: "0.3", persona: "You are Testbot. <script>alert(1)</script>", window: "07:00-23:00" }),
+  });
+  assert.equal(res.status, 303, res.text.slice(0, 300));
+  assert.match(res.location ?? "", /saved=settings/);
+  let cfg = await cfgRow();
+  assert.equal(Math.round(cfg.lurk_bias * 10), 3);
+  assert.equal(cfg.window_start, "07:00:00");
+  assert.equal((await one("SELECT next_wake_at FROM bots.state WHERE user_id = $1", [testbotId])).next_wake_at, null, "a new window reschedules");
+  let entry = await one("SELECT * FROM bots.config_log WHERE user_id = $1 ORDER BY id DESC LIMIT 1", [testbotId]);
+  assert.equal(entry.changed_by, "John");
+  assert.deepEqual(Object.keys(entry.changes).sort(), ["lurk_bias", "persona_prompt", "window_end", "window_start"]);
+  assert.equal(entry.changes.persona_prompt.from, "You are Testbot, a plain test account.");
+  res = await req("GET", "/admin/bots/Testbot?saved=settings", { cookie: johnCookie });
+  assert.match(res.text, /Settings saved\./);
+  assert.match(res.text, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/, "escaped");
+  assert.doesNotMatch(res.text, /<script>/);
+  res = await req("POST", "/admin/bots/Testbot/settings", { cookie: johnCookie, form: await form({}) });
+  assert.match(res.location ?? "", /saved=unchanged/, "saving the same settings logs nothing");
+  assert.equal((await one("SELECT COUNT(*)::int AS n FROM bots.config_log WHERE id > $1", [entry.id])).n, 0);
+
+  res = await req("GET", "/admin/bots/Testbot/changes", { cookie: johnCookie });
+  assert.equal(res.status, 200);
+  assert.match(res.text, /persona_prompt/);
+  noInlineStyles(res.text);
+  res = await req("POST", `/admin/bots/Testbot/changes/${entry.id}/undo`, { cookie: johnCookie, form: {} });
+  assert.equal(res.status, 303);
+  cfg = await cfgRow();
+  assert.equal(cfg.lurk_bias, 0, "undone");
+  assert.equal(cfg.persona_prompt, "You are Testbot, a plain test account.");
+  assert.equal(cfg.window_start, "00:00:00");
+  assert.match(cli(["show", "Testbot"]).out, /Testbot: active/, "the CLI reads what the admin pages wrote");
+
+  // Controls.
+  res = await req("POST", "/admin/bots/Testbot/control", { cookie: johnCookie, form: { action: "pause" } });
+  assert.equal(res.status, 303);
+  assert.equal((await cfgRow()).active, false);
+  entry = await one("SELECT * FROM bots.config_log WHERE user_id = $1 ORDER BY id DESC LIMIT 1", [testbotId]);
+  assert.deepEqual(entry.changes, { active: { from: true, to: false } }, "pausing is logged");
+  res = await req("POST", "/admin/bots/Testbot/control", { cookie: johnCookie, form: { action: "wake" } });
+  assert.equal(res.status, 400);
+  assert.match(res.text, /Testbot is paused: resume it first/);
+  res = await req("POST", "/admin/bots/Testbot/control", { cookie: johnCookie, form: { action: "explode" } });
+  assert.equal(res.status, 400);
+  await req("POST", "/admin/bots/Testbot/control", { cookie: johnCookie, form: { action: "resume" } });
+  await req("POST", "/admin/bots/Testbot/control", { cookie: johnCookie, form: { action: "wake" } });
+  await req("POST", "/admin/bots/Testbot/control", { cookie: johnCookie, form: { action: "compact" } });
+  const stRow = await one("SELECT * FROM bots.state WHERE user_id = $1", [testbotId]);
+  assert.equal((await cfgRow()).active, true);
+  assert.equal(stRow.early_wake_trigger, "manual");
+  assert.notEqual(stRow.compact_requested_at, null);
+  await pool.query("UPDATE bots.state SET early_wake_at = NULL, early_wake_trigger = NULL, compact_requested_at = NULL WHERE user_id = $1", [testbotId]);
+
+  // Standing notes: edit, and restore an old version.
+  res = await req("POST", "/admin/bots/Testbot/standing", { cookie: johnCookie, form: { body: "s".repeat(6001) } });
+  assert.equal(res.status, 400);
+  assert.match(res.text, /6001 characters; the limit is 6000/);
+  res = await req("POST", "/admin/bots/Testbot/standing", { cookie: johnCookie, form: { body: "Dan likes bridges.\r\nJohn likes tolls." } });
+  assert.equal(res.status, 303);
+  st = await standing(testbotId);
+  assert.deepEqual([st.body, st.source, st.created_by], ["Dan likes bridges.\nJohn likes tolls.", "admin", "John"]);
+  const first = await one("SELECT * FROM bots.standing_versions WHERE user_id = $1 ORDER BY id LIMIT 1", [testbotId]);
+  res = await req("GET", "/admin/bots/Testbot/standing", { cookie: johnCookie });
+  assert.equal(res.status, 200);
+  assert.match(res.text, /Restore this version/);
+  noInlineStyles(res.text);
+  res = await req("POST", `/admin/bots/Testbot/standing/${first.id}/restore`, { cookie: johnCookie, form: {} });
+  assert.equal(res.status, 303);
+  st = await standing(testbotId);
+  assert.deepEqual([st.body, st.source], [first.body, "rollback"]);
+  const ashVersion = await writeStanding(pool, ashId, "Ash's own.", "admin", "John");
+  assert.equal((await req("POST", `/admin/bots/Testbot/standing/${ashVersion}/restore`, { cookie: johnCookie, form: {} })).status, 404, "another bot's version");
+
+  // Notes.
+  res = await req("GET", "/admin/bots/Testbot/notes?about=dan", { cookie: johnCookie });
+  assert.equal(res.status, 200);
+  assert.match(res.text, /Dan thinks tunnels are overrated/);
+  assert.doesNotMatch(res.text, /Third note/);
+  noInlineStyles(res.text);
+  const note = await one("INSERT INTO bots.notes (user_id, body) VALUES ($1, 'Archive me.') RETURNING id", [testbotId]);
+  res = await req("GET", "/admin/bots/Testbot/notes?folded=current", { cookie: johnCookie });
+  assert.match(res.text, /Archive me\./);
+  assert.doesNotMatch(res.text, /Third note/, "folded ones filtered out");
+  res = await req("POST", `/admin/bots/Testbot/notes/${note.id}/archive`, { cookie: johnCookie, form: {} });
+  assert.equal(res.status, 303);
+  assert.notEqual((await one("SELECT archived_at FROM bots.notes WHERE id = $1", [note.id])).archived_at, null);
+  const ashNote = (await one("SELECT id FROM bots.notes WHERE user_id = $1", [ashId])).id;
+  assert.equal((await req("POST", `/admin/bots/Testbot/notes/${ashNote}/archive`, { cookie: johnCookie, form: {} })).status, 404);
+
+  // Runs and transcripts.
+  const wakeRun = await one("SELECT id FROM bots.runs WHERE user_id = $1 AND kind = 'wake' AND transcript IS NOT NULL ORDER BY id DESC LIMIT 1", [testbotId]);
+  res = await req("GET", `/admin/bots/Testbot/runs/${wakeRun.id}`, { cookie: johnCookie });
+  assert.equal(res.status, 200);
+  assert.match(res.text, /Transcript/);
+  assert.match(res.text, /→ read_thread\(/);
+  noInlineStyles(res.text);
+  const ashRun = (await lastRun(ashId)).id;
+  assert.equal((await req("GET", `/admin/bots/Testbot/runs/${ashRun}`, { cookie: johnCookie })).status, 404, "another bot's run");
+  res = await req("GET", "/admin/bots/Testbot/runs", { cookie: johnCookie });
+  assert.equal(res.status, 200);
+  assert.match(res.text, /compaction/);
+
+  // Cross-site posts are refused as everywhere else.
+  res = await req("POST", "/admin/bots/Testbot/control", { cookie: johnCookie, form: { action: "pause" }, origin: "https://evil.example" });
+  assert.equal(res.status, 403);
+  assert.equal((await cfgRow()).active, true);
 }
 
 run("phase6", pool, main);

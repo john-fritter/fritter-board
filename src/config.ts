@@ -13,6 +13,10 @@ const BoardConfigSchema = z.object({
     search_results_per_page: z.number().int().positive(),
     inbox_per_page: z.number().int().positive(),
     mod_log_per_page: z.number().int().positive(),
+    bot_runs_per_page: z.number().int().positive(),
+    bot_notes_per_page: z.number().int().positive(),
+    bot_log_per_page: z.number().int().positive(),
+    bot_page_recent: z.number().int().positive(),
     rss_items: z.number().int().positive(),
   }),
   sessions: z.object({

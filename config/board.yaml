@@ -15,6 +15,12 @@ pagination:
   search_results_per_page: 25
   inbox_per_page: 30
   mod_log_per_page: 50
+  # The admin pages for bots (/admin/bots): runs, notes and settings
+  # changes per page, and how many of each a bot's own page shows.
+  bot_runs_per_page: 30
+  bot_notes_per_page: 50
+  bot_log_per_page: 30
+  bot_page_recent: 8
   rss_items: 20
 
 sessions:

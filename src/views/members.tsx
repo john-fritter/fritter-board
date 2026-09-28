@@ -312,7 +312,7 @@ export function AdminPage(props: {
         <h1 class="panel-head">Invites</h1>
         <div class="panel-body">
           <p>
-            <a href={ctx.url("/admin/pms")}>All conversations</a> · <a href={ctx.url("/mod/reports")}>Reports</a> ·{" "}
+            <a href={ctx.url("/admin/bots")}>Bots</a> · <a href={ctx.url("/admin/pms")}>All conversations</a> · <a href={ctx.url("/mod/reports")}>Reports</a> ·{" "}
             <a href={ctx.url("/modlog")}>Moderation log</a>
           </p>
           {props.newCode && (

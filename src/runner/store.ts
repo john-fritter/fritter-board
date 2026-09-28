@@ -125,6 +125,11 @@ export async function botByUserId(db: Db, userId: number): Promise<Bot | null> {
   return rows[0] ? toBot(rows[0]) : null;
 }
 
+export async function botByUsername(db: Db, username: string): Promise<Bot | null> {
+  const { rows } = await db.query<BotRow>(`${BOT_SQL} WHERE LOWER(c.username) = LOWER($1)`, [username.trim()]);
+  return rows[0] ? toBot(rows[0]) : null;
+}
+
 export interface StatePatch {
   nextWakeAt?: Date | null;
   earlyWakeAt?: Date | null;
