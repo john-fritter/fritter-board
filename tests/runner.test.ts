@@ -98,6 +98,10 @@ async function main() {
   });
   assert.deepEqual(sent!.body["response_format"], { type: "json_schema", json_schema: { name: "decision", strict: true, schema: { type: "object" } } });
   assert.equal(sent!.body["tools"], undefined, "no tools unless given");
+  assert.equal(sent!.body["reasoning_effort"], "none", "none is sent: it turns reasoning off");
+  await model.complete({ model: "m", messages: [], reasoningEffort: "default" });
+  assert.equal(sent!.body["reasoning_effort"], undefined, "default sends no reasoning_effort");
+  assert.equal(sent!.body["reasoning"], undefined, "nor the reasoning object");
   assert.deepEqual(parseUsage({ prompt_tokens: 5, reasoning_tokens: 3, cache_read_input_tokens: 2 }), {
     promptTokens: 5,
     completionTokens: 0,
@@ -126,6 +130,8 @@ async function main() {
   assert.ok(!err.isDailyCap && err.isTransient);
   assert.ok((await failWith(503, "upstream down")).isTransient);
   assert.ok(!(await failWith(400, { error: { message: "bad model", code: "invalid_model" } })).isTransient, "a bad request isn't");
+  err = await failWith(400, { error: { message: "This model does not support reasoning_effort", code: "unsupported_reasoning_effort" } });
+  assert.ok(err.isUnsupportedEffort && !err.isTransient);
   const offline = new NanoGptModel("k", { fetch: (async () => { throw new TypeError("fetch failed"); }) as typeof fetch });
   await assert.rejects(offline.complete({ model: "m", messages: [], reasoningEffort: "low" }), (e: unknown) => e instanceof ModelError && e.isTransient);
 
@@ -196,6 +202,28 @@ async function main() {
   assert.equal(p.tools, "no tool call");
   assert.equal(p.reasoning, "no reasoning tokens reported");
   assert.equal(p.suggested, "single_shot");
+  // A model that refuses reasoning_effort is probed without it.
+  const good = scripted(true, true, [100, 900]);
+  const efforts: string[] = [];
+  p = await probeModel(
+    {
+      async complete(r: ChatRequest) {
+        efforts.push(r.reasoningEffort);
+        if (r.reasoningEffort !== "default") {
+          throw new ModelError("NanoGPT 400: unsupported", 400, "unsupported_reasoning_effort", null);
+        }
+        return good.complete(r);
+      },
+    },
+    "no-effort"
+  );
+  assert.match(p.reachable, /^yes, .*\(refuses reasoning_effort\)$/);
+  assert.equal(p.tools, "yes");
+  assert.equal(p.reasoning, "refuses reasoning_effort");
+  assert.equal(p.json, "yes");
+  assert.equal(p.suggested, "tools, --effort default");
+  assert.deepEqual(efforts.slice(0, 2), ["low", "default"], "one refusal, then default throughout");
+  assert.ok(efforts.slice(1).every((e) => e === "default"));
   p = await probeModel({ complete: async () => { throw new ModelError("nope", 404, "model_not_found", null); } }, "gone");
   assert.equal(p.reachable, "no: error 404 model_not_found");
   assert.equal(p.suggested, "don't use");

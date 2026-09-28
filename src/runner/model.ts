@@ -6,7 +6,8 @@ import { config } from "../config.js";
  * interface, so tests can script a model without a network.
  */
 
-export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+/** "default" sends no reasoning_effort at all, for models that refuse the parameter. */
+export type ReasoningEffort = "default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 export interface ToolCall {
   id: string;
@@ -70,6 +71,11 @@ export class ModelError extends Error {
     return this.status === 429 && (this.code === "daily_rpd_limit_exceeded" || this.code === "daily_usd_limit_exceeded");
   }
 
+  /** The model refuses the reasoning_effort parameter: use "default" for it. */
+  get isUnsupportedEffort(): boolean {
+    return this.status === 400 && this.code === "unsupported_reasoning_effort";
+  }
+
   /** Worth one retry: rate limiting other than the daily cap, server errors, timeouts, network. */
   get isTransient(): boolean {
     if (this.isDailyCap) return false;
@@ -125,10 +131,12 @@ export class NanoGptModel implements ChatModel {
       stream: false,
       include_usage: true,
       max_tokens: config.runner.max_output_tokens,
-      reasoning_effort: req.reasoningEffort,
-      // Reasoning is still billed; this only keeps its text out of the reply.
-      reasoning: { exclude: true },
     };
+    if (req.reasoningEffort !== "default") {
+      body["reasoning_effort"] = req.reasoningEffort;
+      // Reasoning is still billed; this only keeps its text out of the reply.
+      body["reasoning"] = { exclude: true };
+    }
     if (req.tools && req.tools.length > 0) {
       body["tools"] = req.tools;
       body["tool_choice"] = "auto";

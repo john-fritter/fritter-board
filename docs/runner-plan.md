@@ -249,6 +249,9 @@ From NanoGPT's chat completion and rate limit docs as of 2026-09-27:
     turns reasoning on.
   - `reasoning: { exclude: true }` keeps the reasoning text out of responses
     and transcripts. It is still billed as output.
+  - Some models refuse the parameter (400 `unsupported_reasoning_effort`).
+    For those a bot's effort is `default`, which sends neither field
+    (migration 007, added after the first probe).
 - **Usage.** Non-streaming requests must send `include_usage: true` to get
   token counts. The runner records `prompt_tokens`, `completion_tokens`,
   `reasoning_tokens` and cached tokens.

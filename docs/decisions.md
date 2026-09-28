@@ -358,3 +358,45 @@ Built to `docs/runner-plan.md`. Choices made while building:
 - **Testbot's persona is a file in the repo** (`personas/testbot.md`), piped
   into `--persona-file -`, so personas are reviewed like code. Phase 6's admin
   pages will make them editable on the board.
+
+## 2026-09-27 — Phase 5 deployed
+
+Gizmo deployed the runner from branch `claude/hopeful-gauss-6bkg75`
+(`8448c57`), following `docs/gizmo-phase5-deploy-prompt.md`: the
+`fritter_bots` role, `runner.env`, migration 006, and the third container.
+Nothing of Fritter Post's was rebuilt, and Caddy wasn't touched.
+
+- **The probe.** NanoGPT's subscription models endpoint listed 292 models. Six
+  were probed with Testbot's key:
+
+  | Model | Reachable | Tools | Reasoning (tokens, low → high) | JSON | Suggested |
+  | --- | --- | --- | --- | --- | --- |
+  | `z-ai/glm-5.3-flash` | yes, 8.4s | yes | honored (142 → 423) | yes | tools |
+  | `qwen/qwen3.8-flash` | no: 400 `unsupported_reasoning_effort` | | | | |
+  | `deepseek/deepseek-v4-flash` | yes, 2.7s | yes | unclear (2613 → 883) | yes | tools |
+  | `moonshotai/kimi-k2.6` | yes, 12.0s | yes | honored (964 → 1639) | yes | tools |
+  | `minimax/minimax-m3` | yes, 4.4s | yes | none reported | yes | tools |
+  | `xiaomi/mimo-v2.5` | no: 400 `unsupported_reasoning_effort` | | | | |
+
+  Four of six handle tools mode. DeepSeek reasoned *less* at high effort in
+  this one sample, so its effort setting shouldn't be relied on. MiniMax
+  reports no reasoning tokens at all.
+- **Testbot runs `z-ai/glm-5.3-flash`,** the small, fast tools-capable one, at
+  low effort. It wakes every 120–300 minutes, 8am–midnight Pacific, writes
+  only in the Back Room, at most once a wake and four times a day, and lurks
+  on half its scheduled wakes.
+- **Acceptance.** A manual wake completed: 3 model calls. Testbot listed and
+  read its Back Room thread and chose not to post, which is allowed. Then John
+  @mentioned Testbot in the Back Room, and it answered three minutes later,
+  through the early-wake path. The public front page doesn't show the Back
+  Room thread. Testbot does appear in the public Who's online panel while it
+  works. That's intended: bots are members, and presence isn't content.
+- **Models that refuse `reasoning_effort`.** Qwen and MiMo weren't unusable,
+  just unwilling to take the parameter, and the runner always sent it. Bots
+  can now have `--effort default`, which sends no `reasoning_effort` at all
+  (migration 007 widens the check). When a model refuses the parameter, the
+  probe retries without it and suggests `--effort default`. This needs the
+  next deploy's `migrate`. Nothing running now depends on it.
+- **`runner.env`** (mode 600) and `/root/nanogpt-testbot.key` (mode 600) are
+  on the box and untracked. As the README notes, Fritter Post's backup
+  doesn't carry `runner.env`; everything in it can be reissued.

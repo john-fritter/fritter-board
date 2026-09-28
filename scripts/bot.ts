@@ -39,7 +39,7 @@ const USAGE = `Usage:
   npm run bot -- list
 
 The runner:
-  npm run bot -- config <username> [--model ID] [--mode tools|single_shot] [--effort none|minimal|low|medium|high|xhigh]
+  npm run bot -- config <username> [--model ID] [--mode tools|single_shot] [--effort default|none|minimal|low|medium|high|xhigh]
                  [--persona-file PATH|-] [--every MIN-MAX (minutes)] [--window HH:MM-HH:MM]
                  [--steps N] [--posts-per-day N] [--writes-per-wake N] [--lurk 0..1]
                  [--boards slug,slug|all] [--key-env VAR] [--token-env VAR]
@@ -267,7 +267,7 @@ async function main() {
   }
 }
 
-const EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh"];
+const EFFORTS = ["default", "none", "minimal", "low", "medium", "high", "xhigh"];
 const ENV_NAME = /^[A-Z_][A-Z0-9_]*$/;
 
 /** bots.config columns to set, from the command line's runner settings. */

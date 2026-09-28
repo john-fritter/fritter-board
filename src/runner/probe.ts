@@ -40,13 +40,26 @@ function why(err: unknown): string {
 
 export async function probeModel(chat: ChatModel, model: string): Promise<ProbeResult> {
   const r: ProbeResult = { model, reachable: "no", tools: "-", reasoning: "-", json: "-", suggested: "don't use" };
-  const ask = (messages: ChatMessage[], effort: ReasoningEffort = "low", extra = {}) =>
-    chat.complete({ model, messages, reasoningEffort: effort, ...extra });
+  // The effort the rest of the checks use: "low", or "default" (no
+  // reasoning_effort sent) for a model that refuses the parameter.
+  let effort: ReasoningEffort = "low";
+  const ask = (messages: ChatMessage[], e: ReasoningEffort = effort, extra = {}) =>
+    chat.complete({ model, messages, reasoningEffort: e, ...extra });
+  const ready: ChatMessage[] = [{ role: "user", content: "Reply with the single word: ready." }];
 
-  const started = Date.now();
+  let started = Date.now();
   try {
-    const res = await ask([{ role: "user", content: "Reply with the single word: ready." }]);
+    let res;
+    try {
+      res = await ask(ready);
+    } catch (err) {
+      if (!(err instanceof ModelError && err.isUnsupportedEffort)) throw err;
+      effort = "default";
+      started = Date.now();
+      res = await ask(ready);
+    }
     r.reachable = `yes, ${((Date.now() - started) / 1000).toFixed(1)}s`;
+    if (effort === "default") r.reachable += " (refuses reasoning_effort)";
     if (!res.content?.trim()) r.reachable += " (empty reply)";
   } catch (err) {
     r.reachable = `no: ${why(err)}`;
@@ -58,7 +71,7 @@ export async function probeModel(chat: ChatModel, model: string): Promise<ProbeR
     const messages: ChatMessage[] = [
       { role: "user", content: "What's the weather in Portland, Oregon right now? Use the tool, then tell me in one sentence." },
     ];
-    const first = await ask(messages, "low", { tools: [WEATHER] });
+    const first = await ask(messages, effort, { tools: [WEATHER] });
     const call = first.toolCalls[0];
     if (!call) {
       r.tools = "no tool call";
@@ -75,7 +88,7 @@ export async function probeModel(chat: ChatModel, model: string): Promise<ProbeR
           tool_call_id: call.id,
           content: JSON.stringify({ city: args.city, conditions: "fog", temperature_f: 58 }),
         });
-        const second = await ask(messages, "low", { tools: [WEATHER] });
+        const second = await ask(messages, effort, { tools: [WEATHER] });
         const text = second.content ?? "";
         toolsOk = second.toolCalls.length === 0 && /58|fog/i.test(text);
         r.tools = toolsOk ? "yes" : second.toolCalls.length ? "loops on the tool" : "ignored the result";
@@ -85,24 +98,28 @@ export async function probeModel(chat: ChatModel, model: string): Promise<ProbeR
     r.tools = `failed: ${why(err)}`;
   }
 
-  try {
-    const low = await ask([{ role: "user", content: PUZZLE }], "low");
-    const high = await ask([{ role: "user", content: PUZZLE }], "high");
-    const a = low.usage.reasoningTokens;
-    const b = high.usage.reasoningTokens;
-    r.reasoning =
-      a === 0 && b === 0
-        ? "no reasoning tokens reported"
-        : b > a * 1.5
-          ? `honored (low ${a}, high ${b})`
-          : `unclear (low ${a}, high ${b})`;
-  } catch (err) {
-    r.reasoning = `failed: ${why(err)}`;
+  if (effort === "default") {
+    r.reasoning = "refuses reasoning_effort";
+  } else {
+    try {
+      const low = await ask([{ role: "user", content: PUZZLE }], "low");
+      const high = await ask([{ role: "user", content: PUZZLE }], "high");
+      const a = low.usage.reasoningTokens;
+      const b = high.usage.reasoningTokens;
+      r.reasoning =
+        a === 0 && b === 0
+          ? "no reasoning tokens reported"
+          : b > a * 1.5
+            ? `honored (low ${a}, high ${b})`
+            : `unclear (low ${a}, high ${b})`;
+    } catch (err) {
+      r.reasoning = `failed: ${why(err)}`;
+    }
   }
 
   let jsonOk = false;
   try {
-    const res = await ask([{ role: "user", content: "What is 17 + 25? Answer as JSON." }], "low", {
+    const res = await ask([{ role: "user", content: "What is 17 + 25? Answer as JSON." }], effort, {
       jsonSchema: {
         name: "sum",
         schema: {
@@ -121,6 +138,7 @@ export async function probeModel(chat: ChatModel, model: string): Promise<ProbeR
   }
 
   r.suggested = toolsOk ? "tools" : jsonOk ? "single_shot" : "don't use";
+  if (effort === "default" && (toolsOk || jsonOk)) r.suggested += ", --effort default";
   return r;
 }
 
