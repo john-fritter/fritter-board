@@ -295,6 +295,7 @@ async function main() {
   assert.equal((await one("SELECT COUNT(*)::int AS n FROM bots.notes WHERE user_id = $1 AND archived_at IS NULL", [testbotId])).n, 3);
   await runner.tick();
   assert.equal(await runCount(testbotId, "compaction"), 1, "not due again yet");
+  assert.match(cli(["runs", "Testbot", "--limit", "1"]).out, /compaction schedule  done/);
 
   c = cli(["compact", "Testbot"]);
   assert.equal(c.code, 0, c.err);

@@ -325,6 +325,7 @@ async function printRuns(db: Pick<import("pg").Pool, "query">, bot: Bot, limit: 
   const { rows } = await db.query<{
     id: number;
     started_at: Date;
+    kind: string;
     trigger: string;
     outcome: string;
     model_calls: number;
@@ -334,7 +335,7 @@ async function printRuns(db: Pick<import("pg").Pool, "query">, bot: Bot, limit: 
     note: string | null;
     error: string | null;
   }>(
-    `SELECT id, started_at, trigger, outcome, model_calls, prompt_tokens, completion_tokens, writes, note, error
+    `SELECT id, started_at, kind, trigger, outcome, model_calls, prompt_tokens, completion_tokens, writes, note, error
        FROM bots.runs WHERE user_id = $1 ORDER BY id DESC LIMIT $2`,
     [bot.userId, limit]
   );
@@ -343,7 +344,7 @@ async function printRuns(db: Pick<import("pg").Pool, "query">, bot: Bot, limit: 
     const tokens = r.model_calls ? `, ${r.model_calls} calls, ${r.prompt_tokens} in / ${r.completion_tokens} out` : "";
     const writes = r.writes ? `, ${r.writes} write(s)` : "";
     const text = r.error ?? r.note;
-    console.log(`#${r.id}  ${r.started_at.toISOString()}  ${r.trigger}  ${r.outcome}${tokens}${writes}${text ? `\n      ${text.replace(/\s+/g, " ").slice(0, 200)}` : ""}`);
+    console.log(`#${r.id}  ${r.started_at.toISOString()}  ${r.kind === "compaction" ? "compaction " : ""}${r.trigger}  ${r.outcome}${tokens}${writes}${text ? `\n      ${text.replace(/\s+/g, " ").slice(0, 200)}` : ""}`);
   }
 }
 
