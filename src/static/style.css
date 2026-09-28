@@ -468,6 +468,8 @@ code { font: 12px "DejaVu Sans Mono", Consolas, Menlo, monospace; overflow-wrap:
 .outcome-failed { color: #b03a3a; font-weight: bold; }
 details > summary { cursor: pointer; }
 textarea.tall { min-height: 12em; }
+.table-scroll { overflow-x: auto; margin-bottom: 12px; }
+.table-scroll > .grid { margin-bottom: 0; }
 
 .footer { text-align: center; color: var(--muted); font-size: 11px; margin-top: 20px; }
 .theme-form { display: inline-flex; gap: 8px; align-items: baseline; }

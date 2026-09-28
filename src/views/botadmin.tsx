@@ -50,39 +50,41 @@ function RunSummary(props: { run: RunRow }) {
 function RunsTable(props: { ctx: PageCtx; bot: Bot; runs: RunRow[] }) {
   const { ctx, bot } = props;
   return (
-    <table class="grid compact">
-      <thead>
-        <tr class="cat-row">
-          <th scope="col">Run</th>
-          <th scope="col">Started</th>
-          <th scope="col">What happened</th>
-          <th scope="col">Note</th>
-        </tr>
-      </thead>
-      <tbody>
-        {props.runs.length === 0 && (
-          <tr>
-            <td colspan={4} class="empty">
-              No runs yet.
-            </td>
+    <div class="table-scroll">
+      <table class="grid compact">
+        <thead>
+          <tr class="cat-row">
+            <th scope="col">Run</th>
+            <th scope="col">Started</th>
+            <th scope="col">What happened</th>
+            <th scope="col">Note</th>
           </tr>
-        )}
-        {props.runs.map((r) => (
-          <tr>
-            <td>
-              <a href={ctx.url(`${base(bot)}/runs/${r.id}`)}>#{r.id}</a>
-            </td>
-            <td class="nowrap">
-              <Time d={r.startedAt} />
-            </td>
-            <td>
-              <RunSummary run={r} />
-            </td>
-            <td>{r.error ?? r.note}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {props.runs.length === 0 && (
+            <tr>
+              <td colspan={4} class="empty">
+                No runs yet.
+              </td>
+            </tr>
+          )}
+          {props.runs.map((r) => (
+            <tr>
+              <td>
+                <a href={ctx.url(`${base(bot)}/runs/${r.id}`)}>#{r.id}</a>
+              </td>
+              <td class="nowrap">
+                <Time d={r.startedAt} />
+              </td>
+              <td>
+                <RunSummary run={r} />
+              </td>
+              <td>{r.error ?? r.note}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -123,58 +125,64 @@ export function BotsPage(props: { ctx: PageCtx; bots: BotRow[]; unconfigured: st
       <section class="panel">
         <h1 class="panel-head">Bots</h1>
         <div class="panel-body">
-          <table class="grid compact">
-            <thead>
-              <tr class="cat-row">
-                <th scope="col">Bot</th>
-                <th scope="col">Status</th>
-                <th scope="col">Model</th>
-                <th scope="col">Next wake</th>
-                <th scope="col">Last run</th>
-                <th scope="col">Writes, 24h</th>
-                <th scope="col">Notes</th>
-              </tr>
-            </thead>
-            <tbody>
-              {props.bots.length === 0 && (
-                <tr>
-                  <td colspan={7} class="empty">
-                    No bot has runner settings yet.
-                  </td>
+          <div class="table-scroll">
+            <table class="grid compact">
+              <thead>
+                <tr class="cat-row">
+                  <th scope="col">Bot</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Model</th>
+                  <th scope="col">Next wake</th>
+                  <th scope="col">Last run</th>
+                  <th scope="col" class="col-num">
+                    Writes, 24h
+                  </th>
+                  <th scope="col" class="col-num">
+                    Notes
+                  </th>
                 </tr>
-              )}
-              {props.bots.map(({ bot, lastRun, writesToday, notes }) => (
-                <tr>
-                  <td>
-                    <a href={ctx.url(base(bot))}>{bot.username}</a>
-                  </td>
-                  <td>
-                    <Status bot={bot} />
-                  </td>
-                  <td>
-                    <code>{bot.model}</code> ({bot.mode})
-                  </td>
-                  <td class="nowrap">{bot.active && bot.nextWakeAt ? <Time d={bot.nextWakeAt} /> : "-"}</td>
-                  <td>
-                    {lastRun ? (
-                      <>
-                        <a href={ctx.url(`${base(bot)}/runs/${lastRun.id}`)}>
-                          <Time d={lastRun.startedAt} />
-                        </a>{" "}
-                        <RunSummary run={lastRun} />
-                      </>
-                    ) : (
-                      "never"
-                    )}
-                  </td>
-                  <td class="col-num">
-                    {writesToday} / {bot.postsPerDay}
-                  </td>
-                  <td class="col-num">{notes}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {props.bots.length === 0 && (
+                  <tr>
+                    <td colspan={7} class="empty">
+                      No bot has runner settings yet.
+                    </td>
+                  </tr>
+                )}
+                {props.bots.map(({ bot, lastRun, writesToday, notes }) => (
+                  <tr>
+                    <td>
+                      <a href={ctx.url(base(bot))}>{bot.username}</a>
+                    </td>
+                    <td>
+                      <Status bot={bot} />
+                    </td>
+                    <td>
+                      <code>{bot.model}</code> ({bot.mode})
+                    </td>
+                    <td class="nowrap">{bot.active && bot.nextWakeAt ? <Time d={bot.nextWakeAt} /> : "-"}</td>
+                    <td>
+                      {lastRun ? (
+                        <>
+                          <a href={ctx.url(`${base(bot)}/runs/${lastRun.id}`)}>
+                            <Time d={lastRun.startedAt} />
+                          </a>{" "}
+                          <RunSummary run={lastRun} />
+                        </>
+                      ) : (
+                        "never"
+                      )}
+                    </td>
+                    <td class="col-num">
+                      {writesToday} / {bot.postsPerDay}
+                    </td>
+                    <td class="col-num">{notes}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           {props.unconfigured.length > 0 && (
             <p class="hint">
               Bot accounts without runner settings: {props.unconfigured.join(", ")}. Give one settings with{" "}
@@ -524,31 +532,33 @@ export function RunPage(props: { ctx: PageCtx; bot: Bot; run: RunDetail }) {
           {run.actions.length === 0 ? (
             <p class="empty">None.</p>
           ) : (
-            <table class="grid compact">
-              <thead>
-                <tr class="cat-row">
-                  <th scope="col">Tool</th>
-                  <th scope="col">Arguments</th>
-                  <th scope="col">Result</th>
-                </tr>
-              </thead>
-              <tbody>
-                {run.actions.map((a) => (
-                  <tr>
-                    <td class={a.ok ? undefined : "outcome-failed"}>
-                      {a.tool}
-                      {!a.ok && " (refused)"}
-                    </td>
-                    <td>
-                      <code>{a.args}</code>
-                    </td>
-                    <td>
-                      <code>{a.result}</code>
-                    </td>
+            <div class="table-scroll">
+              <table class="grid compact">
+                <thead>
+                  <tr class="cat-row">
+                    <th scope="col">Tool</th>
+                    <th scope="col">Arguments</th>
+                    <th scope="col">Result</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {run.actions.map((a) => (
+                    <tr>
+                      <td class={a.ok ? undefined : "outcome-failed"}>
+                        {a.tool}
+                        {!a.ok && " (refused)"}
+                      </td>
+                      <td>
+                        <code>{a.args}</code>
+                      </td>
+                      <td>
+                        <code>{a.result}</code>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       </section>
@@ -705,53 +715,55 @@ export function ChangesPage(props: { ctx: PageCtx; bot: Bot; entries: LogEntry[]
         <h1 class="panel-head">Changes to {bot.username}'s settings</h1>
         <div class="panel-body">
           <ErrorNote message={props.error} />
-          <table class="grid compact">
-            <thead>
-              <tr class="cat-row">
-                <th scope="col">When</th>
-                <th scope="col">By</th>
-                <th scope="col">Setting</th>
-                <th scope="col">From</th>
-                <th scope="col">To</th>
-                <th scope="col"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {props.entries.length === 0 && (
-                <tr>
-                  <td colspan={6} class="empty">
-                    No changes logged yet.
-                  </td>
+          <div class="table-scroll">
+            <table class="grid compact">
+              <thead>
+                <tr class="cat-row">
+                  <th scope="col">When</th>
+                  <th scope="col">By</th>
+                  <th scope="col">Setting</th>
+                  <th scope="col">From</th>
+                  <th scope="col">To</th>
+                  <th scope="col"></th>
                 </tr>
-              )}
-              {props.entries.map((e) =>
-                Object.entries(e.changes).map(([field, c], i) => (
+              </thead>
+              <tbody>
+                {props.entries.length === 0 && (
                   <tr>
-                    <td class="nowrap">{i === 0 && <Time d={e.createdAt} />}</td>
-                    <td>{i === 0 && e.changedBy}</td>
-                    <td>
-                      <code>{field}</code>
-                    </td>
-                    <td>
-                      <Value v={c.from} />
-                    </td>
-                    <td>
-                      <Value v={c.to} />
-                    </td>
-                    <td>
-                      {i === 0 && (
-                        <form method="post" action={ctx.url(`${base(bot)}/changes/${e.id}/undo`)} class="inline-form">
-                          <button type="submit" class="linkish">
-                            Undo
-                          </button>
-                        </form>
-                      )}
+                    <td colspan={6} class="empty">
+                      No changes logged yet.
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                )}
+                {props.entries.map((e) =>
+                  Object.entries(e.changes).map(([field, c], i) => (
+                    <tr>
+                      <td class="nowrap">{i === 0 && <Time d={e.createdAt} />}</td>
+                      <td>{i === 0 && e.changedBy}</td>
+                      <td>
+                        <code>{field}</code>
+                      </td>
+                      <td>
+                        <Value v={c.from} />
+                      </td>
+                      <td>
+                        <Value v={c.to} />
+                      </td>
+                      <td>
+                        {i === 0 && (
+                          <form method="post" action={ctx.url(`${base(bot)}/changes/${e.id}/undo`)} class="inline-form">
+                            <button type="submit" class="linkish">
+                              Undo
+                            </button>
+                          </form>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
           <p class="hint">Undo sets the settings in that change back to what they were before it, as a new change.</p>
           <div class="toolbar">
             <Pagination ctx={ctx} base={`${base(bot)}/changes`} page={props.page} />
