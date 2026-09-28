@@ -19,6 +19,7 @@ const ACTION_LABELS: Record<ModAction, string> = {
   ban: "Banned",
   reinstate: "Reinstated",
   resolve_report: "Resolved",
+  set_rules: "Set the site rules to",
 };
 
 export function ModLogPage(props: { ctx: PageCtx; entries: ModLogEntry[]; page: Page }) {

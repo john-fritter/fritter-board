@@ -10,9 +10,12 @@ import {
   listChanges,
   listNotes,
   listRuns,
+  listBriefs,
   listStanding,
   noteFilter,
+  restoreBrief,
   restoreStanding,
+  saveBrief,
   saveStanding,
   undoChange,
   updateSettings,
@@ -21,7 +24,7 @@ import {
 } from "../botadmin/bots.js";
 import { invalid } from "../forum/errors.js";
 import type { SettingsInput } from "../runner/settings.js";
-import { BotPage, BotsPage, ChangesPage, NotesPage, RunPage, RunsPage, StandingPage, type BotPageProps } from "../views/botadmin.js";
+import { BotPage, BotsPage, BriefsPage, ChangesPage, NotesPage, RunPage, RunsPage, StandingPage, type BotPageProps } from "../views/botadmin.js";
 import type { AppContext } from "../app.js";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { formError, parseId, readForm, render } from "./util.js";
@@ -38,6 +41,8 @@ const SAVED: Record<string, string> = {
   resume: "Resumed: its first wake comes within its interval.",
   wake: "It wakes at the runner's next tick.",
   compact: "Its notes are folded into its standing notes at the runner's next tick.",
+  moderate: "It moderates at the runner's next tick.",
+  brief: "Brief saved as a new version; bots get it from their next visit.",
 };
 
 const SETTINGS_FIELDS: (keyof SettingsInput)[] = [
@@ -54,6 +59,11 @@ const SETTINGS_FIELDS: (keyof SettingsInput)[] = [
   "boards",
   "keyEnv",
   "tokenEnv",
+  "callsPerDay",
+  "moderates",
+  "modKeyEnv",
+  "modEffort",
+  "modSteps",
 ];
 
 export function registerBotAdminRoutes(app: Hono<AppEnv>, s: Services): void {
@@ -88,6 +98,31 @@ export function registerBotAdminRoutes(app: Hono<AppEnv>, s: Services): void {
   });
 
   app.get("/admin/bots/:name", (c) => botPage(c, c.req.param("name")));
+
+  app.get("/admin/briefs", async (c) => {
+    const saved = c.req.query("saved");
+    return render(c, <BriefsPage ctx={c.get("page")} briefs={await listBriefs(ctx, c.get("viewer"))} saved={saved ? (SAVED[saved] ?? null) : null} />);
+  });
+
+  app.post("/admin/briefs/:name", async (c) => {
+    const name = c.req.param("name");
+    const body = (await readForm(c))("body");
+    try {
+      const saved = await saveBrief(ctx, c.get("viewer"), name, body);
+      return c.redirect(url(`/admin/briefs?saved=${saved ? "brief" : "unchanged"}#${name}`), 303);
+    } catch (err) {
+      const { message, status } = formError(err);
+      const briefs = await listBriefs(ctx, c.get("viewer"));
+      return render(c, <BriefsPage ctx={c.get("page")} briefs={briefs} error={{ name, message, text: body }} />, status);
+    }
+  });
+
+  app.post("/admin/briefs/:name/restore", async (c) => {
+    const name = c.req.param("name");
+    const version = (await readForm(c))("version");
+    await restoreBrief(ctx, c.get("viewer"), name, version ? parseId(version) : null);
+    return c.redirect(url(`/admin/briefs?saved=brief#${name}`), 303);
+  });
 
   app.post("/admin/bots/:name/settings", async (c) => {
     const name = c.req.param("name");

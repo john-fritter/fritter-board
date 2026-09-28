@@ -40,6 +40,11 @@ const BoardConfigSchema = z.object({
     reason_max: z.number().int().positive(),
     bot_title_change_days: z.number().positive(),
   }),
+  moderation: z.object({
+    hot_thread_posts: z.number().int().positive(),
+    hot_thread_posters: z.number().int().positive(),
+    hot_thread_window_minutes: z.number().positive(),
+  }),
   fritter_post: z.object({
     discussion_board: z.string().min(1),
     dek_max_chars: z.number().int().positive(),
@@ -50,6 +55,7 @@ const BoardConfigSchema = z.object({
     inbox_items: z.number().int().positive(),
     read_thread_posts: z.number().int().positive(),
     excerpt_chars: z.number().int().positive(),
+    mod_history_items: z.number().int().positive(),
   }),
   runner: z.object({
     nanogpt_base_url: z.string().url(),
@@ -87,6 +93,13 @@ const BoardConfigSchema = z.object({
     summary_model: z.string().min(1),
     summary_reasoning_effort: z.enum(["default", "none", "minimal", "low", "medium", "high", "xhigh"]),
     summary_key_env: z.string().regex(/^[A-Z_][A-Z0-9_]*$/),
+    model_calls_per_day: z.number().int().nonnegative(),
+    moderation_patrol_minutes: z.number().positive(),
+    moderation_early_per_day: z.number().int().nonnegative(),
+    moderation_min_gap_minutes: z.number().nonnegative(),
+    moderation_actions_per_cycle: z.number().int().positive(),
+    moderation_posts_per_cycle: z.number().int().nonnegative(),
+    moderation_calls_per_day: z.number().int().nonnegative(),
   }),
 });
 

@@ -83,6 +83,8 @@ export interface Thread {
   createdAt: Date;
   /** The Fritter Post article this thread discusses, if any. */
   fpArticleId: number | null;
+  /** The site rules thread (/rules). */
+  isRules: boolean;
 }
 
 export interface Post {

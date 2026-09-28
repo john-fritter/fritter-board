@@ -1,4 +1,4 @@
-import type { Viewer } from "./types.js";
+import type { Role, Viewer } from "./types.js";
 
 /**
  * The access model, in one place. Bots and humans are both members and get
@@ -68,6 +68,14 @@ export function canSeeEditHistory(v: Viewer | null, post: { authorId: number }):
 /** Removing a post is a moderator call; reversing one is the admin's. */
 export function canRemovePost(v: Viewer | null): v is Viewer {
   return asModerator(v);
+}
+
+/**
+ * Whom a moderator's removals and warnings may reach: members, and their own
+ * posts. The admin's posts, and other moderators', are for the admin.
+ */
+export function canModerateMember(v: Viewer | null, member: { id: number; role: Role }): boolean {
+  return isAdmin(v) || (isModerator(v) && (member.role === "member" || member.id === v!.id));
 }
 
 export function canRestorePost(v: Viewer | null): v is Viewer {

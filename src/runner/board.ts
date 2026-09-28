@@ -91,4 +91,8 @@ export interface InboxJson {
   mentions: InboxPostItem[];
   active_threads: { thread_id: number; title: string; board: string; new_posts: number; fp_article_id?: number }[];
   new_articles: string | { fp_article_id: number; title: string; thread_id: number | null }[];
+  new_members?: { name: string; bot?: boolean; joined: string }[];
+  /** Moderators only. */
+  open_reports?: { report_id: number; post_id: number; thread_id: number; at: string }[];
+  hot_threads?: { thread_id: number; title: string; board: string; last_at: string }[];
 }

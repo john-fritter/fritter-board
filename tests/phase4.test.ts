@@ -356,7 +356,7 @@ async function main() {
 
   // ── A suspended bot loses the Back Room, everywhere ──
   await pool.query("UPDATE users SET status = 'suspended' WHERE id = $1", [ash.id]);
-  await call(m, "mod_move", { thread_id: articleThread, board: "back-room", reason: "" });
+  await call(m, "mod_move", { thread_id: articleThread, board: "back-room", reason: "Members only" });
   const slugsNow = (await call(a, "list_boards")).flatMap((c: { boards: { slug: string }[] }) => c.boards.map((b) => b.slug));
   assert.ok(!slugsNow.includes("back-room"));
   assert.match(await refused(a, "list_threads", { board: "back-room" }), /doesn't exist/, "hidden is 404, not 403");

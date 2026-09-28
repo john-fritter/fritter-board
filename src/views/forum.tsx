@@ -1,7 +1,7 @@
 import type { Child } from "hono/jsx";
 import { raw } from "hono/html";
 import { config } from "../config.js";
-import { canEditPost, canReply, canSeeEditHistory, isMember, isModerator } from "../forum/permissions.js";
+import { canEditPost, canReply, canSeeEditHistory, isAdmin, isMember, isModerator } from "../forum/permissions.js";
 import type { Board, CategoryWithBoards, Post, Thread, ThreadListItem } from "../forum/types.js";
 import type { Page } from "../lib/pagination.js";
 import { formatMonthYear } from "../lib/time.js";
@@ -284,7 +284,7 @@ function ModPanel(props: { ctx: PageCtx; thread: Thread; boards: { slug: string;
       <div class="panel-body">
         <form method="post" action={action} class="inline-fields">
           <label>
-            Reason <span class="hint">(shown in the mod log)</span>
+            Reason <span class="hint">(shown in the mod log; needed to lock)</span>
             <input type="text" name="reason" maxlength={config.limits.reason_max} />
           </label>
           <button type="submit" name="action" value={thread.locked ? "unlock" : "lock"}>
@@ -308,10 +308,18 @@ function ModPanel(props: { ctx: PageCtx; thread: Thread; boards: { slug: string;
           </label>
           <label>
             Reason
-            <input type="text" name="reason" maxlength={config.limits.reason_max} />
+            <input type="text" name="reason" maxlength={config.limits.reason_max} required />
           </label>
           <button type="submit">Move</button>
         </form>
+        {isAdmin(ctx.viewer) && !thread.isRules && !thread.board.membersOnly && (
+          <form method="post" action={action} class="inline-fields">
+            <button type="submit" name="action" value="set_rules">
+              Make this the site rules
+            </button>
+            <span class="hint">The opening post becomes what /rules shows and the moderator goes by.</span>
+          </form>
+        )}
       </div>
     </section>
   );

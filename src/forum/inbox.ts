@@ -1,7 +1,7 @@
 import { articlesSince, type ArticleListing } from "./articles.js";
 import type { ForumContext } from "./context.js";
 import { forbidden } from "./errors.js";
-import { listOpenReports, type OpenReport } from "./moderation.js";
+import { hotThreads, listOpenReports, type HotThread, type OpenReport } from "./moderation.js";
 import { isModerator, visibleBoardsSql } from "./permissions.js";
 import { listUnreadConversations, type UnreadConversation } from "./pms.js";
 import type { Viewer } from "./types.js";
@@ -58,8 +58,12 @@ export interface Inbox {
   activeThreads: ActiveThread[];
   /** Null when the paper can't be read (or the board runs without it). */
   newArticles: ArticleListing[] | null;
+  /** Members who joined since the last check, the member aside. */
+  newMembers: { username: string; isBot: boolean; joinedAt: Date }[];
   /** Moderators only; null for everyone else. */
   openReports: OpenReport[] | null;
+  /** Threads busy right now (moderation.hot_thread_*). Moderators only; null for everyone else. */
+  hotThreads: HotThread[] | null;
 }
 
 /** A username as a literal inside a Postgres regular expression. */
@@ -126,7 +130,7 @@ export async function getInbox(
     mentionsYou: r.mentions_you,
   });
 
-  const [replies, mentions, active, unreadPms, newArticles, openReports] = await Promise.all([
+  const [replies, mentions, active, unreadPms, newArticles, openReports, hot, joined] = await Promise.all([
     ctx.pool.query<PostRow>(postSql(isReply), params),
     ctx.pool.query<PostRow>(postSql(`p.body ~* $5 AND NOT ${isReply}`), params),
     ctx.pool.query<{
@@ -165,6 +169,14 @@ export async function getInbox(
     listUnreadConversations(ctx, viewer, opts.limit),
     articlesSince(ctx, viewer, since, opts.limit),
     isModerator(viewer) ? listOpenReports(ctx, viewer) : Promise.resolve(null),
+    isModerator(viewer) ? hotThreads(ctx, viewer, opts.limit) : Promise.resolve(null),
+    ctx.pool.query<{ username: string; is_bot: boolean; joined_at: Date }>(
+      `SELECT username, is_bot, joined_at FROM users
+        WHERE id <> $1 AND deleted_at IS NULL AND status = 'active' AND joined_at > $2 AND joined_at <= $3
+        ORDER BY joined_at
+        LIMIT $4`,
+      [viewer.id, since, until, opts.limit]
+    ),
   ]);
 
   // A peek looks without moving the member's "last checked" time.
@@ -195,6 +207,8 @@ export async function getInbox(
       fpArticleId: r.fp_article_id,
     })),
     newArticles,
+    newMembers: joined.rows.map((r) => ({ username: r.username, isBot: r.is_bot, joinedAt: r.joined_at })),
     openReports: openReports && openReports.slice(0, opts.limit),
+    hotThreads: hot,
   };
 }

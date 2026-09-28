@@ -1,4 +1,5 @@
 import { config } from "../config.js";
+import { BRIEF_NAMES, isBriefName } from "./briefs.js";
 import { modelIdProblem } from "./model.js";
 import { parseTimeOfDay } from "./schedule.js";
 import type { Db } from "./store.js";
@@ -45,6 +46,13 @@ export interface SettingsInput {
   boards?: string;
   keyEnv?: string;
   tokenEnv?: string;
+  /** Model calls a day on the member key: a number, or "default". */
+  callsPerDay?: string;
+  /** Moderation rounds: "on" or "off". */
+  moderates?: string;
+  modKeyEnv?: string;
+  modEffort?: string;
+  modSteps?: string;
 }
 
 /** The bots.config columns that settings may change. */
@@ -65,6 +73,11 @@ export const CONFIG_COLUMNS = [
   "write_boards",
   "api_key_ref",
   "board_token_ref",
+  "model_calls_per_day",
+  "moderates",
+  "mod_api_key_ref",
+  "mod_reasoning_effort",
+  "mod_max_steps",
 ] as const;
 export type ConfigColumn = (typeof CONFIG_COLUMNS)[number];
 
@@ -140,6 +153,25 @@ export function parseSettings(v: SettingsInput): Partial<Record<ConfigColumn, un
     if (!ENV_NAME.test(value.trim())) fail(`${what} is an environment variable name, like NANOGPT_KEY_TESTBOT.`);
     out[column] = value.trim();
   }
+  if (v.callsPerDay !== undefined) {
+    out.model_calls_per_day = v.callsPerDay.trim() === "default" || v.callsPerDay.trim() === "" ? null : whole(v.callsPerDay, "Calls per day", 0);
+  }
+  if (v.moderates !== undefined) {
+    const on = v.moderates.trim();
+    if (on !== "on" && on !== "off") fail("Moderation is on or off.");
+    out.moderates = on === "on";
+  }
+  if (v.modKeyEnv !== undefined) {
+    const name = v.modKeyEnv.trim();
+    if (name !== "" && !ENV_NAME.test(name)) fail("The moderation key's is an environment variable name, like NANOGPT_KEY_MODERATION.");
+    out.mod_api_key_ref = name || null;
+  }
+  if (v.modEffort !== undefined) {
+    if (!(EFFORTS as readonly string[]).includes(v.modEffort)) fail(`The moderation effort is one of ${EFFORTS.join(", ")}.`);
+    out.mod_reasoning_effort = v.modEffort;
+  }
+  const modSteps = whole(v.modSteps, "Moderation steps", 1);
+  if (modSteps !== undefined) out.mod_max_steps = modSteps;
   return out;
 }
 
@@ -161,6 +193,11 @@ export function settingsText(c: Record<string, unknown>): Required<SettingsInput
     boards: Array.isArray(c["write_boards"]) ? (c["write_boards"] as string[]).join(",") : "all",
     keyEnv: String(c["api_key_ref"]),
     tokenEnv: String(c["board_token_ref"]),
+    callsPerDay: c["model_calls_per_day"] === null || c["model_calls_per_day"] === undefined ? "default" : String(c["model_calls_per_day"]),
+    moderates: c["moderates"] === true ? "on" : "off",
+    modKeyEnv: c["mod_api_key_ref"] ? String(c["mod_api_key_ref"]) : "",
+    modEffort: String(c["mod_reasoning_effort"] ?? "medium"),
+    modSteps: String(c["mod_max_steps"] ?? 8),
   };
 }
 
@@ -205,6 +242,13 @@ export async function applyColumns(
   if (rescheduled) {
     await db.query("UPDATE bots.state SET next_wake_at = NULL, updated_at = NOW() WHERE user_id = $1", [userId]);
   }
+  // Moderation turned on, or off, or onto another key: its rounds start afresh.
+  if ("moderates" in changes || "mod_api_key_ref" in changes) {
+    await db.query(
+      "UPDATE bots.state SET mod_next_at = NULL, mod_early_at = NULL, mod_early_trigger = NULL, mod_paused_until = NULL, updated_at = NOW() WHERE user_id = $1",
+      [userId]
+    );
+  }
   return changes;
 }
 
@@ -230,14 +274,16 @@ export async function revertChange(db: Db, userId: number, entryId: number, chan
 }
 
 /**
- * Resumes or pauses a bot. Either way its schedule starts afresh; resuming
- * also lifts a pause for NanoGPT's daily cap.
+ * Resumes or pauses a bot. Either way its schedules (visits and moderation
+ * rounds) start afresh; resuming also lifts a pause for NanoGPT's daily cap.
  */
 export async function setActive(db: Db, userId: number, active: boolean, changedBy: string): Promise<ConfigChanges> {
   const changes = await applyColumns(db, userId, { active }, changedBy);
   await db.query(
     `UPDATE bots.state SET next_wake_at = NULL, early_wake_at = NULL, early_wake_trigger = NULL,
-            paused_until = CASE WHEN $2 THEN NULL ELSE paused_until END, updated_at = NOW()
+            paused_until = CASE WHEN $2 THEN NULL ELSE paused_until END,
+            mod_next_at = NULL, mod_early_at = NULL, mod_early_trigger = NULL,
+            mod_paused_until = CASE WHEN $2 THEN NULL ELSE mod_paused_until END, updated_at = NOW()
       WHERE user_id = $1`,
     [userId, active]
   );
@@ -248,6 +294,14 @@ export async function setActive(db: Db, userId: number, active: boolean, changed
 export async function requestWake(db: Db, userId: number): Promise<void> {
   await db.query(
     "UPDATE bots.state SET early_wake_at = NOW(), early_wake_trigger = 'manual', paused_until = NULL, updated_at = NOW() WHERE user_id = $1",
+    [userId]
+  );
+}
+
+/** A moderation round for an active bot that moderates, at the runner's next tick. */
+export async function requestModeration(db: Db, userId: number): Promise<void> {
+  await db.query(
+    "UPDATE bots.state SET mod_early_at = NOW(), mod_early_trigger = 'manual', mod_paused_until = NULL, updated_at = NOW() WHERE user_id = $1",
     [userId]
   );
 }
@@ -272,6 +326,18 @@ export async function writeStanding(
   const { rows } = await db.query<{ id: number }>(
     "INSERT INTO bots.standing_versions (user_id, body, source, created_by) VALUES ($1, $2, $3, $4) RETURNING id",
     [userId, text, source, createdBy]
+  );
+  return rows[0]!.id;
+}
+
+/** A new version of a role brief (./briefs.ts), written by hand or restored from an old one. */
+export async function writeBrief(db: Db, name: string, body: string, createdBy: string): Promise<number> {
+  if (!isBriefName(name)) fail(`There's no brief called ${name}; they are ${BRIEF_NAMES.join(", ")}.`);
+  const text = body.replace(/\r\n/g, "\n").trim();
+  if (!text) fail("The brief is empty.");
+  const { rows } = await db.query<{ id: number }>(
+    "INSERT INTO bots.brief_versions (name, body, created_by) VALUES ($1, $2, $3) RETURNING id",
+    [name, text, createdBy]
   );
   return rows[0]!.id;
 }
