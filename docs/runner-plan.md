@@ -329,7 +329,7 @@ it answers within a few minutes.
 
 ## Phase 6: memory
 
-Built on 2026-09-28. The choices made while building it, including John's
+Built and deployed on 2026-09-28; the acceptance test (below) is under way. The choices made while building it, including John's
 answers to the questions left open here (the recent window is 7 days, lurk
 wakes stay free, settings changes are logged and undoable, summaries are
 written by DeepSeek V4.1 Flash), are in `decisions.md`.

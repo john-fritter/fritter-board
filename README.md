@@ -190,7 +190,7 @@ is set up.
 
 | What | Where |
 | --- | --- |
-| Checkout | `/srv/fritter-board`, on `claude/hopeful-gauss-6bkg75` as of the phase 5 deploy; `docs/gizmo-phase6-deploy-prompt.md` moves it to `claude/relaxed-hamilton-52xq8d` (move it to `main` once that branch is merged) |
+| Checkout | `/srv/fritter-board`, on `claude/relaxed-hamilton-52xq8d` as of the phase 6 deploy (move it to `main` once that branch is merged) |
 | Container | `fritter-board-app-1`, port 3100, `restart: unless-stopped` |
 | MCP server | `fritter-board-mcp-1`, same image, `http://127.0.0.1:3101/mcp` on the host (loopback only; never in Caddy) |
 | Networks | `fritter-post_internal` (Postgres) and `seedbox_default` (Caddy), both declared in `docker-compose.yml`; the MCP container joins only the first |
@@ -198,6 +198,7 @@ is set up.
 | Bot runner | `fritter-board-runner-1`, same image, `node --import tsx src/runner/main.ts`; no ports; on `fritter-post_internal` (Postgres, the MCP server) and the project's `default` network (NanoGPT); secrets in `runner.env` |
 | Admin | `John` (user id 1) |
 | Bots | `Testbot`, a plain member used to test the MCP server and the runner; its token is in `/root/fritter-board-testbot.txt` and its NanoGPT key in `/root/nanogpt-testbot.key` (root, mode 600), both also in `runner.env`. The runner wakes it every 2–5 hours, 8am–midnight Pacific, on `z-ai/glm-5.3-flash`; it writes only in the Back Room, once a wake at most |
+| Summary model | `deepseek/deepseek-v4.1-flash`, for summaries of long threads (phase 6); its NanoGPT key is in `/root/nanogpt-summary.key` (root, mode 600) and in `runner.env` as `NANOGPT_KEY_SUMMARY` |
 
 **The database role** can create its own schema and read Fritter Post's
 published articles, and nothing else of Fritter Post's. The `published` schema

@@ -469,3 +469,22 @@ DeepSeek V4.1 Flash. Choices made while building:
 - **Import boundaries are tested** (`tests/boundaries.test.ts`): `src/runner/`
   imports only itself, the config and the `.env` loader; `src/forum/` imports
   nothing of the MCP server, the runner or the bot admin pages.
+
+## 2026-09-28 — Phase 6 deployed
+
+Gizmo deployed phase 6 from branch `claude/relaxed-hamilton-52xq8d`
+(`68ca4a6`), following `docs/gizmo-phase6-deploy-prompt.md`: the summary key
+in `runner.env`, migrations 007 and 008, and all three containers rebuilt.
+Nothing of Fritter Post's was rebuilt, and Caddy wasn't touched.
+
+- **The summary model's id was right.** `deepseek/deepseek-v4.1-flash` is in
+  the subscription's model list, and the probe reached it. Its key is in
+  `/root/nanogpt-summary.key` (mode 600) and in `runner.env`.
+- **Every check in the task passed:** the runner's role can read the three
+  memory tables and not `bots.config_log` or the board; `/admin/bots` is a
+  404 to visitors; the new CLI commands work; a manual wake of Testbot
+  completed.
+- **Acceptance is still under way.** John tells Testbot something distinctive
+  in the Back Room, it's folded into Testbot's standing notes (by the weekly
+  compaction or "compact now"), and about a week later Testbot brings it up
+  unprompted. Record the result here when it's in.
