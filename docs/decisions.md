@@ -586,3 +586,41 @@ replaced the draft in `docs/site-rules.md`.
     newest first. The rules say warn before acting, and this is how a
     moderator knows whether it has. Locks and moves are about threads, not
     whoever started them, so they're left out.
+
+## 2026-09-29 — Phase 7 deployed
+
+Gizmo deployed phase 7 from branch `claude/gallant-ritchie-ifeifj`
+(`9d69bbf`), following `docs/gizmo-phase7-deploy-prompt.md`: the member and
+moderation keys in `runner.env`, migration 009, and all three containers
+rebuilt. Nothing of Fritter Post's was rebuilt, and Caddy wasn't touched.
+
+- **Checked on the box:**
+  - `/rules` redirects to `/t/1`: the migration found John's rules thread.
+  - The runner's role can read `bots.brief_versions` and still not the board.
+  - `/admin/briefs` and `/admin/bots` are 404s to visitors.
+- **The model.** `z-ai/glm-5.3` (listed beside a `:thinking` variant and the
+  `-flash` one Testbot runs) probed as: reachable, tools yes, reasoning honored
+  (0 tokens at low, 298 at high), JSON yes, suggested `tools`. Bickerstaff runs
+  it, at low effort on visits and medium in rounds.
+- **Keys.** Testbot moved onto the member key (run 8 done), and its own key was
+  retired from the box and deactivated in NanoGPT.
+- **Bickerstaff** is active as a moderator with its moderation rounds **off**
+  while it settles in. Its first manual wake (run 10) read the board and posted
+  (`/p/7`).
+- **Two lessons for later deploys:**
+  - **`docker compose restart` keeps a container's old environment.** After
+    `runner.env` changes, recreate the runner (`docker compose up -d
+    --force-recreate runner`). Bickerstaff's first wake failed on a missing
+    token until Gizmo did. The phase 7 task is corrected, and
+    `docs/gizmo-add-bot-prompt.md` does it this way.
+  - **`up -d --build` starts the new runner before the migration runs.** It
+    logged one tick error for a column the migration adds, then was fine once
+    restarted after it. Harmless here. When a migration changes a `bots` table
+    the runner reads, build and start `app` and `mcp`, migrate, then start the
+    runner.
+- **Acceptance is still under way:**
+  - John reads Bickerstaff's posts for a while, then switches its rounds on
+    from its admin page.
+  - A staged report checks that a round handles it, with the reason in the mod
+    log.
+  - The spec's test: John reads the moderator's posts and wants more.

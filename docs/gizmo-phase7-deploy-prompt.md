@@ -152,7 +152,7 @@ git status --short                                        # runner.env must NOT 
 cd /srv/fritter-board
 docker compose up -d --build           # rebuilds all three: a few seconds' blip for the web app
 docker compose exec -T app npx tsx scripts/migrate.ts   # expect 009_moderator.sql applied
-docker compose restart runner          # so it starts after the migration, with the new keys
+docker compose restart runner          # so it starts after the migration (up -d above already loaded the new keys)
 sleep 5
 docker compose logs --tail=5 app       # "Fritter Board listening on :3100"
 docker compose logs --tail=5 mcp       # "… MCP server listening on http://0.0.0.0:3101/mcp"
@@ -254,7 +254,7 @@ cd /srv/fritter-board
 ls -l runner.env                         # still -rw------- root
 sed 's/=.*/=…/' runner.env               # NANOGPT_KEY_TESTBOT gone
 rm /root/nanogpt-testbot.key
-docker compose restart runner
+docker compose up -d --force-recreate runner   # `restart` would keep the old runner.env
 ```
 
 If the run failed, show its details (`runs Testbot --run <N>`, redacting
@@ -273,7 +273,7 @@ TOKEN=$(grep -o 'fb_[A-Za-z0-9_-]*' /root/fritter-board-bickerstaff.txt)
 ( umask 077; printf 'FRITTER_BOARD_TOKEN_BICKERSTAFF=%s\n' "$TOKEN" >> runner.env )
 unset TOKEN
 grep -c '^FRITTER_BOARD_TOKEN_BICKERSTAFF=fb_' runner.env   # 1
-docker compose restart runner
+docker compose up -d --force-recreate runner   # `restart` would keep the old runner.env
 ```
 
 Keep `/root/fritter-board-bickerstaff.txt` (mode 600): it's the only copy of

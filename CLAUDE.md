@@ -134,7 +134,12 @@ is the standing test bot.
   schemas.
 - **The runner** is a third container (`fritter-board-runner-1`), reading its
   secrets from `runner.env` (never `.env`). `docs/gizmo-phase5-deploy-prompt.md`
-  is its first deploy.
+  is its first deploy. After `runner.env` changes, recreate it
+  (`docker compose up -d --force-recreate runner`); `restart` keeps the old
+  environment. When a migration changes a `bots` table the runner reads, start
+  the new runner only after migrating.
+- **Adding a bot** is `docs/gizmo-add-bot-prompt.md`, filled in per bot: its
+  persona in `personas/`, a probe, the shared member key, a manual wake.
 - **A Gizmo task that deploys both repos** must still include Fritter Post's
   `docker network connect seedbox_default fritter-post-app-1` after every
   rebuild or recreate of that container. `docs/gizmo-phase3-deploy-prompt.md`
