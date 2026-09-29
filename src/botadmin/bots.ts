@@ -8,16 +8,19 @@ import {
   applyColumns,
   parseSettings,
   requestCompaction,
+  requestModeration,
   requestWake,
   revertChange,
   setActive,
   settingsText,
   SettingsError,
+  writeBrief,
   writeStanding,
   type ConfigChanges,
   type SettingsInput,
 } from "../runner/settings.js";
-import { botByUsername, writesLastDay, type Bot, type Db } from "../runner/store.js";
+import { BRIEF_NAMES, briefVersions, currentBriefs, defaultBriefs, isBriefName, type BriefName, type BriefVersion } from "../runner/briefs.js";
+import { botByUsername, modelCallsLastDay, writesLastDay, type Bot, type Db } from "../runner/store.js";
 
 /**
  * The admin's steering wheel for bots (/admin/bots): what each bot is doing,
@@ -63,7 +66,7 @@ async function settingsCall<T>(fn: () => Promise<T>): Promise<T> {
 
 export interface RunRow {
   id: number;
-  kind: "wake" | "compaction";
+  kind: "wake" | "compaction" | "moderation";
   trigger: string;
   outcome: string;
   startedAt: Date;
@@ -172,15 +175,20 @@ export interface BotRow {
   lastRun: RunRow | null;
   writesToday: number;
   notes: number;
+  /** Model calls in the last 24 hours on its member key, and in moderation rounds. */
+  callsToday: number;
+  modCallsToday: number;
 }
 
 async function botRow(db: Db, bot: Bot): Promise<BotRow> {
-  const [runs, writesToday, notes] = await Promise.all([
+  const [runs, writesToday, notes, callsToday, modCallsToday] = await Promise.all([
     recentRuns(db, bot.userId, 1),
     writesLastDay(db, bot.userId),
     db.query<{ n: number }>("SELECT COUNT(*)::int AS n FROM bots.notes WHERE user_id = $1 AND archived_at IS NULL", [bot.userId]),
+    modelCallsLastDay(db, bot.userId, "member"),
+    modelCallsLastDay(db, bot.userId, "moderation"),
   ]);
-  return { bot, lastRun: runs[0] ?? null, writesToday, notes: notes.rows[0]!.n };
+  return { bot, lastRun: runs[0] ?? null, writesToday, notes: notes.rows[0]!.n, callsToday, modCallsToday };
 }
 
 export async function listBots(ctx: BotAdminCtx, viewer: Viewer | null) {
@@ -233,12 +241,17 @@ export async function updateSettings(ctx: BotAdminCtx, viewer: Viewer | null, na
   return settingsCall(() => applyColumns(ctx.pool, bot.userId, parseSettings(input), viewer!.username));
 }
 
-export type Control = "pause" | "resume" | "wake" | "compact";
-export const CONTROLS: readonly Control[] = ["pause", "resume", "wake", "compact"];
+export type Control = "pause" | "resume" | "wake" | "compact" | "moderate";
+export const CONTROLS: readonly Control[] = ["pause", "resume", "wake", "compact", "moderate"];
 
 export async function controlBot(ctx: BotAdminCtx, viewer: Viewer | null, name: string, control: Control): Promise<void> {
   const bot = await findBot(ctx, viewer, name);
-  if ((control === "wake" || control === "compact") && !bot.active) throw invalid(`${bot.username} is paused: resume it first.`);
+  if ((control === "wake" || control === "compact" || control === "moderate") && !bot.active) {
+    throw invalid(`${bot.username} is paused: resume it first.`);
+  }
+  if (control === "moderate" && (!bot.moderates || !bot.modApiKeyRef)) {
+    throw invalid(`${bot.username} doesn't moderate: turn moderation on and name its key first.`);
+  }
   switch (control) {
     case "pause":
     case "resume":
@@ -249,6 +262,9 @@ export async function controlBot(ctx: BotAdminCtx, viewer: Viewer | null, name: 
       break;
     case "compact":
       await requestCompaction(ctx.pool, bot.userId);
+      break;
+    case "moderate":
+      await requestModeration(ctx.pool, bot.userId);
       break;
   }
 }
@@ -376,4 +392,55 @@ export async function archiveNote(ctx: BotAdminCtx, viewer: Viewer | null, name:
     [noteId, bot.userId]
   );
   if (!rowCount) throw notFound();
+}
+
+// ── Role briefs ────────────────────────────────────────────────────────────
+
+export interface BriefView {
+  name: BriefName;
+  /** The text bots get now. */
+  current: string;
+  /** Null while the shipped text (config/briefs/<name>.md) is in use. */
+  latest: BriefVersion | null;
+  versions: BriefVersion[];
+  shipped: string;
+}
+
+/** The three role briefs every bot's prompt is built from, with their versions. */
+export async function listBriefs(ctx: BotAdminCtx, viewer: Viewer | null): Promise<BriefView[]> {
+  admin(viewer);
+  const current = await currentBriefs(ctx.pool);
+  const out: BriefView[] = [];
+  for (const name of BRIEF_NAMES) {
+    const versions = await briefVersions(ctx.pool, name, config.pagination.bot_log_per_page);
+    out.push({ name, current: current[name], latest: versions[0] ?? null, versions, shipped: defaultBriefs()[name] });
+  }
+  return out;
+}
+
+function briefName(name: string): BriefName {
+  if (!isBriefName(name)) throw notFound();
+  return name;
+}
+
+/** A new version of a brief; nothing, if the text hasn't changed. */
+export async function saveBrief(ctx: BotAdminCtx, viewer: Viewer | null, name: string, body: string): Promise<boolean> {
+  const who = admin(viewer);
+  const brief = briefName(name);
+  const current = (await currentBriefs(ctx.pool))[brief];
+  if (current === body.replace(/\r\n/g, "\n").trim()) return false;
+  await settingsCall(() => writeBrief(ctx.pool, brief, body, who.username));
+  return true;
+}
+
+/** Saves an old version, or the shipped text (versionId null), as the newest. */
+export async function restoreBrief(ctx: BotAdminCtx, viewer: Viewer | null, name: string, versionId: number | null): Promise<void> {
+  const who = admin(viewer);
+  const brief = briefName(name);
+  let body = defaultBriefs()[brief];
+  if (versionId !== null) {
+    const { rows } = await ctx.pool.query<{ body: string }>("SELECT body FROM bots.brief_versions WHERE id = $1 AND name = $2", [versionId, brief]);
+    body = (rows[0] ?? fail404()).body;
+  }
+  await settingsCall(() => writeBrief(ctx.pool, brief, body, who.username));
 }

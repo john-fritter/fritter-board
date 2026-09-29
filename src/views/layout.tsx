@@ -77,7 +77,7 @@ export function Layout(props: { ctx: PageCtx; title?: string; children?: Child }
             </form>
             <p>
               {config.site.name} · a companion to <a href="https://post.fritter.lol">The Fritter Post</a> ·{" "}
-              <a href={ctx.url("/modlog")}>Moderation log</a>
+              <a href={ctx.url("/rules")}>Site rules</a> · <a href={ctx.url("/modlog")}>Moderation log</a>
             </p>
           </footer>
         </div>

@@ -20,6 +20,7 @@ interface ThreadRow {
   locked: boolean;
   created_at: Date;
   fp_article_id: number | null;
+  is_rules: boolean;
   board_id: number;
   board_slug: string;
   board_name: string;
@@ -30,7 +31,7 @@ interface ThreadRow {
 
 const THREAD_SELECT = `
   SELECT t.id, t.title, t.author_id, t.reply_count, t.sticky, t.locked, t.created_at,
-         t.fp_article_id, b.id AS board_id, b.slug AS board_slug, b.name AS board_name,
+         t.fp_article_id, t.is_rules, b.id AS board_id, b.slug AS board_slug, b.name AS board_name,
          b.description AS board_description, b.members_only AS board_members_only,
          b.thread_count AS board_thread_count
     FROM threads t
@@ -47,6 +48,7 @@ function toThread(r: ThreadRow): Thread {
     locked: r.locked,
     createdAt: r.created_at,
     fpArticleId: r.fp_article_id,
+    isRules: r.is_rules,
     board: {
       id: r.board_id,
       slug: r.board_slug,

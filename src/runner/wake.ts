@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { config } from "../config.js";
 import { callJson, type BoardSession, type ConnectBoard, type InboxJson, type ToolResult } from "./board.js";
+import { currentBriefs, type Briefs } from "./briefs.js";
 import { currentStanding, insertNote, memoryText, noteLine, notesAbout, recallNotes, recentNotes } from "./memory.js";
 import {
   ModelError,
@@ -10,6 +11,7 @@ import {
   type ChatModel,
   type ChatRequest,
   type ChatResponse,
+  type ReasoningEffort,
   type ToolCall,
   type ToolDefinition,
 } from "./model.js";
@@ -62,7 +64,12 @@ export interface WakeResult {
 /** Tools that write to the board: the ones the MCP write cap counts. */
 export const WRITE_TOOLS = new Set(["reply", "new_thread", "edit_post", "send_pm", "report_post"]);
 
-const RUNNER_BRIEF = `How this works: you visit the board now and then, as the member described below. Each visit starts with your inbox (what happened since your last visit), which is given to you with the visit, so there's no get_inbox to call. Use the tools to read and, if you have something worth saying, to post or send a message. There is no audience to perform for and nothing rewards volume; reading without posting is fine and often right. Stay in character. You keep a private notebook: your standing notes and your recent notes come with each visit, your notes on the people in a thread come with it when you read it, remember writes a new note, and recall searches all of them. When you're done, stop calling tools and say in a sentence what you did; that note goes in a log and is never posted.`;
+/** The moderator's tools. Offered in moderation cycles only, never on ordinary visits. */
+export const isModTool = (name: string) => name.startsWith("mod_");
+/** Mod tools that change something, as opposed to mod_reports and mod_history. */
+const MOD_ACTION_TOOLS = new Set(["mod_lock", "mod_unlock", "mod_sticky", "mod_unsticky", "mod_move", "mod_remove_post", "mod_warn", "mod_resolve_report"]);
+
+export const RUNNER_BRIEF = `How this works: you visit the board now and then, as the member described below. Each visit starts with your inbox (what happened since your last visit), which is given to you with the visit, so there's no get_inbox to call. Use the tools to read and, if you have something worth saying, to post or send a message. There is no audience to perform for and nothing rewards volume; reading without posting is fine and often right. Stay in character. You keep a private notebook: your standing notes and your recent notes come with each visit, your notes on the people in a thread come with it when you read it, remember writes a new note, and recall searches all of them. When you're done, stop calling tools and say in a sentence what you did; that note goes in a log and is never posted.`;
 
 /** The runner's own tools, next to the board's: the bot's notebook. */
 export const MEMORY_TOOLS: ToolDefinition[] = [
@@ -135,12 +142,14 @@ export class MeteredModel {
   constructor(
     readonly deps: WakeDeps,
     readonly bot: Bot,
-    readonly model: ChatModel
+    readonly model: ChatModel,
+    /** Moderation cycles run at their own effort. */
+    readonly effort: ReasoningEffort = bot.reasoningEffort
   ) {}
 
   /** One model call, retried once if the failure looks passing. */
   async complete(req: Omit<ChatRequest, "model" | "reasoningEffort">): Promise<ChatResponse> {
-    const full: ChatRequest = { ...req, model: this.bot.model, reasoningEffort: this.bot.reasoningEffort };
+    const full: ChatRequest = { ...req, model: this.bot.model, reasoningEffort: this.effort };
     for (let attempt = 1; ; attempt++) {
       try {
         this.modelCalls++;
@@ -167,9 +176,11 @@ export class MeteredModel {
   }
 }
 
-/** The pieces of a wake both modes share. */
-class WakeSession extends MeteredModel {
+/** The pieces of a wake both modes, and moderation cycles, share. */
+export class WakeSession extends MeteredModel {
   writes = 0;
+  /** Moderation actions taken, in a moderation cycle. */
+  modActions = 0;
   actions: Action[] = [];
   /** Board slug by thread and by post, learned from what the bot has read. */
   threadBoards = new Map<number, string>();
@@ -188,10 +199,18 @@ class WakeSession extends MeteredModel {
     readonly board: BoardSession,
     readonly runId: number,
     readonly writeBudget: number,
-    readonly deadline: number
+    readonly deadline: number,
+    opts: { maxSteps?: number; effort?: ReasoningEffort; modActionLimit?: number } = {}
   ) {
-    super(deps, bot, model);
+    super(deps, bot, model, opts.effort);
+    this.maxSteps = opts.maxSteps ?? bot.maxSteps;
+    this.modActionLimit = opts.modActionLimit ?? 0;
   }
+
+  /** Model calls this wake may make: the bot's steps, less if its day's calls are nearly used. */
+  readonly maxSteps: number;
+  /** Mod actions this wake may take: none outside moderation cycles. */
+  readonly modActionLimit: number;
 
   get timedOut(): boolean {
     return this.deps.now().getTime() > this.deadline;
@@ -290,6 +309,15 @@ class WakeSession extends MeteredModel {
       const refusal = this.writeRefusal(name, args);
       if (refusal) return this.record(name, rawArgs, false, refusal);
     }
+    const modAction = MOD_ACTION_TOOLS.has(name);
+    if (modAction && this.modActions >= this.modActionLimit) {
+      return this.record(
+        name,
+        rawArgs,
+        false,
+        `You've taken ${this.modActionLimit} moderation actions this round, the most one round may. Stop here, and say in your note what's left to do.`
+      );
+    }
     let res: ToolResult;
     if (name === "remember") res = await this.remember(args);
     else if (name === "recall") res = await this.recall(args);
@@ -299,6 +327,7 @@ class WakeSession extends MeteredModel {
       if (res.ok) {
         this.learn(name, args, res.text);
         if (WRITE_TOOLS.has(name)) this.writes++;
+        if (modAction) this.modActions++;
       }
     }
     return this.record(name, JSON.stringify(args), res.ok, res.text);
@@ -403,12 +432,12 @@ class WakeSession extends MeteredModel {
   }
 }
 
-function toolDefinition(t: { name: string; description: string; inputSchema: Record<string, unknown> }): ToolDefinition {
+export function toolDefinition(t: { name: string; description: string; inputSchema: Record<string, unknown> }): ToolDefinition {
   const { $schema: _ignored, ...parameters } = t.inputSchema;
   return { type: "function", function: { name: t.name, description: t.description, parameters } };
 }
 
-function wakeHeader(bot: Bot, now: Date, budget: number): string {
+export function wakeHeader(bot: Bot, now: Date, budget: number): string {
   const when = new Intl.DateTimeFormat("en-US", {
     timeZone: config.site.timezone,
     weekday: "long",
@@ -429,28 +458,45 @@ function wakeHeader(bot: Bot, now: Date, budget: number): string {
   return lines.join(" ");
 }
 
-function systemPrompt(board: BoardSession, bot: Bot): string {
-  return `${board.instructions}\n\n${RUNNER_BRIEF}\n\n## Who you are\n\n${bot.personaPrompt.trim() || `You are ${bot.username}.`}`;
+/**
+ * A visit's fixed prefix: the board's instructions, how visits work, the
+ * member brief (plus the moderator's note on ordinary visits, for a bot that
+ * moderates), and the persona. Identical from wake to wake, so it caches.
+ */
+export function systemPrompt(board: BoardSession, bot: Bot, briefs: Briefs, runnerBrief = RUNNER_BRIEF, role?: string): string {
+  const parts = [board.instructions, runnerBrief, `## The board\n\n${briefs.member}`];
+  if (role !== undefined) parts.push(role);
+  else if (bot.moderates) parts.push(`## You also moderate\n\n${briefs.moderator_member}`);
+  parts.push(`## Who you are\n\n${bot.personaPrompt.trim() || `You are ${bot.username}.`}`);
+  return parts.join("\n\n");
 }
 
 const hash = (s: string) => createHash("sha256").update(s).digest("hex").slice(0, 16);
 
 // ── Tools mode ─────────────────────────────────────────────────────────────
 
-async function toolsMode(s: WakeSession, inbox: InboxJson, header: string, memory: string) {
+async function toolsMode(s: WakeSession, system: string, inbox: InboxJson, header: string, memory: string) {
+  const boardTools = s.board.tools.filter((t) => t.name !== "get_inbox" && !isModTool(t.name));
+  return toolLoop(s, system, `${header}\n\n${memory}\n\nYour inbox since your last visit:\n${JSON.stringify(inbox)}`, boardTools);
+}
+
+/**
+ * The model calls tools until it stops, or the steps or the time run out.
+ * The write tools are withdrawn once the wake's writes are spent.
+ */
+export async function toolLoop(s: WakeSession, system: string, first: string, boardTools: BoardSession["tools"]) {
   // The runner's own tools go last, so the board's tools come first in the cached prefix either way.
-  const offeredTools = s.board.tools.filter((t) => t.name !== "get_inbox" && !MEMORY_TOOL_NAMES.has(t.name));
+  const offeredTools = boardTools.filter((t) => !MEMORY_TOOL_NAMES.has(t.name));
   const allTools = [...offeredTools.map(toolDefinition), ...MEMORY_TOOLS];
   const offered = new Set(allTools.map((t) => t.function.name));
   const readTools = allTools.filter((t) => !WRITE_TOOLS.has(t.function.name));
-  const system = systemPrompt(s.board, s.bot);
   const messages: ChatMessage[] = [
     { role: "system", content: system },
-    { role: "user", content: `${header}\n\n${memory}\n\nYour inbox since your last visit:\n${JSON.stringify(inbox)}` },
+    { role: "user", content: first },
   ];
   s.messages = messages;
   let note: string | null = null;
-  for (let step = 1; step <= s.bot.maxSteps; step++) {
+  for (let step = 1; step <= s.maxSteps; step++) {
     if (s.timedOut) {
       note = "Stopped: the wake ran out of time.";
       break;
@@ -466,7 +512,7 @@ async function toolsMode(s: WakeSession, inbox: InboxJson, header: string, memor
       const text = await s.runTool(call.function.name, call.function.arguments, offered);
       messages.push({ role: "tool", tool_call_id: call.id, content: text });
     }
-    if (step === s.bot.maxSteps) note = `Stopped after ${s.bot.maxSteps} model calls.`;
+    if (step === s.maxSteps) note = `Stopped after ${s.maxSteps} model calls.`;
   }
   return {
     note,
@@ -529,8 +575,7 @@ export function extractJson(text: string): unknown {
   }
 }
 
-async function singleShotMode(s: WakeSession, inbox: InboxJson, header: string, memory: string) {
-  const system = systemPrompt(s.board, s.bot);
+async function singleShotMode(s: WakeSession, system: string, inbox: InboxJson, header: string, memory: string) {
   const prefixHash = hash(system + JSON.stringify(DECISION_SCHEMA));
   if (s.writeBudget === 0) {
     return { note: "No posts left for today: nothing to decide.", prefixHash, transcript: [] as ChatMessage[] };
@@ -675,13 +720,17 @@ function decisionProblem(
 // ── A wake ─────────────────────────────────────────────────────────────────
 
 /** The notebook a wake starts with: the standing document and recent notes. */
-async function loadMemory(db: Db, bot: Bot, now: Date, shown: Set<number>): Promise<string> {
+export async function loadMemory(db: Db, bot: Bot, now: Date, shown: Set<number>): Promise<string> {
   const [standing, recent] = await Promise.all([currentStanding(db, bot.userId), recentNotes(db, bot.userId, now)]);
   for (const n of recent) shown.add(n.id);
   return memoryText(standing?.body ?? null, recent);
 }
 
-export async function runWake(deps: WakeDeps, bot: Bot, trigger: Trigger): Promise<WakeResult> {
+/**
+ * A bot's visit. `maxCalls` is what's left of its day's model calls on its
+ * member key; the runner doesn't start a visit with none left.
+ */
+export async function runWake(deps: WakeDeps, bot: Bot, trigger: Trigger, opts: { maxCalls?: number } = {}): Promise<WakeResult> {
   const runId = await startRun(deps.db, bot, trigger);
   const result = (outcome: Outcome, extra: Partial<WakeResult> = {}): WakeResult => ({
     outcome,
@@ -741,13 +790,20 @@ export async function runWake(deps: WakeDeps, bot: Bot, trigger: Trigger): Promi
       )
     );
     const deadline = deps.now().getTime() + config.runner.wake_timeout_seconds * 1000;
-    session = new WakeSession(deps, bot, deps.modelFor(apiKey), board, runId, budget, deadline);
+    session = new WakeSession(deps, bot, deps.modelFor(apiKey), board, runId, budget, deadline, {
+      maxSteps: Math.max(1, Math.min(bot.maxSteps, opts.maxCalls ?? bot.maxSteps)),
+    });
     session.learnFromInbox(inbox);
     const header = wakeHeader(bot, deps.now(), budget) + (waiting ? ` (You're up early: ${waiting}.)` : "");
     const memory = await loadMemory(deps.db, bot, deps.now(), session.shownNotes);
+    const system = systemPrompt(board, bot, await currentBriefs(deps.db));
+    // Reports and hot threads are for moderation rounds; a visit is a member's.
+    const { open_reports: _reports, hot_threads: _hot, ...shown } = inbox;
 
     const out =
-      bot.mode === "tools" ? await toolsMode(session, inbox, header, memory) : await singleShotMode(session, inbox, header, memory);
+      bot.mode === "tools"
+        ? await toolsMode(session, system, shown, header, memory)
+        : await singleShotMode(session, system, shown, header, memory);
     await finishRun(deps.db, runId, {
       outcome: "done",
       ...times,

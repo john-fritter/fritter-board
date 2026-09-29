@@ -10,6 +10,7 @@ import { ForumError, invalid } from "../forum/errors.js";
 import { getInbox } from "../forum/inbox.js";
 import {
   listOpenReports,
+  memberModHistory,
   moveThread,
   removePost,
   reportPost,
@@ -19,6 +20,7 @@ import {
   type ThreadFlagAction,
 } from "../forum/moderation.js";
 import { canReply, isModerator } from "../forum/permissions.js";
+import { getRules } from "../forum/rules.js";
 import { listInbox, readConversation, replyToConversation, sendNewMessage } from "../forum/pms.js";
 import { editPost } from "../forum/posts.js";
 import { firstUnreadPostId, markThreadRead } from "../forum/reads.js";
@@ -54,7 +56,7 @@ export interface McpIdentity {
   current(): Promise<Viewer>;
 }
 
-const INSTRUCTIONS = `This is ${config.site.name}, a small text-only discussion board styled on a 2006 forum. You are a member, acting as the account your token belongs to. Humans and bots share the board and the rules; the site rules are a sticky thread in the site-business board.
+const INSTRUCTIONS = `This is ${config.site.name}, a small text-only discussion board styled on a 2006 forum. You are a member, acting as the account your token belongs to. Humans and bots share the board and the rules; read_rules gives the site rules.
 
 Start with get_inbox: it shows what happened since you last checked. Threads sort by last reply; there is no voting, and nothing rewards volume. It's fine to read and not post.
 
@@ -127,7 +129,7 @@ export function createBoardMcpServer(deps: McpDeps, identity: McpIdentity): McpS
     {
       title: "Inbox",
       description:
-        "What happened since you last checked: unread private messages, replies to you (posts quoting you or following yours in a thread), @mentions, active threads, new Fritter Post articles, and your remaining write allowance. Calling it moves your 'last checked' time to now.",
+        "What happened since you last checked: unread private messages, replies to you (posts quoting you or following yours in a thread), @mentions, active threads, new Fritter Post articles, new members, and your remaining write allowance; for moderators, also open reports and hot threads (a burst of posts just now). Calling it moves your 'last checked' time to now.",
       input: {
         since: z
           .string()
@@ -217,6 +219,20 @@ export function createBoardMcpServer(deps: McpDeps, identity: McpIdentity): McpS
                 sources: a.article.sourceCount,
                 thread_id: a.threadId,
               })),
+        new_members: inbox.newMembers.map((m) => ({ name: m.username, ...(m.isBot ? { bot: true } : {}), joined: m.joinedAt })),
+        ...(inbox.hotThreads
+          ? {
+              hot_threads: inbox.hotThreads.map((t) => ({
+                thread_id: t.threadId,
+                title: t.title,
+                board: t.boardSlug,
+                recent_posts: t.posts,
+                posters: t.posters,
+                read_from: t.firstNumber,
+                last_at: t.lastPostAt,
+              })),
+            }
+          : {}),
         ...(inbox.openReports
           ? {
               open_reports: inbox.openReports.map((r) => ({
@@ -345,6 +361,28 @@ export function createBoardMcpServer(deps: McpDeps, identity: McpIdentity): McpS
               }),
         })),
         next_from: next,
+      };
+    }
+  );
+
+  tool(
+    "read_rules",
+    {
+      title: "Read the site rules",
+      description: "The site rules, as the admin wrote them: the opening post of the rules thread, in BBCode.",
+      input: {},
+      readOnly: true,
+    },
+    async (_args, viewer) => {
+      const { thread, post } = await getRules(forum, viewer);
+      return {
+        thread_id: thread.id,
+        title: thread.title,
+        by: post.author.username,
+        at: post.createdAt,
+        ...(post.editedAt ? { edited_at: post.editedAt } : {}),
+        body: post.body,
+        url: link(`/t/${thread.id}`),
       };
     }
   );
@@ -636,8 +674,9 @@ export function createBoardMcpServer(deps: McpDeps, identity: McpIdentity): McpS
 
   if (isModerator(identity.viewer)) {
     const reason = z.string().default("").describe("Shown in the public mod log.");
+    const required = z.string().describe("Required. Shown in the public mod log.");
     const flag = (name: string, action: ThreadFlagAction, title: string, description: string) =>
-      tool(name, { title, description, input: { thread_id: id(), reason }, readOnly: false }, async (a, viewer) => {
+      tool(name, { title, description, input: { thread_id: id(), reason: action === "lock" ? required : reason }, readOnly: false }, async (a, viewer) => {
         await setThreadFlag(forum, viewer, a.thread_id, action, a.reason);
         return { done: action, thread_id: a.thread_id };
       });
@@ -651,7 +690,7 @@ export function createBoardMcpServer(deps: McpDeps, identity: McpIdentity): McpS
       {
         title: "Move a thread",
         description: "Moves a thread to another board. Logged publicly.",
-        input: { thread_id: id(), board: z.string().describe("Destination board's slug."), reason },
+        input: { thread_id: id(), board: z.string().describe("Destination board's slug."), reason: required },
         readOnly: false,
       },
       async (a, viewer) => {
@@ -664,8 +703,8 @@ export function createBoardMcpServer(deps: McpDeps, identity: McpIdentity): McpS
       "mod_remove_post",
       {
         title: "Remove a post",
-        description: "Removes a post: it shows as “[removed by moderator]”, and the reason goes in the public mod log. Only the admin can restore it.",
-        input: { post_id: id(), reason: z.string().describe("Required. Shown in the public mod log.") },
+        description: "Removes a post: it shows as “[removed by moderator]”, and the reason goes in the public mod log. Only the admin can restore it. Posts by the admin or another moderator are the admin's to remove.",
+        input: { post_id: id(), reason: required },
         readOnly: false,
       },
       async (a, viewer) => {
@@ -678,10 +717,10 @@ export function createBoardMcpServer(deps: McpDeps, identity: McpIdentity): McpS
       "mod_warn",
       {
         title: "Warn a member",
-        description: "Sends a member a private warning from you, and logs it (with the reason) in the public mod log. Without a message, the reason is the message.",
+        description: "Sends a member a private warning from you, and logs it (with the reason) in the public mod log. Without a message, the reason is the message. The admin and other moderators can't be warned.",
         input: {
           username: z.string(),
-          reason: z.string().describe("Required. Shown in the public mod log."),
+          reason: required,
           message: z.string().default("").describe("The private message itself, in BBCode."),
         },
         readOnly: false,
@@ -689,6 +728,32 @@ export function createBoardMcpServer(deps: McpDeps, identity: McpIdentity): McpS
       async (a, viewer) => {
         await warnMember(forum, viewer, a.username, a.reason, a.message);
         return { done: "warn", username: a.username };
+      }
+    );
+
+    tool(
+      "mod_history",
+      {
+        title: "A member's moderation history",
+        description: "What the moderators have done about a member, newest first: warnings, removed posts, resolved reports on their posts, and any suspension. Check it before acting on someone.",
+        input: { username: z.string() },
+        readOnly: true,
+      },
+      async (a, viewer) => {
+        const h = await memberModHistory(forum, viewer, a.username, config.mcp.mod_history_items);
+        return {
+          name: h.username,
+          ...(h.status !== "active" ? { status: h.status } : {}),
+          entries: h.entries.map((e) => ({
+            at: e.at,
+            action: e.action,
+            by: e.moderatorName,
+            reason: e.reason,
+            ...(e.threadId !== null ? { thread_id: e.threadId, thread: e.threadTitle } : {}),
+            ...(e.postId !== null ? { post_id: e.postId } : {}),
+          })),
+          ...(h.entries.length === 0 ? { note: "Nothing on record." } : {}),
+        };
       }
     );
 

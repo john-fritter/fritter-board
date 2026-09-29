@@ -21,6 +21,10 @@
  *   npm run bot -- notes <username> [--about NAME] [--limit N]
  *   npm run bot -- compact <username>             fold every note into its standing notes at the next tick
  *
+ * Moderation and the role briefs (phase 7):
+ *   npm run bot -- moderate <username>            a moderation round at the next tick
+ *   npm run bot -- brief <name> [--file PATH|-]   show, or replace, a role brief (member, moderator_member, moderation)
+ *
  * Settings changes are logged in bots.config_log, as by "cli"; the admin
  * pages at /admin/bots do all of this too.
  *
@@ -36,7 +40,17 @@ import { config } from "../src/config.js";
 import { getPool, withTransaction } from "../src/db/index.js";
 import { insertUser } from "../src/forum/accounts.js";
 import { currentStanding, noteLine, recallNotes } from "../src/runner/memory.js";
-import { applyColumns, parseSettings, requestCompaction, requestWake, setActive, writeStanding } from "../src/runner/settings.js";
+import { BRIEF_NAMES, briefVersions, defaultBriefs, isBriefName } from "../src/runner/briefs.js";
+import {
+  applyColumns,
+  parseSettings,
+  requestCompaction,
+  requestModeration,
+  requestWake,
+  setActive,
+  writeBrief,
+  writeStanding,
+} from "../src/runner/settings.js";
 import { botByUserId, type Bot } from "../src/runner/store.js";
 
 const USAGE = `Usage:
@@ -50,7 +64,8 @@ The runner:
   npm run bot -- config <username> [--model ID] [--mode tools|single_shot] [--effort default|none|minimal|low|medium|high|xhigh]
                  [--persona-file PATH|-] [--every MIN-MAX (minutes)] [--window HH:MM-HH:MM]
                  [--steps N] [--posts-per-day N] [--writes-per-wake N] [--lurk 0..1]
-                 [--boards slug,slug|all] [--key-env VAR] [--token-env VAR]
+                 [--boards slug,slug|all] [--key-env VAR] [--token-env VAR] [--calls-per-day N|default]
+                 [--moderates on|off] [--mod-key-env VAR] [--mod-effort EFFORT] [--mod-steps N]
   npm run bot -- show <username>
   npm run bot -- resume <username>
   npm run bot -- pause <username>
@@ -60,7 +75,11 @@ The runner:
 Memory:
   npm run bot -- standing <username> [--file PATH|-]
   npm run bot -- notes <username> [--about NAME] [--limit N]
-  npm run bot -- compact <username>`;
+  npm run bot -- compact <username>
+
+Moderation and the role briefs:
+  npm run bot -- moderate <username>
+  npm run bot -- brief <member|moderator_member|moderation> [--file PATH|-]`;
 
 function fail(message: string): never {
   throw new Error(message);
@@ -93,6 +112,11 @@ async function main() {
       boards: { type: "string" },
       "key-env": { type: "string" },
       "token-env": { type: "string" },
+      "calls-per-day": { type: "string" },
+      moderates: { type: "string" },
+      "mod-key-env": { type: "string" },
+      "mod-effort": { type: "string" },
+      "mod-steps": { type: "string" },
       limit: { type: "string" },
       run: { type: "string" },
       file: { type: "string" },
@@ -221,6 +245,11 @@ async function main() {
           boards: values.boards,
           keyEnv: values["key-env"],
           tokenEnv: values["token-env"],
+          callsPerDay: values["calls-per-day"],
+          moderates: values.moderates,
+          modKeyEnv: values["mod-key-env"],
+          modEffort: values["mod-effort"],
+          modSteps: values["mod-steps"],
         });
         if (!existing) {
           for (const [field, flag] of [["model", "--model"], ["api_key_ref", "--key-env"], ["board_token_ref", "--token-env"]] as const) {
@@ -292,6 +321,28 @@ async function main() {
         console.log(`${bot.username}'s notes are folded into its standing notes at the runner's next tick.`);
         break;
       }
+      case "moderate": {
+        const bot = await runnerBot(pool, (await findBot(username!)).id);
+        if (!bot.active) fail(`${bot.username} is paused: npm run bot -- resume ${bot.username} first.`);
+        if (!bot.moderates || !bot.modApiKeyRef) fail(`${bot.username} doesn't moderate: npm run bot -- config ${bot.username} --moderates on --mod-key-env VAR`);
+        await requestModeration(pool, bot.userId);
+        console.log(`${bot.username} moderates at the runner's next tick (within ${config.runner.tick_seconds} seconds).`);
+        break;
+      }
+      case "brief": {
+        const name = username!;
+        if (!isBriefName(name)) fail(`The briefs are ${BRIEF_NAMES.join(", ")}.`);
+        if (values.file !== undefined) {
+          await writeBrief(pool, name, readFileSync(values.file === "-" ? 0 : values.file, "utf-8"), "cli");
+        }
+        const [latest] = await briefVersions(pool, name, 1);
+        console.log(
+          latest
+            ? `The ${name} brief (version ${latest.id}, ${at(latest.createdAt)} by ${latest.createdBy}):\n\n${latest.body}`
+            : `The ${name} brief (as shipped, config/briefs/${name}.md):\n\n${defaultBriefs()[name]}`
+        );
+        break;
+      }
       default:
         fail(USAGE);
     }
@@ -316,9 +367,17 @@ function printBot(b: Bot): void {
   per day          ${b.postsPerDay} writes; lurks ${Math.round(b.lurkBias * 100)}% of scheduled wakes
   writes in        ${b.writeBoards ? b.writeBoards.join(", ") : "any board it can see"}
   secrets (env)    key ${b.apiKeyRef}, token ${b.boardTokenRef}
+  model calls      ${b.modelCallsPerDay ?? `${config.runner.model_calls_per_day} (default)`} a day on its key
+  moderation       ${b.moderates ? `on: key ${b.modApiKeyRef ?? "(none set: no rounds)"}, reasoning ${b.modReasoningEffort}, up to ${b.modMaxSteps} model calls a round` : "off"}
   persona          ${b.personaPrompt ? `${b.personaPrompt.length} characters` : "(none yet)"}
   next wake        ${at(b.nextWakeAt)}${b.earlyWakeAt ? `, early wake ${at(b.earlyWakeAt)} (${b.earlyWakeTrigger})` : ""}
-  inbox cursor     ${at(b.inboxCursor)}${b.pausedUntil ? `\n  paused until     ${at(b.pausedUntil)} (NanoGPT daily cap)` : ""}`);
+  inbox cursor     ${at(b.inboxCursor)}${b.pausedUntil ? `\n  paused until     ${at(b.pausedUntil)} (NanoGPT daily cap)` : ""}${
+    b.moderates
+      ? `\n  next patrol      ${at(b.modNextAt)}${b.modEarlyAt ? `, early round ${at(b.modEarlyAt)} (${b.modEarlyTrigger})` : ""}${
+          b.modPausedUntil ? `\n  rounds paused    until ${at(b.modPausedUntil)} (NanoGPT daily cap)` : ""
+        }`
+      : ""
+  }`);
 }
 
 async function printRuns(db: Pick<import("pg").Pool, "query">, bot: Bot, limit: number): Promise<void> {
@@ -344,7 +403,7 @@ async function printRuns(db: Pick<import("pg").Pool, "query">, bot: Bot, limit: 
     const tokens = r.model_calls ? `, ${r.model_calls} calls, ${r.prompt_tokens} in / ${r.completion_tokens} out` : "";
     const writes = r.writes ? `, ${r.writes} write(s)` : "";
     const text = r.error ?? r.note;
-    console.log(`#${r.id}  ${r.started_at.toISOString()}  ${r.kind === "compaction" ? "compaction " : ""}${r.trigger}  ${r.outcome}${tokens}${writes}${text ? `\n      ${text.replace(/\s+/g, " ").slice(0, 200)}` : ""}`);
+    console.log(`#${r.id}  ${r.started_at.toISOString()}  ${r.kind !== "wake" ? `${r.kind} ` : ""}${r.trigger}  ${r.outcome}${tokens}${writes}${text ? `\n      ${text.replace(/\s+/g, " ").slice(0, 200)}` : ""}`);
   }
 }
 

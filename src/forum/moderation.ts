@@ -6,14 +6,16 @@ import type { ForumContext } from "./context.js";
 import { forbidden, invalid, notFound } from "./errors.js";
 import {
   canChangeMemberStatus,
+  canModerateMember,
   canRemovePost,
   canRestorePost,
   canSeeBoard,
   isMember,
   asModerator,
+  visibleBoardsSql,
 } from "./permissions.js";
 import { startConversationTx } from "./pms.js";
-import type { UserStatus, Viewer } from "./types.js";
+import type { Role, UserStatus, Viewer } from "./types.js";
 import { optionalReason, validateReason } from "./validate.js";
 
 /**
@@ -35,11 +37,12 @@ export type ModAction =
   | "suspend"
   | "ban"
   | "reinstate"
-  | "resolve_report";
+  | "resolve_report"
+  | "set_rules";
 
 type TargetType = "thread" | "post" | "user" | "report";
 
-async function logAction(
+export async function logAction(
   client: PoolClient,
   moderator: Viewer,
   action: ModAction,
@@ -63,8 +66,9 @@ async function lockThreadForMod(client: PoolClient, threadId: number) {
     locked: boolean;
     sticky: boolean;
     reply_count: number;
+    is_rules: boolean;
   }>(
-    `SELECT t.id, t.board_id, t.locked, t.sticky, t.reply_count
+    `SELECT t.id, t.board_id, t.locked, t.sticky, t.reply_count, t.is_rules
        FROM threads t JOIN boards b ON b.id = t.board_id
       WHERE t.id = $1 AND t.deleted_at IS NULL AND b.deleted_at IS NULL
       FOR UPDATE OF t`,
@@ -96,7 +100,8 @@ export async function setThreadFlag(
   rawReason: string
 ): Promise<void> {
   if (!asModerator(viewer)) throw notFound("That page");
-  const reason = optionalReason(rawReason);
+  // The site rules promise a reason for every lock, in the public log.
+  const reason = action === "lock" ? validateReason(rawReason, "a reason for locking it") : optionalReason(rawReason);
   const { column, value } = FLAG_ACTIONS[action];
   await withTransaction(ctx.pool, async (client) => {
     const thread = await lockThreadForMod(client, threadId);
@@ -114,16 +119,17 @@ export async function moveThread(
   rawReason: string
 ): Promise<void> {
   if (!asModerator(viewer)) throw notFound("That page");
-  const reason = optionalReason(rawReason);
+  const reason = validateReason(rawReason, "a reason for the move");
   await withTransaction(ctx.pool, async (client) => {
     const thread = await lockThreadForMod(client, threadId);
-    const { rows } = await client.query<{ id: number; slug: string }>(
-      "SELECT id, slug FROM boards WHERE slug = $1 AND deleted_at IS NULL",
+    const { rows } = await client.query<{ id: number; slug: string; members_only: boolean }>(
+      "SELECT id, slug, members_only FROM boards WHERE slug = $1 AND deleted_at IS NULL",
       [toBoardSlug]
     );
     const to = rows[0];
     if (!to) throw invalid("That board doesn't exist.");
     if (to.id === thread.board_id) return;
+    if (thread.is_rules && to.members_only) throw invalid("The site rules stay where everyone can read them.");
     const { rows: from } = await client.query<{ slug: string }>("SELECT slug FROM boards WHERE id = $1", [
       thread.board_id,
     ]);
@@ -158,14 +164,23 @@ export async function removePost(
   if (!canRemovePost(viewer)) throw notFound("That page");
   const reason = validateReason(rawReason);
   await withTransaction(ctx.pool, async (client) => {
+    const { rows: found } = await client.query<{ author_id: number; role: Role }>(
+      `SELECT p.author_id, u.role FROM posts p JOIN users u ON u.id = p.author_id
+        WHERE p.id = $1 AND p.deleted_at IS NULL FOR UPDATE OF p`,
+      [postId]
+    );
+    const target = found[0];
+    if (!target) throw invalid("That post is already removed, or doesn't exist.");
+    if (!canModerateMember(viewer, { id: target.author_id, role: target.role })) {
+      throw forbidden("Posts by the admin or another moderator are for the admin to remove. Report it instead.");
+    }
     const { rows } = await client.query<{ author_id: number }>(
       `UPDATE posts SET deleted_at = NOW(), deleted_by = $2, delete_reason = $3
         WHERE id = $1 AND deleted_at IS NULL
         RETURNING author_id`,
       [postId, viewer.id, reason]
     );
-    const post = rows[0];
-    if (!post) throw invalid("That post is already removed, or doesn't exist.");
+    const post = rows[0]!;
     await client.query("UPDATE users SET post_count = GREATEST(post_count - 1, 0) WHERE id = $1", [post.author_id]);
     await logAction(client, viewer, "remove_post", "post", postId, reason);
   });
@@ -194,7 +209,7 @@ export async function restorePost(
 }
 
 async function findMember(client: PoolClient, username: string) {
-  const { rows } = await client.query<{ id: number; username: string; role: string; status: UserStatus }>(
+  const { rows } = await client.query<{ id: number; username: string; role: Role; status: UserStatus }>(
     "SELECT id, username, role, status FROM users WHERE LOWER(username) = LOWER($1) AND deleted_at IS NULL",
     [username.trim()]
   );
@@ -218,6 +233,7 @@ export async function warnMember(
   await withTransaction(ctx.pool, async (client) => {
     const member = await findMember(client, username);
     if (member.id === viewer.id) throw invalid("You can't warn yourself.");
+    if (!canModerateMember(viewer, member)) throw forbidden("The admin and the moderators are the admin's to warn.");
     const body = message.trim() === "" ? reason : message;
     await startConversationTx(ctx, client, viewer, member.username, WARNING_SUBJECT, body);
     await logAction(client, viewer, "warn", "user", member.id, reason);
@@ -449,5 +465,131 @@ export async function listModLog(
         details: hidden ? {} : { fromBoard: r.details.from_board, toBoard: r.details.to_board },
       };
     }),
+  };
+}
+
+// ── Hot threads and a member's history, for moderators ─────────────────────
+
+export interface HotThread {
+  threadId: number;
+  title: string;
+  boardSlug: string;
+  /** Posts, and different posters, in the window. */
+  posts: number;
+  posters: number;
+  /** Position of the window's first post, to read from. */
+  firstNumber: number;
+  lastPostAt: Date;
+}
+
+/**
+ * Threads that have taken a burst of posts from more than one member lately
+ * (moderation.hot_thread_*). A busy thread isn't a problem in itself; this
+ * only tells the moderators where to look.
+ */
+export async function hotThreads(ctx: ForumContext, viewer: Viewer | null, limit: number): Promise<HotThread[]> {
+  if (!asModerator(viewer)) throw notFound("That page");
+  const m = config.moderation;
+  const { rows } = await ctx.pool.query<{
+    id: number;
+    title: string;
+    board_slug: string;
+    posts: number;
+    posters: number;
+    first_number: number;
+    last_at: Date;
+  }>(
+    `WITH recent AS (
+       SELECT p.thread_id, COUNT(*)::int AS posts, COUNT(DISTINCT p.author_id)::int AS posters,
+              MIN(p.id) AS first_id, MAX(p.created_at) AS last_at
+         FROM posts p
+        WHERE p.deleted_at IS NULL AND p.created_at > NOW() - $1::float8 * INTERVAL '1 minute'
+        GROUP BY p.thread_id
+       HAVING COUNT(*) >= $2 AND COUNT(DISTINCT p.author_id) >= $3)
+     SELECT t.id, t.title, b.slug AS board_slug, r.posts, r.posters, r.last_at,
+            (SELECT COUNT(*) FROM posts q WHERE q.thread_id = t.id AND q.id <= r.first_id)::int AS first_number
+       FROM recent r
+       JOIN threads t ON t.id = r.thread_id
+       JOIN boards b ON b.id = t.board_id
+      WHERE t.deleted_at IS NULL AND ${visibleBoardsSql(viewer)}
+      ORDER BY r.last_at DESC
+      LIMIT $4`,
+    [m.hot_thread_window_minutes, m.hot_thread_posts, m.hot_thread_posters, limit]
+  );
+  return rows.map((r) => ({
+    threadId: r.id,
+    title: r.title,
+    boardSlug: r.board_slug,
+    posts: r.posts,
+    posters: r.posters,
+    firstNumber: r.first_number,
+    lastPostAt: r.last_at,
+  }));
+}
+
+export interface ModHistoryEntry {
+  at: Date;
+  moderatorName: string;
+  action: ModAction;
+  reason: string;
+  threadId: number | null;
+  threadTitle: string | null;
+  postId: number | null;
+}
+
+/**
+ * The moderation log as it touches one member: actions on them, on their
+ * posts and on reports about their posts, newest first. (Locks and moves are
+ * about threads, not whoever started them, so they're left out.) For moderators, who see every board, so nothing is redacted; the
+ * site rules ask for a warning before anything firmer, and this is how a
+ * moderator knows whether one was given.
+ */
+export async function memberModHistory(
+  ctx: ForumContext,
+  viewer: Viewer | null,
+  username: string,
+  limit: number
+): Promise<{ username: string; status: UserStatus; entries: ModHistoryEntry[] }> {
+  if (!asModerator(viewer)) throw notFound("That page");
+  const { rows: found } = await ctx.pool.query<{ id: number; username: string; status: UserStatus }>(
+    "SELECT id, username, status FROM users WHERE LOWER(username) = LOWER($1) AND deleted_at IS NULL",
+    [username.trim().replace(/^@/, "")]
+  );
+  const member = found[0];
+  if (!member) throw notFound("That member");
+  const { rows } = await ctx.pool.query<{
+    created_at: Date;
+    moderator: string;
+    action: ModAction;
+    reason: string;
+    thread_id: number | null;
+    thread_title: string | null;
+    post_id: number | null;
+  }>(
+    `SELECT a.created_at, m.username AS moderator, a.action, a.reason,
+            pt.id AS thread_id, pt.title AS thread_title, p.id AS post_id
+       FROM mod_actions a
+       JOIN users m ON m.id = a.moderator_id
+       LEFT JOIN reports r ON a.target_type = 'report' AND r.id = a.target_id
+       LEFT JOIN posts p ON p.id = CASE a.target_type WHEN 'post' THEN a.target_id WHEN 'report' THEN r.post_id END
+       LEFT JOIN threads pt ON pt.id = p.thread_id
+      WHERE (a.target_type = 'user' AND a.target_id = $1)
+         OR p.author_id = $1
+      ORDER BY a.id DESC
+      LIMIT $2`,
+    [member.id, limit]
+  );
+  return {
+    username: member.username,
+    status: member.status,
+    entries: rows.map((r) => ({
+      at: r.created_at,
+      moderatorName: r.moderator,
+      action: r.action,
+      reason: r.reason,
+      threadId: r.thread_id,
+      threadTitle: r.thread_title,
+      postId: r.post_id,
+    })),
   };
 }

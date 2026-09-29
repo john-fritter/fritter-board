@@ -238,7 +238,7 @@ async function main() {
   assert.ok(res.text.includes("&amp;lt;b&amp;gt;zoning"), "post HTML is escaped inside the XML");
   assert.ok(!res.text.includes("<b>"));
   assert.equal((await req("GET", "/b/back-room/rss.xml", { cookie: eve })).status, 404, "the Back Room has no feed, even for members");
-  res = await req("POST", `/t/${t1}/mod`, { cookie: mo, form: { action: "move", board: "back-room", reason: "" } });
+  res = await req("POST", `/t/${t1}/mod`, { cookie: mo, form: { action: "move", board: "back-room", reason: "Members only" } });
   res = await req("GET", "/b/off-topic/rss.xml");
   assert.ok(!res.text.includes("Zoning vote"), "moving a thread into the Back Room takes it out of public feeds");
   assert.equal((await req("GET", `/t/${t1}`)).status, 404);

@@ -1,5 +1,6 @@
 import type { Child } from "hono/jsx";
-import type { BotRow, LogEntry, RunDetail, RunRow, StandingVersion, TranscriptMessage, NoteFilter } from "../botadmin/bots.js";
+import type { BotRow, BriefView, LogEntry, RunDetail, RunRow, StandingVersion, TranscriptMessage, NoteFilter } from "../botadmin/bots.js";
+import { BRIEF_TITLES } from "../runner/briefs.js";
 import { config } from "../config.js";
 import type { Page } from "../lib/pagination.js";
 import type { Note, Standing } from "../runner/memory.js";
@@ -35,11 +36,40 @@ function Status(props: { bot: Bot }) {
   return <>active</>;
 }
 
+function Moderation(props: { bot: Bot; calls: number }) {
+  const b = props.bot;
+  if (!b.moderates) return <>off</>;
+  if (!b.modApiKeyRef) return <>on, but no moderation key is named: no rounds</>;
+  const now = new Date();
+  return (
+    <>
+      rounds on <code>{b.modApiKeyRef}</code>, {props.calls} of {config.runner.moderation_calls_per_day} calls in 24h
+      {b.modPausedUntil && b.modPausedUntil > now ? (
+        <>
+          ; resting until <Time d={b.modPausedUntil} /> (NanoGPT daily cap)
+        </>
+      ) : (
+        b.active &&
+        b.modNextAt && (
+          <>
+            ; next patrol <Time d={b.modNextAt} />
+          </>
+        )
+      )}
+      {b.modEarlyAt && (
+        <>
+          ; early round <Time d={b.modEarlyAt} /> ({b.modEarlyTrigger})
+        </>
+      )}
+    </>
+  );
+}
+
 function RunSummary(props: { run: RunRow }) {
   const r = props.run;
   return (
     <>
-      {r.kind === "compaction" ? "compaction" : r.trigger} · <span class={`outcome-${r.outcome}`}>{r.outcome}</span>
+      {r.kind === "wake" ? r.trigger : r.kind === "compaction" ? "compaction" : `moderation (${r.trigger})`} · <span class={`outcome-${r.outcome}`}>{r.outcome}</span>
       {r.modelCalls > 0 && ` · ${r.modelCalls} call(s), ${n(r.promptTokens)} in / ${n(r.completionTokens)} out`}
       {r.summaryCalls > 0 && ` · ${r.summaryCalls} summary call(s)`}
       {r.writes > 0 && ` · ${r.writes} write(s)`}
@@ -183,6 +213,9 @@ export function BotsPage(props: { ctx: PageCtx; bots: BotRow[]; unconfigured: st
               </tbody>
             </table>
           </div>
+          <p>
+            <a href={ctx.url("/admin/briefs")}>Role briefs</a>: what every bot is told about the board, and the moderator about moderating.
+          </p>
           {props.unconfigured.length > 0 && (
             <p class="hint">
               Bot accounts without runner settings: {props.unconfigured.join(", ")}. Give one settings with{" "}
@@ -264,7 +297,36 @@ function SettingsForm(props: { ctx: PageCtx; bot: Bot; s: Required<SettingsInput
         <Field label="Writes in" hint="(board slugs, or all)" name="boards" value={s.boards} />
         <Field label="Key variable" name="keyEnv" value={s.keyEnv} />
         <Field label="Token variable" name="tokenEnv" value={s.tokenEnv} />
+        <Field label="Model calls a day" hint="(on its key; or default)" name="callsPerDay" value={s.callsPerDay} />
       </div>
+      <div class="inline-fields">
+        <label>
+          Moderation rounds
+          <select name="moderates">
+            <option value="off" selected={s.moderates === "off"}>
+              off
+            </option>
+            <option value="on" selected={s.moderates === "on"}>
+              on
+            </option>
+          </select>
+        </label>
+        <Field label="Moderation key variable" name="modKeyEnv" value={s.modKeyEnv} />
+        <label>
+          Moderation effort
+          <select name="modEffort">
+            {EFFORTS.map((e) => (
+              <option value={e} selected={s.modEffort === e}>
+                {e}
+              </option>
+            ))}
+          </select>
+        </label>
+        <Field label="Model calls a round" name="modSteps" value={s.modSteps} />
+      </div>
+      <p class="hint">
+        Moderation rounds need the bot to be a moderator on the board. Mod tools are offered only in rounds, never on ordinary visits.
+      </p>
       <label>
         Persona
         <textarea name="persona" rows={18} class="tall">
@@ -339,13 +401,22 @@ export function BotPage(props: BotPageProps) {
             </dd>
             <dt>Inbox read to</dt>
             <dd>{bot.inboxCursor ? <Time d={bot.inboxCursor} /> : "-"}</dd>
+            <dt>Model calls, 24h</dt>
+            <dd>
+              {row.callsToday} of {bot.modelCallsPerDay ?? config.runner.model_calls_per_day} on <code>{bot.apiKeyRef}</code>
+            </dd>
+            <dt>Moderation</dt>
+            <dd>
+              <Moderation bot={bot} calls={row.modCallsToday} />
+            </dd>
           </dl>
           <div class="form-actions">
             {bot.active ? control("pause", "Pause") : control("resume", "Resume")}
             {control("wake", "Wake now", !bot.active)}
             {control("compact", "Compact notes now", !bot.active)}
+            {bot.moderates && control("moderate", "Moderate now", !bot.active || !bot.modApiKeyRef)}
           </div>
-          <p class="hint">Wake and compact happen at the runner's next tick, within {config.runner.tick_seconds} seconds.</p>
+          <p class="hint">Wake, compact and moderate happen at the runner's next tick, within {config.runner.tick_seconds} seconds.</p>
         </div>
       </section>
 
@@ -770,6 +841,94 @@ export function ChangesPage(props: { ctx: PageCtx; bot: Bot; entries: LogEntry[]
           </div>
         </div>
       </section>
+    </Layout>
+  );
+}
+
+// ── Role briefs ────────────────────────────────────────────────────────────
+
+const BRIEF_ABOUT: Record<BriefView["name"], string> = {
+  member: "Every bot, on every visit and round: what the board is and how to be a member of it.",
+  moderator_member: "Added on the ordinary visits of a bot that moderates.",
+  moderation: "The moderator's brief for moderation rounds, with the site rules.",
+};
+
+export function BriefsPage(props: { ctx: PageCtx; briefs: BriefView[]; saved?: string | null; error?: { name: string; message: string; text: string } | null }) {
+  const { ctx } = props;
+  const t: { label: string; href?: string }[] = [{ label: "Admin", href: "/admin" }, { label: "Bots", href: "/admin/bots" }, { label: "Role briefs" }];
+  return (
+    <Layout ctx={ctx} title="Role briefs · Bots">
+      <Crumbs ctx={ctx} trail={t} />
+      <h1 class="page-title">Role briefs</h1>
+      <p class="desc">
+        A bot's prompt is the board's own instructions, then these briefs, then its persona. Changes apply from each bot's next visit.
+      </p>
+      {props.saved && (
+        <p class="notice" role="status">
+          {props.saved}
+        </p>
+      )}
+      {props.briefs.map((b) => {
+        const error = props.error?.name === b.name ? props.error : null;
+        return (
+          <section class="panel" id={b.name}>
+            <h2 class="panel-head">{BRIEF_TITLES[b.name]}</h2>
+            <div class="panel-body">
+              <p class="meta">
+                {BRIEF_ABOUT[b.name]}{" "}
+                {b.latest ? (
+                  <>
+                    Version {b.latest.id}, <Time d={b.latest.createdAt} /> by {b.latest.createdBy}.
+                  </>
+                ) : (
+                  <>
+                    As shipped (<code>config/briefs/{b.name}.md</code>).
+                  </>
+                )}
+              </p>
+              <ErrorNote message={error?.message} />
+              <form method="post" action={ctx.url(`/admin/briefs/${b.name}`)} class="compose">
+                <textarea name="body" rows={14} aria-label={BRIEF_TITLES[b.name]} class="tall">
+                  {error ? error.text : b.current}
+                </textarea>
+                <div class="form-actions">
+                  <button type="submit">Save as a new version</button>
+                </div>
+              </form>
+              {b.latest && b.latest.body !== b.shipped && (
+                <form method="post" action={ctx.url(`/admin/briefs/${b.name}/restore`)} class="inline-form">
+                  <button type="submit" class="linkish">
+                    Go back to the shipped text
+                  </button>
+                </form>
+              )}
+              {b.versions.length > 1 && (
+                <details>
+                  <summary>Earlier versions</summary>
+                  <ul class="recent-posts">
+                    {b.versions.slice(1).map((v) => (
+                      <li>
+                        <details>
+                          <summary>
+                            Version {v.id} · <Time d={v.createdAt} /> · {v.createdBy}
+                          </summary>
+                          <div class="pre-text">{v.body}</div>
+                        </details>
+                        <form method="post" action={ctx.url(`/admin/briefs/${b.name}/restore`)} class="inline-form">
+                          <input type="hidden" name="version" value={String(v.id)} />
+                          <button type="submit" class="linkish">
+                            Restore this version
+                          </button>
+                        </form>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </div>
+          </section>
+        );
+      })}
     </Layout>
   );
 }

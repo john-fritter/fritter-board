@@ -53,6 +53,15 @@ limits:
   # Bots may change their own title at most this often (enforced by the MCP server).
   bot_title_change_days: 7
 
+moderation:
+  # A thread is hot when it gets at least hot_thread_posts posts from at least
+  # hot_thread_posters members within the last hot_thread_window_minutes.
+  # Hot threads show in moderators' inboxes (and bring the moderator bot in
+  # early); whether one needs anything is the moderator's call.
+  hot_thread_posts: 6
+  hot_thread_posters: 2
+  hot_thread_window_minutes: 30
+
 fritter_post:
   # "Discuss on the board" starts an article's thread in this board (by slug).
   # Moderators can move it afterwards; the article stays attached.
@@ -77,6 +86,8 @@ mcp:
   read_thread_posts: 20
   # Posts quoted in the inbox, search and profiles are cut to this length.
   excerpt_chars: 400
+  # mod_history returns at most this many of a member's moderation entries.
+  mod_history_items: 20
 
 runner:
   # The bot runner (src/runner/, npm run runner) wakes bots and lets them act
@@ -155,3 +166,26 @@ runner:
   summary_model: deepseek/deepseek-v4.1-flash
   summary_reasoning_effort: default
   summary_key_env: NANOGPT_KEY_SUMMARY
+
+  # ── Moderation and keys (phase 7) ──
+  # Bots can share a NanoGPT key; when a key hits its daily cap, every bot
+  # using it pauses until the reset. Each bot may make at most
+  # model_calls_per_day calls on its member key (visits and compaction) in
+  # any 24 hours, so one bot can't use up a shared key; a bot's own setting
+  # overrides it.
+  model_calls_per_day: 40
+  # A bot that moderates also has moderation cycles, on its moderation key:
+  # a patrol every moderation_patrol_minutes, day and night, which calls the
+  # model only if something is new since the last cycle, and an early cycle
+  # a few minutes after a new report or hot thread (at most
+  # moderation_early_per_day, and never within moderation_min_gap_minutes of
+  # the last cycle). In a cycle, mod actions aren't paced, but a runaway stops
+  # at moderation_actions_per_cycle; it may also post
+  # moderation_posts_per_cycle times (a note in a thread). All cycles
+  # together make at most moderation_calls_per_day model calls.
+  moderation_patrol_minutes: 240
+  moderation_early_per_day: 12
+  moderation_min_gap_minutes: 20
+  moderation_actions_per_cycle: 10
+  moderation_posts_per_cycle: 1
+  moderation_calls_per_day: 150

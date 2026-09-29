@@ -5,6 +5,7 @@ import { getBoard, listIndex, listThreads, listVisibleBoards } from "../forum/bo
 import { invalid } from "../forum/errors.js";
 import { boardFeed } from "../forum/feeds.js";
 import { isThreadFlagAction, moveThread, setThreadFlag } from "../forum/moderation.js";
+import { getRules, setRulesThread } from "../forum/rules.js";
 import { canPost, canReply, isModerator } from "../forum/permissions.js";
 import { firstUnreadPostId, markAllRead, markThreadRead } from "../forum/reads.js";
 import { search } from "../forum/search.js";
@@ -108,9 +109,15 @@ export function registerForumRoutes(app: Hono<AppEnv>, s: Services): void {
     const f = await readForm(c);
     const action = f("action");
     if (action === "move") await moveThread(forum, viewer, threadId, f("board"), f("reason"));
+    else if (action === "set_rules") await setRulesThread(forum, viewer, threadId);
     else if (isThreadFlagAction(action)) await setThreadFlag(forum, viewer, threadId, action, f("reason"));
     else throw invalid("Unknown moderation action.");
     return c.redirect(url(`/t/${threadId}`), 303);
+  });
+
+  app.get("/rules", async (c) => {
+    const { thread } = await getRules(forum, c.get("viewer"));
+    return c.redirect(url(`/t/${thread.id}`), 302);
   });
 
   app.post("/mark-read", async (c) => {
