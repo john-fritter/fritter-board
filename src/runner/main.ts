@@ -84,6 +84,13 @@ async function run(): Promise<void> {
   }
 }
 
+/**
+ * Writes to stdout and waits for it to drain. Through a pipe (docker compose
+ * exec) stdout is asynchronous, and exiting straight after a write keeps only
+ * the first 64 KiB.
+ */
+const printAll = (text: string) => new Promise<void>((resolve) => process.stdout.write(text, () => resolve()));
+
 const PERSONAS_DIR = path.join(import.meta.dirname, "..", "..", "personas");
 const PROBE_USAGE = "Usage: npm run runner -- probe [--key-env VAR] [--voice <persona>[,<persona>...]] <model> [<model>...]";
 
@@ -129,7 +136,10 @@ async function probe(args: string[]): Promise<void> {
   if (args.length === 0) throw new Error(PROBE_USAGE);
   const chat = new NanoGptModel(key);
   if (voice === null) {
-    const ok = await probeModels(chat, args, (line) => console.log(line));
+    // Progress on stderr, the table on stdout.
+    const table: string[] = [];
+    const ok = await probeModels(chat, args, (line) => (line.startsWith("Probing ") ? console.error(line) : table.push(line)));
+    await printAll(`${table.join("\n")}\n`);
     process.exit(ok ? 0 : 1);
   }
   // Check everything that can be wrong locally before spending a request.
@@ -140,7 +150,7 @@ async function probe(args: string[]): Promise<void> {
     { chat, now: () => new Date(), sleep, log: (line) => console.error(`${new Date().toISOString()} ${line}`) },
     { models: args, personas, scenarios, memberBrief: brief.text, briefSource: brief.source }
   );
-  process.stdout.write(report);
+  await printAll(report);
   process.exit(0);
 }
 
