@@ -59,18 +59,64 @@ export function voiceSystemPrompt(memberBrief: string, persona: string): string 
   return [BOARD_NOTE, `## The board\n\n${memberBrief.trim()}`, `## Who you are\n\n${persona.trim()}`].join("\n\n");
 }
 
+/** A scenario's posts get ids from here, in order. */
+const FIRST_POST_ID = 1001;
+
 /** The scenario as the model sees it: the thread as read_thread shows it, then what to write. */
 export function scenarioPrompt(s: Scenario): string {
   if (!s.thread) return s.ask;
   const t = s.thread;
   const posts = t.posts.map((p, i) => ({
     number: i + 1,
-    post_id: 1001 + i,
+    post_id: FIRST_POST_ID + i,
     author: { name: p.author, ...(p.bot ? { bot: true } : {}), ...(p.role ? { role: p.role } : {}) },
     body: p.body,
   }));
   const read = { thread: { thread_id: 101, title: t.title, board: t.board, posts: posts.length, you_can_reply: true }, posts, next_from: null };
   return `${JSON.stringify(read)}\n\n${s.ask}`;
+}
+
+const QUOTE = /\[quote(?:=(?:"([^"\]]*)"|([^\s\]]+)))?(?:\s+post=(\d+))?\]([\s\S]*?)\[\/quote\]/gi;
+
+/** Text for comparing a quote with its source: no tags, quote marks or case, spaces collapsed. */
+const plain = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/\[\/?[a-z]+(?:=[^\]]*)?\]/g, " ")
+    .replace(/[\\"'“”‘’]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+/**
+ * What a member shouldn't do, checked mechanically: link to anything (bots
+ * can't browse, so a link is made up), quote words that aren't in the thread
+ * or someone who isn't, @mention someone who isn't there, or write Markdown.
+ * A flag is a reason to read the sample closely, not a verdict.
+ */
+export function sampleFlags(text: string, scenario: Scenario): string[] {
+  const flags = new Set<string>();
+  const posts = (scenario.thread?.posts ?? []).map((p, i) => ({ ...p, id: FIRST_POST_ID + i }));
+  if (/\[url[=\]]|https?:\/\/|www\./i.test(text)) flags.add("link");
+  for (const m of text.matchAll(QUOTE)) {
+    if (!posts.length) {
+      flags.add("quote with nothing to quote");
+      continue;
+    }
+    const name = (m[1] ?? m[2])?.toLowerCase();
+    const id = m[3] ? Number(m[3]) : null;
+    const sources = posts.filter((p) => (!name || p.author.toLowerCase() === name) && (id === null || p.id === id));
+    // An ellipsis may join pieces of the source; each piece must be in it.
+    const pieces = plain(m[4]!).split(/\s*(?:\.\.\.|…)\s*/).filter((f) => f.length >= 12);
+    if (!sources.length || pieces.some((f) => !sources.some((p) => plain(p.body).includes(f)))) flags.add("quote not in the thread");
+  }
+  if ((text.match(/\[quote/gi)?.length ?? 0) !== (text.match(/\[\/quote\]/gi)?.length ?? 0)) flags.add("unbalanced quote tags");
+  const present = new Set(posts.map((p) => p.author.toLowerCase()));
+  for (const m of text.matchAll(/(?:^|[^\w@])@([A-Za-z0-9][\w.-]*)/g)) {
+    const who = m[1]!.replace(/[.-]+$/, "");
+    if (!present.has(who.toLowerCase())) flags.add(`@${who}: not in the thread`);
+  }
+  if (/\*\*[^*\n]+\*\*|^#{1,6} \S|^```|\[[^\]\n]+\]\(https?:/m.test(text)) flags.add("markdown");
+  return [...flags];
 }
 
 export interface Persona {
@@ -86,6 +132,8 @@ export interface VoiceSample {
   text: string | null;
   /** Why there's no text, or what was odd about it. */
   note: string | null;
+  /** From sampleFlags. */
+  flags: string[];
   seconds: number;
   outputTokens: number;
   reasoningTokens: number;
@@ -149,7 +197,7 @@ export async function runVoiceProbe(deps: VoiceProbeDeps, input: VoiceProbeInput
       for (const scenario of input.scenarios) {
         for (const r of results.filter(isReachable)) {
           deps.log(`${persona.name}, ${scenario.name}: ${r.model}…`);
-          samples.push(await sample(chat, deps, r, system, scenarioPrompt(scenario), persona.name, scenario.name));
+          samples.push(await sample(chat, deps, r, system, scenario, persona.name));
         }
       }
     }
@@ -166,17 +214,17 @@ async function sample(
   deps: VoiceProbeDeps,
   probed: ProbeResult,
   system: string,
-  prompt: string,
-  persona: string,
-  scenario: string
+  scenario: Scenario,
+  persona: string
 ): Promise<VoiceSample> {
   const out: VoiceSample = {
     persona,
-    scenario,
+    scenario: scenario.name,
     model: probed.model,
     effort: probed.effort,
     text: null,
     note: null,
+    flags: [],
     seconds: 0,
     outputTokens: 0,
     reasoningTokens: 0,
@@ -187,7 +235,7 @@ async function sample(
       reasoningEffort: probed.effort,
       messages: [
         { role: "system", content: system },
-        { role: "user", content: prompt },
+        { role: "user", content: scenarioPrompt(scenario) },
       ],
     });
   const started = deps.now().getTime();
@@ -210,7 +258,10 @@ async function sample(
   out.outputTokens = res.usage.completionTokens;
   out.reasoningTokens = res.usage.reasoningTokens;
   const text = res.content?.trim() ?? "";
-  if (text) out.text = text;
+  if (text) {
+    out.text = text;
+    out.flags = sampleFlags(text, scenario);
+  }
   if (res.finishReason === "length") out.note = text ? "cut off at the output limit" : "used the whole output limit without writing anything";
   else if (!text) out.note = res.toolCalls.length ? "tried to call a tool" : "empty reply";
   return out;
@@ -228,6 +279,7 @@ function report(input: VoiceProbeInput, results: ProbeResult[], samples: VoiceSa
   lines.push("", "## Mechanics", "", ...probeTable(results));
   const skipped = results.filter((r) => !isReachable(r)).map((r) => r.model);
   if (skipped.length) lines.push("", `Unreachable, so no samples: ${skipped.join(", ")}.`);
+  if (samples.length) lines.push("", "## Summary", "", "Characters in each sample, and its flags.", "", ...summaryTable(input, samples));
 
   for (const persona of input.personas) {
     const mine = samples.filter((s) => s.persona === persona.name);
@@ -240,12 +292,31 @@ function report(input: VoiceProbeInput, results: ProbeResult[], samples: VoiceSa
       for (const s of these) {
         const tokens = s.reasoningTokens ? `${s.outputTokens} tokens out, ${s.reasoningTokens} reasoning` : `${s.outputTokens} tokens out`;
         const facts = [`${s.seconds.toFixed(1)}s`, tokens, ...(s.text ? [`${s.text.length} chars`] : []), `effort ${s.effort}`];
-        lines.push("", `#### ${s.model}`, "", `*${facts.join(", ")}*${s.note ? `. **${s.note}**` : ""}`);
+        const notes = [...(s.note ? [s.note] : []), ...(s.flags.length ? [`flags: ${s.flags.join("; ")}`] : [])];
+        lines.push("", `#### ${s.model}`, "", `*${facts.join(", ")}*${notes.length ? `. **${notes.join(". ")}**` : ""}`);
         if (s.text) lines.push("", fence(s.text));
       }
     }
   }
   return `${lines.join("\n")}\n`;
+}
+
+/** A row per model and persona, a column per scenario. */
+function summaryTable(input: VoiceProbeInput, samples: VoiceSample[]): string[] {
+  const cell = (s: VoiceSample | undefined) =>
+    !s ? "" : !s.text ? (s.note ?? "no text") : [s.text.length.toLocaleString("en-US"), ...s.flags].join("; ").replace(/\|/g, "/");
+  const rows: string[] = [
+    `| model | persona | ${input.scenarios.map((sc) => sc.name).join(" | ")} |`,
+    `|---|---|${input.scenarios.map(() => "---").join("|")}|`,
+  ];
+  for (const model of input.models) {
+    for (const persona of input.personas) {
+      const mine = samples.filter((s) => s.model === model && s.persona === persona.name);
+      if (!mine.length) continue;
+      rows.push(`| ${model} | ${persona.name} | ${input.scenarios.map((sc) => cell(mine.find((s) => s.scenario === sc.name))).join(" | ")} |`);
+    }
+  }
+  return rows;
 }
 
 /** A fenced block that the text can't close early. */

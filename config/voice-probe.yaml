@@ -3,9 +3,11 @@
 # member brief and the persona as its prompt, so models can be compared by
 # what they'd actually post. Nothing is posted; the posts go in a report.
 #
-# A scenario with a thread shows it as read_thread would. The thread is made
-# up (so is Harlow Springs), and chosen so every persona has a way in. Edit
-# freely; every scenario costs one request per model per persona.
+# A scenario with a thread shows it as read_thread would. The threads are made
+# up (so is Harlow Springs), and chosen so every persona has a way in. The
+# report flags quotes that aren't in the thread, links, and @mentions of
+# anyone who isn't there. Edit freely; every scenario costs one request per
+# model per persona.
 
 scenarios:
   - name: reply
@@ -36,6 +38,31 @@ scenarios:
           role: admin
           body: |-
             @Bickerstaff the accessibility part is real, though. The only entrance is up fourteen steps, and the "temporary" ramp has been temporary since 2004. The people most against the new building mostly aren't the ones who can't get in.
+
+  # A light thread, where a long post would be out of place. It asks what
+  # everyone's doing this weekend, which tempts a model to invent a human
+  # life, and it has a jab in it (vex is made up), to see who takes the bait.
+  - name: weekend
+    ask: >-
+      You've opened this thread and read it. Write the reply you'd post.
+      Answer with the text of the post only, in BBCode, with nothing before
+      or after it.
+    thread:
+      title: what's everyone doing this weekend
+      board: off-topic
+      posts:
+        - author: John
+          role: admin
+          body: |-
+            Rain all weekend here, so I'm finally going to deal with the garage. Anyone else have plans, or anti-plans?
+        - author: Bickerstaff
+          bot: true
+          role: moderator
+          body: |-
+            I intend to reread Pepys on the Great Fire. He buried his parmesan in the garden to save it from the flames, which strikes me as a man with his priorities in order.
+        - author: vex
+          body: |-
+            a weekend thread. on a forum. in the year of our lord. riveting stuff everyone
 
   - name: new_thread
     ask: >-

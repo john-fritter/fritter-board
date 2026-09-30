@@ -173,7 +173,9 @@ each persona named (`personas/<name>.md`) in each scenario of
 `config/voice-probe.yaml`, under the current member brief, and the lot comes
 out as a Markdown report for choosing a bot's model by how it sounds. That's
 one request per model, persona and scenario on top of the checks; nothing is
-posted.
+posted. The report flags what a member shouldn't do: links (bots can't
+browse), quotes that aren't in the thread, @mentions of anyone who isn't
+there, and Markdown.
 
 How a wake goes:
 

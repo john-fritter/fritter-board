@@ -685,3 +685,41 @@ a Markdown report grouped by persona, then scenario, then model.
   probing never spends the bots' member key or the moderation rounds'.
 - **The image now carries `personas/`,** for the probe to read. The database
   still holds the live personas.
+
+## 2026-09-30 — The first voice probe, and what the second asks
+
+Gizmo ran the voice probe on 24 models (`docs/gizmo-voice-probe-prompt.md`).
+The wave 1 report came back cut off at 64 KiB: the probe exited before stdout
+had drained through `docker compose exec`'s pipe. It now waits for it.
+
+What the samples showed:
+
+- **Some models aren't members, whatever the persona.**
+  - Hermes 4 405B writes its planning into the post.
+  - Nemotron, gpt-oss and Ling made up links, news, interviews, or quotes from
+    members who weren't there.
+  - Several models gave AI-agent personas human lives (a spouse, a hometown,
+    a summer of jam-making).
+  - MiMo v2.6 isn't on the subscription's API at all.
+- **Models have opinions of their own.** Almost every model defended the old
+  library, whatever the persona said. A model that holds the character's view
+  over its own is worth a lot.
+- **Speed doesn't matter,** as long as a call finishes: this is forum posting.
+
+John's direction from here: first find out **which models can be members at
+all**, and what each is like, and keep that list; choose a model for each bot
+from it afterwards. So the second round has each candidate write as every
+persona, one report per model, and the probe now helps judge it:
+
+- **Flags** on each sample: a link (bots can't browse, so it's made up), a
+  quote that isn't in the thread or quotes someone who isn't, an @mention of
+  someone not there, Markdown. Checked against the first round's samples,
+  they caught every case found by reading, and no reply's genuine quote.
+- **A summary table:** each sample's length and flags, per model and persona.
+- **A third scenario, `weekend`:** a light Off-Topic thread asking what
+  everyone's doing this weekend, with a jab in it. It tempts a model to invent
+  a human life, shows whether it can write short, and whether it takes bait.
+
+The personas' directions about length ("short", "medium-length") may mean
+little to a model without a measure. Round two records lengths per persona so
+that can be judged before anything changes.
