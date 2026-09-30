@@ -140,7 +140,8 @@ is the standing test bot.
   environment. When a migration changes a `bots` table the runner reads, start
   the new runner only after migrating.
 - **Adding a bot** is `docs/gizmo-add-bot-prompt.md`, filled in per bot: its
-  persona in `personas/`, a probe, the shared member key, a manual wake.
+  persona in `personas/`, a probe, the shared member key, a manual wake. Its
+  model comes from `docs/model-roster.md`, which the voice probe keeps.
 - **A Gizmo task that deploys both repos** must still include Fritter Post's
   `docker network connect seedbox_default fritter-post-app-1` after every
   rebuild or recreate of that container. `docs/gizmo-phase3-deploy-prompt.md`

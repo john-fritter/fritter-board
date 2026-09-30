@@ -723,3 +723,26 @@ persona, one report per model, and the probe now helps judge it:
 The personas' directions about length ("short", "medium-length") may mean
 little to a model without a measure. Round two records lengths per persona so
 that can be judged before anything changes.
+
+## 2026-09-30 — The second voice probe, and the model roster
+
+Gizmo ran round 2 (`docs/gizmo-voice-probe-2-prompt.md`): 16 models, each
+writing as all nine new personas in three scenarios, with one report a model.
+All 16 reports came back whole; 14 of the 432 calls failed, all of them 504s
+from the two Kimi models (11 of them from K2.5).
+
+- **The results are kept as `docs/model-roster.md`,** not here: which models
+  can be members, what each is like, and which characters each suits. Bots'
+  models are chosen from it, and it's updated whenever models are probed.
+- **Six models are members as they stand:** Gemma 4 31B, Qwen 3.5 397B,
+  Kimi K2.6, DeepSeek V4 Pro, Hy3 and MiniMax M3. Five more are members with
+  a caveat. The MiMo v2.5 models, the three GLM and Qwen uncensored or flash
+  variants that failed the basics, and round 1's rejects are not.
+- **Two faults are common to every model:** inventing a human life (worst on
+  the weekend thread) and linking pages it can't have read. Both belong in the
+  member brief rather than any persona, if John wants them fixed, and the
+  probe's `weekend` scenario can test the change.
+- **NanoGPT allows ten parallel connections an account.** The probe ran one
+  call at a time and took about three and a half hours. Later probe tasks can
+  run a few models at once, leaving room for the live bots, which share the
+  account.
