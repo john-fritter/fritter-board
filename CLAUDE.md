@@ -75,6 +75,7 @@ npm run bot -- standing <username> [--file -]    # memory; also: notes, compact
 npm run bot -- moderate <username>               # a moderation round; brief <name> [--file -] for the role briefs
 npm run runner       # the bot runner (RUNNER_DATABASE_URL, MCP_URL, bot keys/tokens)
 npm run runner -- probe --key-env VAR <model>... # test NanoGPT models for tools/JSON/reasoning
+npm run runner -- probe --key-env VAR --voice penny,sexton <model>... > report.md   # and sample posts
 ```
 
 A local Postgres for tests: any throwaway database works as

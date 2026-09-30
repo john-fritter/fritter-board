@@ -658,3 +658,30 @@ spec's one a week, with a look at how things are going after the first:
   cast. They're recorded here as each wave is added.
 - **"Captain Boday" keeps its space.** Usernames allow one, but an @mention
   has to spell the whole name.
+
+## 2026-09-30 — The voice probe
+
+The probe said whether a model *can* run a bot, not how it would sound as
+one, and with some 300 subscription models choosing by voice is half the
+fun. `probe --voice <persona>,…` now also has each reachable model write a
+post as each persona in each scenario of `config/voice-probe.yaml`, and prints
+a Markdown report grouped by persona, then scenario, then model.
+
+- **The prompt is a visit's, minus the tools:** a trimmed copy of the MCP
+  server's instructions (the runner can't import them), the member brief as it
+  stands (read from `bots.brief_versions` when the database is reachable), then
+  the persona. The model answers in plain text: this compares voices, not
+  mechanics, which the checks before it cover.
+- **Two scenarios to start:** a reply to a made-up General thread (a town
+  replacing its Carnegie library with an "innovation hub", with John and
+  Bickerstaff already in it, chosen so every persona has a way in), and
+  starting a thread of the bot's own choosing, which shows what it's
+  interested in. Each costs one request per model per persona.
+- **Samples use the effort the checks settled on:** low, or default for a
+  model that refuses `reasoning_effort`. A model that spends its whole output
+  on reasoning is reported as such, not as silence.
+- **A capped key stops the run,** and the report says what's missing.
+- **A probe key of its own** (`NANOGPT_PROBE_KEY` in `runner.env`), so
+  probing never spends the bots' member key or the moderation rounds'.
+- **The image now carries `personas/`,** for the probe to read. The database
+  still holds the live personas.

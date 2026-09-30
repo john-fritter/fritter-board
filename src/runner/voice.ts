@@ -1,0 +1,256 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import YAML from "yaml";
+import { z } from "zod";
+import { config } from "../config.js";
+import { ModelError, type ChatModel, type ChatResponse, type ReasoningEffort } from "./model.js";
+import { isReachable, probeModel, probeTable, type ProbeResult } from "./probe.js";
+
+/**
+ * The voice probe: how a model would sound as a given bot. The mechanical
+ * probe (./probe.ts) says whether a model can run a bot; this has each model
+ * write the post a persona would make in a few fixed scenarios
+ * (config/voice-probe.yaml), with the member brief and the persona as its
+ * prompt, and collects them in a Markdown report to compare. Nothing is
+ * posted, and nothing touches the board.
+ */
+
+const ScenarioSchema = z.object({
+  name: z.string().regex(/^[a-z0-9_-]+$/),
+  ask: z.string().min(1),
+  thread: z
+    .object({
+      title: z.string().min(1),
+      board: z.string().min(1),
+      posts: z
+        .array(
+          z.object({
+            author: z.string().min(1),
+            body: z.string().min(1),
+            bot: z.boolean().optional(),
+            role: z.enum(["admin", "moderator"]).optional(),
+          })
+        )
+        .min(1),
+    })
+    .optional(),
+});
+const ScenariosSchema = z.object({ scenarios: z.array(ScenarioSchema).min(1) });
+
+export type Scenario = z.infer<typeof ScenarioSchema>;
+
+export const SCENARIOS_FILE = path.join(import.meta.dirname, "..", "..", "config", "voice-probe.yaml");
+
+export function loadScenarios(file = SCENARIOS_FILE): Scenario[] {
+  return ScenariosSchema.parse(YAML.parse(readFileSync(file, "utf-8"))).scenarios;
+}
+
+/**
+ * What a visit's prompt says about the board's mechanics, trimmed to what
+ * matters for writing a post: the runner can't import the MCP server's
+ * instructions, and the tools and limits don't apply here.
+ */
+const BOARD_NOTE = `This is ${config.site.name}, a small text-only discussion board styled on a 2006 forum. You are a member. Threads sort by last reply; there is no voting, and nothing rewards volume.
+
+Posts use BBCode, not Markdown: [b]bold[/b], [i]italic[/i], [u]underline[/u], [s]strike[/s], [url=https://example.com]a link[/url], [code]…[/code], and quotes with [quote="Name" post=123]…[/quote]. Plain URLs are linked automatically. No images and no HTML. Refer to a member as @Name.`;
+
+/** The prompt a sample is written under: the board, the member brief, the persona, as on a visit. */
+export function voiceSystemPrompt(memberBrief: string, persona: string): string {
+  return [BOARD_NOTE, `## The board\n\n${memberBrief.trim()}`, `## Who you are\n\n${persona.trim()}`].join("\n\n");
+}
+
+/** The scenario as the model sees it: the thread as read_thread shows it, then what to write. */
+export function scenarioPrompt(s: Scenario): string {
+  if (!s.thread) return s.ask;
+  const t = s.thread;
+  const posts = t.posts.map((p, i) => ({
+    number: i + 1,
+    post_id: 1001 + i,
+    author: { name: p.author, ...(p.bot ? { bot: true } : {}), ...(p.role ? { role: p.role } : {}) },
+    body: p.body,
+  }));
+  const read = { thread: { thread_id: 101, title: t.title, board: t.board, posts: posts.length, you_can_reply: true }, posts, next_from: null };
+  return `${JSON.stringify(read)}\n\n${s.ask}`;
+}
+
+export interface Persona {
+  name: string;
+  text: string;
+}
+
+export interface VoiceSample {
+  persona: string;
+  scenario: string;
+  model: string;
+  effort: ReasoningEffort;
+  text: string | null;
+  /** Why there's no text, or what was odd about it. */
+  note: string | null;
+  seconds: number;
+  outputTokens: number;
+  reasoningTokens: number;
+}
+
+export interface VoiceProbeDeps {
+  chat: ChatModel;
+  now: () => Date;
+  sleep: (ms: number) => Promise<void>;
+  /** Progress, one line at a time. */
+  log: (line: string) => void;
+}
+
+export interface VoiceProbeInput {
+  models: string[];
+  personas: Persona[];
+  scenarios: Scenario[];
+  memberBrief: string;
+  /** Where the member brief came from, for the report ("as edited", "as shipped"). */
+  briefSource: string;
+}
+
+class DailyCap extends Error {}
+const CAPPED = "The probe key reached its daily cap.";
+
+/**
+ * Probes each model's mechanics, then has every reachable one write a post
+ * per persona per scenario. Returns the report. When the key reaches its
+ * daily cap, the run stops and the report says what's missing.
+ */
+export async function runVoiceProbe(deps: VoiceProbeDeps, input: VoiceProbeInput): Promise<string> {
+  // Every call goes through here, so a capped key stops the run: at once in
+  // the samples, and after the model in hand in the mechanics, which report
+  // their errors rather than throwing them.
+  let capped = false;
+  const chat: ChatModel = {
+    async complete(req) {
+      if (capped) throw new DailyCap(CAPPED);
+      try {
+        return await deps.chat.complete(req);
+      } catch (err) {
+        if (!(err instanceof ModelError && err.isDailyCap)) throw err;
+        capped = true;
+        throw new DailyCap(CAPPED);
+      }
+    },
+  };
+
+  const results: ProbeResult[] = [];
+  const samples: VoiceSample[] = [];
+  let stopped: string | null = null;
+  try {
+    for (const model of input.models) {
+      deps.log(`Probing ${model}…`);
+      const r = await probeModel(chat, model);
+      if (capped) throw new DailyCap(CAPPED);
+      results.push(r);
+    }
+    for (const persona of input.personas) {
+      const system = voiceSystemPrompt(input.memberBrief, persona.text);
+      for (const scenario of input.scenarios) {
+        for (const r of results.filter(isReachable)) {
+          deps.log(`${persona.name}, ${scenario.name}: ${r.model}…`);
+          samples.push(await sample(chat, deps, r, system, scenarioPrompt(scenario), persona.name, scenario.name));
+        }
+      }
+    }
+  } catch (err) {
+    if (!(err instanceof DailyCap)) throw err;
+    stopped = err.message;
+    deps.log(stopped);
+  }
+  return report(input, results, samples, stopped, deps.now());
+}
+
+async function sample(
+  chat: ChatModel,
+  deps: VoiceProbeDeps,
+  probed: ProbeResult,
+  system: string,
+  prompt: string,
+  persona: string,
+  scenario: string
+): Promise<VoiceSample> {
+  const out: VoiceSample = {
+    persona,
+    scenario,
+    model: probed.model,
+    effort: probed.effort,
+    text: null,
+    note: null,
+    seconds: 0,
+    outputTokens: 0,
+    reasoningTokens: 0,
+  };
+  const call = () =>
+    chat.complete({
+      model: probed.model,
+      reasoningEffort: probed.effort,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: prompt },
+      ],
+    });
+  const started = deps.now().getTime();
+  let res: ChatResponse;
+  try {
+    try {
+      res = await call();
+    } catch (err) {
+      if (!(err instanceof ModelError && err.isTransient)) throw err;
+      await deps.sleep(config.runner.retry_wait_seconds * 1000);
+      res = await call();
+    }
+  } catch (err) {
+    if (err instanceof DailyCap) throw err;
+    out.seconds = (deps.now().getTime() - started) / 1000;
+    out.note = `failed: ${err instanceof ModelError && err.status ? `error ${err.status}${err.code ? ` ${err.code}` : ""}` : err instanceof Error ? err.message.slice(0, 120) : String(err)}`;
+    return out;
+  }
+  out.seconds = (deps.now().getTime() - started) / 1000;
+  out.outputTokens = res.usage.completionTokens;
+  out.reasoningTokens = res.usage.reasoningTokens;
+  const text = res.content?.trim() ?? "";
+  if (text) out.text = text;
+  if (res.finishReason === "length") out.note = text ? "cut off at the output limit" : "used the whole output limit without writing anything";
+  else if (!text) out.note = res.toolCalls.length ? "tried to call a tool" : "empty reply";
+  return out;
+}
+
+function report(input: VoiceProbeInput, results: ProbeResult[], samples: VoiceSample[], stopped: string | null, at: Date): string {
+  const lines: string[] = [
+    `# Voice probe, ${at.toISOString().slice(0, 16).replace("T", " ")} UTC`,
+    "",
+    `- Models: ${input.models.length}. Personas: ${input.personas.map((p) => p.name).join(", ")}. Scenarios: ${input.scenarios.map((s) => s.name).join(", ")}.`,
+    `- Prompt: the board's mechanics, the member brief (${input.briefSource}), the persona.`,
+    "- Samples are written at the effort the mechanics used: low, or default for a model that refuses reasoning_effort.",
+  ];
+  if (stopped) lines.push(`- **Stopped early:** ${stopped} What's below is what was done before it.`);
+  lines.push("", "## Mechanics", "", ...probeTable(results));
+  const skipped = results.filter((r) => !isReachable(r)).map((r) => r.model);
+  if (skipped.length) lines.push("", `Unreachable, so no samples: ${skipped.join(", ")}.`);
+
+  for (const persona of input.personas) {
+    const mine = samples.filter((s) => s.persona === persona.name);
+    if (!mine.length) continue;
+    lines.push("", `## ${persona.name}`);
+    for (const scenario of input.scenarios) {
+      const these = mine.filter((s) => s.scenario === scenario.name);
+      if (!these.length) continue;
+      lines.push("", `### ${persona.name}: ${scenario.name}`);
+      for (const s of these) {
+        const tokens = s.reasoningTokens ? `${s.outputTokens} tokens out, ${s.reasoningTokens} reasoning` : `${s.outputTokens} tokens out`;
+        const facts = [`${s.seconds.toFixed(1)}s`, tokens, ...(s.text ? [`${s.text.length} chars`] : []), `effort ${s.effort}`];
+        lines.push("", `#### ${s.model}`, "", `*${facts.join(", ")}*${s.note ? `. **${s.note}**` : ""}`);
+        if (s.text) lines.push("", fence(s.text));
+      }
+    }
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+/** A fenced block that the text can't close early. */
+function fence(text: string): string {
+  const longest = Math.max(0, ...[...text.matchAll(/`+/g)].map((m) => m[0].length));
+  const f = "`".repeat(Math.max(3, longest + 1));
+  return `${f}text\n${text}\n${f}`;
+}

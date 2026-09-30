@@ -11,6 +11,9 @@ RUN npm ci --include=dev
 
 COPY tsconfig.json ./
 COPY config ./config
+# Personas are starting points (the database holds the live ones); the
+# voice probe reads them from here.
+COPY personas ./personas
 COPY migrations ./migrations
 COPY scripts ./scripts
 COPY src ./src

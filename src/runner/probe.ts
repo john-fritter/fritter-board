@@ -31,6 +31,8 @@ export interface ProbeResult {
   reasoning: string;
   json: string;
   suggested: string;
+  /** The effort the checks ran at: "low", or "default" for a model that refuses the parameter. */
+  effort: ReasoningEffort;
 }
 
 function why(err: unknown): string {
@@ -39,7 +41,7 @@ function why(err: unknown): string {
 }
 
 export async function probeModel(chat: ChatModel, model: string): Promise<ProbeResult> {
-  const r: ProbeResult = { model, reachable: "no", tools: "-", reasoning: "-", json: "-", suggested: "don't use" };
+  const r: ProbeResult = { model, reachable: "no", tools: "-", reasoning: "-", json: "-", suggested: "don't use", effort: "low" };
   // The effort the rest of the checks use: "low", or "default" (no
   // reasoning_effort sent) for a model that refuses the parameter.
   let effort: ReasoningEffort = "low";
@@ -55,6 +57,7 @@ export async function probeModel(chat: ChatModel, model: string): Promise<ProbeR
     } catch (err) {
       if (!(err instanceof ModelError && err.isUnsupportedEffort)) throw err;
       effort = "default";
+      r.effort = effort;
       started = Date.now();
       res = await ask(ready);
     }
@@ -142,6 +145,16 @@ export async function probeModel(chat: ChatModel, model: string): Promise<ProbeR
   return r;
 }
 
+export const isReachable = (r: ProbeResult) => r.reachable.startsWith("yes");
+
+/** The results as a Markdown table, one line per row. */
+export function probeTable(results: ProbeResult[]): string[] {
+  const cols = ["model", "reachable", "tools", "reasoning", "json", "suggested"] as const;
+  const widths = cols.map((c) => Math.max(c.length, ...results.map((r) => r[c].length)));
+  const row = (cells: string[]) => `| ${cells.map((c, i) => c.padEnd(widths[i]!)).join(" | ")} |`;
+  return [row([...cols]), `|${widths.map((w) => "-".repeat(w + 2)).join("|")}|`, ...results.map((r) => row(cols.map((c) => r[c])))];
+}
+
 /** Probes each model in turn and prints a table. False if no model was reachable. */
 export async function probeModels(chat: ChatModel, models: string[], print: (line: string) => void): Promise<boolean> {
   const results: ProbeResult[] = [];
@@ -149,12 +162,7 @@ export async function probeModels(chat: ChatModel, models: string[], print: (lin
     print(`Probing ${model}…`);
     results.push(await probeModel(chat, model));
   }
-  const cols: (keyof ProbeResult)[] = ["model", "reachable", "tools", "reasoning", "json", "suggested"];
-  const widths = cols.map((c) => Math.max(c.length, ...results.map((r) => r[c].length)));
-  const row = (cells: string[]) => `| ${cells.map((c, i) => c.padEnd(widths[i]!)).join(" | ")} |`;
   print("");
-  print(row(cols));
-  print(`|${widths.map((w) => "-".repeat(w + 2)).join("|")}|`);
-  for (const r of results) print(row(cols.map((c) => r[c])));
-  return results.some((r) => r.reachable.startsWith("yes"));
+  for (const line of probeTable(results)) print(line);
+  return results.some(isReachable);
 }

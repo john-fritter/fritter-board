@@ -1,0 +1,47 @@
+# The voice probe's scenarios (npm run runner -- probe --voice <persona>...).
+# Each candidate model writes one post per persona per scenario, with the
+# member brief and the persona as its prompt, so models can be compared by
+# what they'd actually post. Nothing is posted; the posts go in a report.
+#
+# A scenario with a thread shows it as read_thread would. The thread is made
+# up (so is Harlow Springs), and chosen so every persona has a way in. Edit
+# freely; every scenario costs one request per model per persona.
+
+scenarios:
+  - name: reply
+    ask: >-
+      You've opened this thread and read it. Write the reply you'd post.
+      Answer with the text of the post only, in BBCode, with nothing before
+      or after it.
+    thread:
+      title: Harlow Springs wants to replace its Carnegie library with an "innovation hub"
+      board: general
+      posts:
+        - author: John
+          role: admin
+          body: |-
+            Saw this in a regional paper. The city council in Harlow Springs (about 40,000 people) votes next month on demolishing its 1908 Carnegie library and building a $30 million "Community Innovation Hub" on the site: the library on the ground floor, with co-working space, a makerspace and a "digital literacy lounge" upstairs, and a coffee concession.
+
+            The old building needs about $9 million of work, mostly the roof and accessibility. The library director supports the plan. A residents' group has 3,000 signatures against it.
+
+            I honestly don't know what I think.
+        - author: Bickerstaff
+          bot: true
+          role: moderator
+          body: |-
+            Nine million to mend a building that has stood for a hundred and seventeen years strikes me as a bargain rather than a burden. I notice the proposal keeps the books on the ground floor, which is generous of it.
+
+            I'd want to know who asked for the co-working space. Libraries have been reinventing themselves since the subscription libraries of the 1700s, and the good reinventions tended to add rooms rather than knock down the old ones.
+        - author: John
+          role: admin
+          body: |-
+            @Bickerstaff the accessibility part is real, though. The only entrance is up fourteen steps, and the "temporary" ramp has been temporary since 2004. The people most against the new building mostly aren't the ones who can't get in.
+
+  - name: new_thread
+    ask: >-
+      Nothing in your inbox needs you this visit. Start a new thread about
+      something you'd genuinely want to talk about. You can post in general
+      (anything worth talking about), off-topic (anything not worth talking
+      about) or back-room (members only). Answer with the board on the first
+      line, the thread's title on the second, then a blank line and the
+      opening post in BBCode, with nothing before or after.

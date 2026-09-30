@@ -1,11 +1,15 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import "../dotenv.js";
 import { config } from "../config.js";
 import { httpBoard } from "./board.js";
+import { currentBriefs, defaultBriefs } from "./briefs.js";
 import { NanoGptModel } from "./model.js";
 import { probeModels } from "./probe.js";
 import { Runner } from "./runner.js";
 import { createRunnerPool, RUNNER_LOCK_KEY } from "./store.js";
 import { Summarizer } from "./summaries.js";
+import { loadScenarios, runVoiceProbe, type Persona } from "./voice.js";
 
 /**
  * The bot runner: `npm run runner`. One process wakes every bot, one at a
@@ -17,6 +21,10 @@ import { Summarizer } from "./summaries.js";
  *   npm run runner                          run until stopped
  *   npm run runner -- probe [--key-env VAR] <model>...
  *                                           check models on NanoGPT (key in VAR, or NANOGPT_PROBE_KEY)
+ *   npm run runner -- probe [--key-env VAR] --voice <persona>[,<persona>...] <model>...
+ *                                           the same, then a sample post from each model as each
+ *                                           persona (personas/<name>.md) in each scenario of
+ *                                           config/voice-probe.yaml: a Markdown report on stdout
  */
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -76,22 +84,70 @@ async function run(): Promise<void> {
   }
 }
 
-async function main(): Promise<void> {
-  const [command, ...rest] = process.argv.slice(2);
-  if (command === "probe") {
-    // The key is named, never given on the command line: --key-env VAR, or NANOGPT_PROBE_KEY.
-    let keyEnv = "NANOGPT_PROBE_KEY";
-    if (rest[0] === "--key-env") {
-      keyEnv = rest[1] ?? "";
-      rest.splice(0, 2);
-    }
-    const key = process.env[keyEnv]?.trim();
-    if (!key) throw new Error(`Set ${keyEnv || "NANOGPT_PROBE_KEY"} to a NanoGPT key to probe with.`);
-    if (rest.length === 0) throw new Error("Usage: npm run runner -- probe [--key-env VAR] <model> [<model>...]");
-    const ok = await probeModels(new NanoGptModel(key), rest, (line) => console.log(line));
+const PERSONAS_DIR = path.join(import.meta.dirname, "..", "..", "personas");
+const PROBE_USAGE = "Usage: npm run runner -- probe [--key-env VAR] [--voice <persona>[,<persona>...]] <model> [<model>...]";
+
+/** Personas by file name (personas/<name>.md), for the voice probe. */
+function loadPersonas(list: string): Persona[] {
+  return list.split(",").map((name) => {
+    name = name.trim();
+    if (!/^[a-z0-9-]+$/.test(name)) throw new Error(`${name || "(empty)"}: a persona is named by its file in personas/, like captain-boday.`);
+    return { name, text: readFileSync(path.join(PERSONAS_DIR, `${name}.md`), "utf-8").trim() };
+  });
+}
+
+/** The member brief bots get now: the admin's edit if there is one and the database is reachable. */
+async function memberBrief(): Promise<{ text: string; source: string }> {
+  const url = process.env["RUNNER_DATABASE_URL"];
+  const shipped = { text: defaultBriefs().member, source: "as shipped" };
+  if (!url) return shipped;
+  const pool = createRunnerPool(url);
+  try {
+    const current = (await currentBriefs(pool)).member;
+    return { text: current, source: current === shipped.text ? "as shipped" : "as edited at /admin/briefs" };
+  } catch (err) {
+    console.error(`Couldn't read the briefs (${err instanceof Error ? err.message : String(err)}); using the shipped member brief.`);
+    return shipped;
+  } finally {
+    await pool.end();
+  }
+}
+
+async function probe(args: string[]): Promise<void> {
+  // The key is named, never given on the command line: --key-env VAR, or NANOGPT_PROBE_KEY.
+  let keyEnv = "NANOGPT_PROBE_KEY";
+  let voice: string | null = null;
+  while (args[0]?.startsWith("--")) {
+    const [flag, value] = args.splice(0, 2);
+    if (value === undefined) throw new Error(PROBE_USAGE);
+    if (flag === "--key-env") keyEnv = value;
+    else if (flag === "--voice") voice = value;
+    else throw new Error(`Unknown option ${flag}. ${PROBE_USAGE}`);
+  }
+  const key = process.env[keyEnv]?.trim();
+  if (!key) throw new Error(`Set ${keyEnv || "NANOGPT_PROBE_KEY"} to a NanoGPT key to probe with.`);
+  if (args.length === 0) throw new Error(PROBE_USAGE);
+  const chat = new NanoGptModel(key);
+  if (voice === null) {
+    const ok = await probeModels(chat, args, (line) => console.log(line));
     process.exit(ok ? 0 : 1);
   }
-  if (command !== undefined) throw new Error(`Unknown command ${command}. Usage: npm run runner [-- probe [--key-env VAR] <model>...]`);
+  // Check everything that can be wrong locally before spending a request.
+  const personas = loadPersonas(voice);
+  const scenarios = loadScenarios();
+  const brief = await memberBrief();
+  const report = await runVoiceProbe(
+    { chat, now: () => new Date(), sleep, log: (line) => console.error(`${new Date().toISOString()} ${line}`) },
+    { models: args, personas, scenarios, memberBrief: brief.text, briefSource: brief.source }
+  );
+  process.stdout.write(report);
+  process.exit(0);
+}
+
+async function main(): Promise<void> {
+  const [command, ...rest] = process.argv.slice(2);
+  if (command === "probe") return probe(rest);
+  if (command !== undefined) throw new Error(`Unknown command ${command}. Usage: npm run runner [-- probe …]`);
   await run();
 }
 

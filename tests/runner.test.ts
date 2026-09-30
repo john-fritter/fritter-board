@@ -3,10 +3,11 @@ import type { InboxJson } from "../src/runner/board.js";
 import { ModelError, modelIdProblem, NanoGptModel, parseUsage, type ChatModel, type ChatRequest, type ChatResponse } from "../src/runner/model.js";
 import { probeModel } from "../src/runner/probe.js";
 import { firstWake, inWindow, isAwake, localMinutes, nextWake, parseTimeOfDay } from "../src/runner/schedule.js";
+import { loadScenarios, runVoiceProbe, scenarioPrompt, voiceSystemPrompt } from "../src/runner/voice.js";
 import { earlyWakeReason, extractJson } from "../src/runner/wake.js";
 
 // The runner's pure parts: waking windows and schedules, the NanoGPT client's
-// requests and errors, the early-wake rule, decision parsing, and the probe.
+// requests and errors, the early-wake rule, decision parsing, and the probes.
 
 const TZ = "America/Los_Angeles";
 const at = (iso: string) => new Date(iso);
@@ -227,6 +228,68 @@ async function main() {
   p = await probeModel({ complete: async () => { throw new ModelError("nope", 404, "model_not_found", null); } }, "gone");
   assert.equal(p.reachable, "no: error 404 model_not_found");
   assert.equal(p.suggested, "don't use");
+
+  // ── The voice probe ──
+  const scenarios = loadScenarios();
+  assert.deepEqual(scenarios.map((sc) => sc.name), ["reply", "new_thread"], "config/voice-probe.yaml parses");
+  const replyPrompt = scenarioPrompt(scenarios[0]!);
+  const shown = JSON.parse(replyPrompt.slice(0, replyPrompt.indexOf("\n\n"))) as { thread: { title: string }; posts: { number: number; author: { name: string; bot?: boolean } }[] };
+  assert.match(shown.thread.title, /Carnegie/, "the thread as read_thread shows it");
+  assert.deepEqual(shown.posts.map((x) => [x.number, x.author.name, x.author.bot ?? false]), [[1, "John", false], [2, "Bickerstaff", true], [3, "John", false]]);
+  assert.ok(replyPrompt.endsWith(scenarios[0]!.ask), "then what to write");
+  assert.equal(scenarioPrompt(scenarios[1]!), scenarios[1]!.ask, "a scenario without a thread is just the ask");
+  const system = voiceSystemPrompt("THE MEMBER BRIEF", "Your name is Penny.");
+  assert.ok(system.includes("BBCode, not Markdown") && system.indexOf("THE MEMBER BRIEF") < system.indexOf("Your name is Penny."), "mechanics, brief, persona");
+
+  // Two models write as two personas; one refuses reasoning_effort, one is gone.
+  const seen: { model: string; effort: string; system: string }[] = [];
+  const voiced = (content: string | null, finishReason = "stop"): ChatResponse => ({
+    content,
+    toolCalls: [],
+    finishReason,
+    usage: { promptTokens: 10, completionTokens: 50, reasoningTokens: 0, cachedTokens: 0 },
+  });
+  const cast: ChatModel = {
+    async complete(r) {
+      if (r.model === "gone") throw new ModelError("nope", 404, "model_not_found", null);
+      if (r.model === "picky" && r.reasoningEffort !== "default") throw new ModelError("400", 400, "unsupported_reasoning_effort", null);
+      if (r.messages[0]!.role !== "system") return good.complete(r);
+      seen.push({ model: r.model, effort: r.reasoningEffort, system: r.messages[0]!.content });
+      if (r.model === "picky") return voiced(null, "length");
+      return voiced(`[b]${r.messages[0]!.content.includes("Penny") ? "Penny" : "Sexton"}[/b] says \`\`\`hi\`\`\``);
+    },
+  };
+  const logged: string[] = [];
+  const clock = { t: Date.parse("2026-09-30T12:00:00Z") };
+  const deps = { chat: cast, now: () => new Date((clock.t += 1500)), sleep: async () => {}, log: (l: string) => logged.push(l) };
+  const personas = [
+    { name: "penny", text: "Your name is Penny." },
+    { name: "sexton", text: "Your name is Sexton." },
+  ];
+  const input = { models: ["good", "picky", "gone"], personas, scenarios, memberBrief: "BRIEF", briefSource: "as shipped" };
+  let report = await runVoiceProbe(deps, input);
+  assert.equal(seen.length, 2 * 2 * 2, "each reachable model, each persona, each scenario");
+  assert.ok(seen.every((x) => x.system.includes("BRIEF")));
+  assert.deepEqual([...new Set(seen.filter((x) => x.model === "picky").map((x) => x.effort))], ["default"], "at the effort the mechanics found");
+  assert.match(report, /^# Voice probe, 2026-09-30 /);
+  assert.match(report, /\| gone +\| no: error 404 model_not_found/, "the mechanics table");
+  assert.match(report, /Unreachable, so no samples: gone\./);
+  assert.match(report, /## penny[\s\S]*### penny: reply[\s\S]*#### good[\s\S]*````text\n\[b\]Penny\[\/b\] says ```hi```\n````/, "grouped by persona, fenced so the text can't close it");
+  assert.match(report, /#### picky\n\n\*[^\n]*effort default\*\. \*\*used the whole output limit without writing anything\*\*/);
+  assert.ok(!report.includes("Stopped early"));
+  assert.ok(logged.some((l) => l.startsWith("penny, reply: good")));
+
+  // A key at its daily cap stops the run, and the report says so.
+  let calls = 0;
+  const capping: ChatModel = {
+    async complete(r) {
+      if (++calls > 8) throw new ModelError("cap", 429, "daily_rpd_limit_exceeded", null);
+      return cast.complete(r);
+    },
+  };
+  report = await runVoiceProbe({ ...deps, chat: capping }, { ...input, models: ["good", "picky"] });
+  assert.match(report, /\*\*Stopped early:\*\* The probe key reached its daily cap\./);
+  assert.equal(calls, 9, "no call after the cap");
 }
 
 main()

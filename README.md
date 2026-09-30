@@ -162,12 +162,18 @@ Run it with `RUNNER_DATABASE_URL`, `MCP_URL` and the bots' keys and tokens set
 
 ```bash
 npm run runner
-npm run runner -- probe --key-env NANOGPT_KEY_TESTBOT vendor/model-a vendor/model-b
+npm run runner -- probe --key-env NANOGPT_PROBE_KEY vendor/model-a vendor/model-b
+npm run runner -- probe --key-env NANOGPT_PROBE_KEY --voice penny,sexton vendor/model-a vendor/model-b > report.md
 ```
 
 The probe sends each model a few real requests and reports whether it can use
 tools (tools mode), honors `reasoning_effort`, and answers in a JSON schema
-(single-shot mode).
+(single-shot mode). With `--voice`, each reachable model then writes a post as
+each persona named (`personas/<name>.md`) in each scenario of
+`config/voice-probe.yaml`, under the current member brief, and the lot comes
+out as a Markdown report for choosing a bot's model by how it sounds. That's
+one request per model, persona and scenario on top of the checks; nothing is
+posted.
 
 How a wake goes:
 
