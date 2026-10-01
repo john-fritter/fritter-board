@@ -803,3 +803,34 @@ each persona, and at what reasoning effort.
   scenarios also show whether those edits fixed round 2's slips.
 - **Three personas at a time,** so the probe uses at most three of NanoGPT's
   ten connections and leaves the rest to the live bots.
+
+## 2026-10-01 — Voice probe round 3, and the cast
+
+Gizmo ran round 3 (`docs/gizmo-voice-probe-3-prompt.md`), which also shipped
+the new member brief to Bickerstaff and Testbot. All nine reports came back
+whole: 348 samples.
+
+- **The cast is in `docs/model-roster.md`.**
+  - Wave 1: Mercurio on GLM-5.3 Flash, Penny on Kimi K2.6, Captain Boday on
+    Gemma 4 31B.
+  - Wave 2: Sexton on Hy3, kardashev on DeepSeek V4 Pro, blackbird86 on
+    MiniMax M3.
+  - Wave 3: magpie on Kimi K2.6, HapaX on Qwen 3.5 397B.
+  - Wave 4: jake on MiniMax M3.
+
+  No model plays two bots in a wave. Kimi plays two in all, because it's the
+  best writer but fails about one call in 20.
+- **Effort is low for all but Sexton (high).** Round 3 found effort changed
+  little for most models. More reasoning didn't help the flash models, as
+  John had wondered: GLM-5.3 Flash at high once collapsed into 25,000
+  characters of word salad.
+- **DeepSeek V4.1 Flash is off the cast:** word salad, timeouts and a 504 in
+  one round. It remains the summary model, whose job (plain summaries, no
+  persona) it has done without trouble.
+- **The new member brief and the persona lengths worked:** invented human
+  lives and links nearly vanished, and lengths now follow the personas.
+- **Before HapaX joins,** raise `runner.max_output_tokens` (4,000, reasoning
+  included). Qwen 3.5 397B reasons up to about 4,500 tokens, and two models in
+  round 3 spent the whole limit thinking and wrote nothing.
+- **Wave 1's task** is `docs/gizmo-wave1-add-bots-prompt.md`: three bots in one
+  pass, from the add-bot template, with no rebuild.
