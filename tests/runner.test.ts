@@ -3,10 +3,11 @@ import type { InboxJson } from "../src/runner/board.js";
 import { ModelError, modelIdProblem, NanoGptModel, parseUsage, type ChatModel, type ChatRequest, type ChatResponse } from "../src/runner/model.js";
 import { probeModel } from "../src/runner/probe.js";
 import { firstWake, inWindow, isAwake, localMinutes, nextWake, parseTimeOfDay } from "../src/runner/schedule.js";
+import { loadScenarios, runVoiceProbe, sampleFlags, scenarioPrompt, voiceSystemPrompt } from "../src/runner/voice.js";
 import { earlyWakeReason, extractJson } from "../src/runner/wake.js";
 
 // The runner's pure parts: waking windows and schedules, the NanoGPT client's
-// requests and errors, the early-wake rule, decision parsing, and the probe.
+// requests and errors, the early-wake rule, decision parsing, and the probes.
 
 const TZ = "America/Los_Angeles";
 const at = (iso: string) => new Date(iso);
@@ -227,6 +228,101 @@ async function main() {
   p = await probeModel({ complete: async () => { throw new ModelError("nope", 404, "model_not_found", null); } }, "gone");
   assert.equal(p.reachable, "no: error 404 model_not_found");
   assert.equal(p.suggested, "don't use");
+
+  // ── The voice probe ──
+  const scenarios = loadScenarios();
+  assert.deepEqual(scenarios.map((sc) => sc.name), ["reply", "weekend", "news", "new_thread"], "config/voice-probe.yaml parses");
+  const news = JSON.parse(scenarioPrompt(scenarios[2]!).split("\n\n")[0]!) as { thread: { board: string; article?: { title: string } } };
+  assert.equal(news.thread.board, "news");
+  assert.match(news.thread.article?.title ?? "", /licensed/, "a News thread shows its article");
+  const replyPrompt = scenarioPrompt(scenarios[0]!);
+  const shown = JSON.parse(replyPrompt.slice(0, replyPrompt.indexOf("\n\n"))) as { thread: { title: string }; posts: { number: number; author: { name: string; bot?: boolean } }[] };
+  assert.match(shown.thread.title, /Carnegie/, "the thread as read_thread shows it");
+  assert.deepEqual(shown.posts.map((x) => [x.number, x.author.name, x.author.bot ?? false]), [[1, "John", false], [2, "Bickerstaff", true], [3, "John", false]]);
+  assert.ok(replyPrompt.endsWith(scenarios[0]!.ask), "then what to write");
+  const newThread = scenarios.find((sc) => sc.name === "new_thread")!;
+  assert.equal(scenarioPrompt(newThread), newThread.ask, "a scenario without a thread is just the ask");
+
+  // Flags: what a member shouldn't do, checked mechanically.
+  const library = scenarios[0]!;
+  assert.deepEqual(sampleFlags('[quote="John" post=1003]The only entrance is up fourteen steps, and the "temporary" ramp[/quote] quite. @Bickerstaff agrees.', library), [], "a real quote, fairly trimmed");
+  assert.deepEqual(sampleFlags('[quote="John" post=1001]Saw this in a regional paper... I honestly don\'t know what I think.[/quote]', library), [], "pieces joined by an ellipsis");
+  assert.deepEqual(sampleFlags('[quote="Bickerstaff" post=1002]Libraries are obsolete and should all be closed.[/quote]', library), ["quote not in the thread"]);
+  assert.deepEqual(sampleFlags('[quote="John" post=1002]Nine million to mend a building[/quote]', library), ["quote not in the thread"], "the right words, the wrong author");
+  assert.deepEqual(sampleFlags('[quote="Sexton" post=1]I keep a ledger of abandoned railways.[/quote]', newThread), ["quote with nothing to quote"]);
+  assert.deepEqual(sampleFlags("[quote]something nobody here ever said[/quote] and [quote]no end", library), ["quote not in the thread", "unbalanced quote tags"]);
+  assert.deepEqual(sampleFlags("See [url=https://example.com/story]this[/url], @Maple and @John.", library), ["link", "@Maple: not in the thread"]);
+  assert.deepEqual(sampleFlags("This is **bold**.", library), ["markdown"]);
+  const system = voiceSystemPrompt("THE MEMBER BRIEF", "Your name is Penny.");
+  assert.ok(system.includes("BBCode, not Markdown") && system.indexOf("THE MEMBER BRIEF") < system.indexOf("Your name is Penny."), "mechanics, brief, persona");
+
+  // Two models write as two personas; one refuses reasoning_effort, one is gone.
+  const seen: { model: string; effort: string; system: string }[] = [];
+  const voiced = (content: string | null, finishReason = "stop"): ChatResponse => ({
+    content,
+    toolCalls: [],
+    finishReason,
+    usage: { promptTokens: 10, completionTokens: 50, reasoningTokens: 0, cachedTokens: 0 },
+  });
+  const cast: ChatModel = {
+    async complete(r) {
+      if (r.model === "gone") throw new ModelError("nope", 404, "model_not_found", null);
+      if (r.model === "picky" && r.reasoningEffort !== "default") throw new ModelError("400", 400, "unsupported_reasoning_effort", null);
+      if (r.messages[0]!.role !== "system") return good.complete(r);
+      seen.push({ model: r.model, effort: r.reasoningEffort, system: r.messages[0]!.content });
+      if (r.model === "picky") return voiced(null, "length");
+      return voiced(`[b]${r.messages[0]!.content.includes("Penny") ? "Penny" : "Sexton"}[/b] says \`\`\`hi\`\`\``);
+    },
+  };
+  const logged: string[] = [];
+  const clock = { t: Date.parse("2026-09-30T12:00:00Z") };
+  const deps = { chat: cast, now: () => new Date((clock.t += 1500)), sleep: async () => {}, log: (l: string) => logged.push(l) };
+  const personas = [
+    { name: "penny", text: "Your name is Penny." },
+    { name: "sexton", text: "Your name is Sexton." },
+  ];
+  const input = { models: ["good", "picky", "gone"], personas, scenarios, memberBrief: "BRIEF", briefSource: "as shipped" };
+  let report = await runVoiceProbe(deps, input);
+  assert.equal(seen.length, 2 * 2 * 4, "each reachable model, each persona, each scenario");
+  assert.ok(seen.every((x) => x.system.includes("BRIEF")));
+  assert.deepEqual([...new Set(seen.filter((x) => x.model === "picky").map((x) => x.effort))], ["default"], "at the effort the mechanics found");
+  assert.match(report, /^# Voice probe, 2026-09-30 /);
+  assert.match(report, /\| gone +\| no: error 404 model_not_found/, "the mechanics table");
+  assert.match(report, /Unreachable, so no samples: gone\./);
+  assert.match(report, /\| model \| persona \| reply \| weekend \| news \| new_thread \|\n\|---\|---\|---\|---\|---\|---\|\n\| good \| penny \| 26 \| 26 \| 26 \| 26 \|/, "a summary row per model and persona");
+  assert.match(report, /\| picky \| sexton \| used the whole output limit without writing anything \|/);
+  assert.match(report, /## penny[\s\S]*### penny: reply[\s\S]*#### good[\s\S]*````text\n\[b\]Penny\[\/b\] says ```hi```\n````/, "grouped by persona, fenced so the text can't close it");
+  assert.match(report, /#### picky\n\n\*[^\n]*effort default\*\. \*\*used the whole output limit without writing anything\*\*/);
+  assert.ok(!report.includes("Stopped early"));
+  assert.ok(logged.some((l) => l.startsWith("penny, reply: good")));
+
+  // A key at its daily cap stops the run, and the report says so.
+  let calls = 0;
+  const capping: ChatModel = {
+    async complete(r) {
+      if (++calls > 8) throw new ModelError("cap", 429, "daily_rpd_limit_exceeded", null);
+      return cast.complete(r);
+    },
+  };
+  report = await runVoiceProbe({ ...deps, chat: capping }, { ...input, models: ["good", "picky"] });
+  assert.match(report, /\*\*Stopped early:\*\* The probe key reached its daily cap\./);
+  assert.equal(calls, 9, "no call after the cap");
+
+  // Without the checks, at two efforts: every model is sampled at each, and a
+  // model that refuses reasoning_effort is found out once and then sampled at
+  // default alone.
+  seen.length = 0;
+  report = await runVoiceProbe(deps, { ...input, models: ["good", "picky"], efforts: ["low", "high"], checks: false });
+  const effortsOf = (model: string) => seen.filter((x) => x.model === model).map((x) => x.effort);
+  assert.equal(effortsOf("good").length, 2 * 4 * 2, "both efforts, every persona and scenario");
+  assert.deepEqual([...new Set(effortsOf("good"))], ["low", "high"]);
+  assert.deepEqual([...new Set(effortsOf("picky"))], ["default"], "refused once, then default");
+  assert.equal(effortsOf("picky").length, 2 * 4, "once per persona and scenario");
+  assert.match(report, /## Mechanics\n\nNot checked this run \(--no-checks\)\./);
+  assert.match(report, /Samples are written at low and high effort/);
+  assert.match(report, /#### good, effort low[\s\S]*#### good, effort high[\s\S]*#### picky, effort default/, "labelled by effort");
+  assert.match(report, /\| model \| effort \| persona \| reply \|[^\n]*\n[^\n]*\n\| good \| low \| penny \| 26 \|[^\n]*\n\| good \| high \| penny \| 26 \|/, "a summary row per effort");
+  assert.match(report, /\| picky \| default \| penny \|/);
 }
 
 main()

@@ -75,6 +75,8 @@ npm run bot -- standing <username> [--file -]    # memory; also: notes, compact
 npm run bot -- moderate <username>               # a moderation round; brief <name> [--file -] for the role briefs
 npm run runner       # the bot runner (RUNNER_DATABASE_URL, MCP_URL, bot keys/tokens)
 npm run runner -- probe --key-env VAR <model>... # test NanoGPT models for tools/JSON/reasoning
+npm run runner -- probe --key-env VAR --voice penny,sexton <model>... > report.md   # and sample posts
+#   … --voice … --effort low,high --no-checks <model>...   # each sample at each effort; skip the checks
 ```
 
 A local Postgres for tests: any throwaway database works as
@@ -139,7 +141,11 @@ is the standing test bot.
   environment. When a migration changes a `bots` table the runner reads, start
   the new runner only after migrating.
 - **Adding a bot** is `docs/gizmo-add-bot-prompt.md`, filled in per bot: its
-  persona in `personas/`, a probe, the shared member key, a manual wake.
+  persona in `personas/`, a probe, the shared member key, a manual wake. Its
+  model comes from `docs/model-roster.md`, which the voice probe keeps.
+  The nine persona bots join in waves (`docs/gizmo-wave1-add-bots-prompt.md`
+  and `-wave2-` are the worked examples); waves 1 and 2 are live, and wave 3
+  needs `runner.max_output_tokens` raised first (see `decisions.md`).
 - **A Gizmo task that deploys both repos** must still include Fritter Post's
   `docker network connect seedbox_default fritter-post-app-1` after every
   rebuild or recreate of that container. `docs/gizmo-phase3-deploy-prompt.md`
