@@ -966,3 +966,78 @@ best service, with the next best as a fallback. It still needs:
 
 The probe's task is `docs/gizmo-search-probe-prompt.md`. It also moves the
 box from the merged wave 2 branch to this one, and rebuilds only the runner.
+
+## 2026-10-01 — What the search probe found
+
+Gizmo ran the search probe (`docs/gizmo-search-probe-prompt.md`): 18 queries
+on all three services, 54 searches, none failed. Exa's 18 searches cost
+$0.126 of its free credit. The keys are on the box as
+`/root/langsearch-key.txt`, `/root/exasearch-key.txt` and
+`/root/linkup-key.txt`, not the names the task suggested.
+
+**Exa is the best of the three, and clearly.**
+
+- **It finds primary sources:** the Fed's own statement, Reuters, AP, NASA,
+  Merriam-Webster, Nature, the California governor's office.
+- **It's the only one that kept up with this week.** It had the MLB
+  postseason's actual scores (the others had only the bracket), a real
+  world-news story from the day (the others had a La Jolla architecture
+  tour and undated news roundups), and the 2026 Nobel in Literature as "not
+  announced until 8 October", with the odds.
+- **It's the fastest:** a 1.0-second median.
+- **63% of its results are dated.** The undated ones are mostly hub pages
+  (AP's trending page, NobelPrize.org).
+
+**LangSearch is second.**
+
+- **It's often good on news** (hurricanes, AI laws, AI models), and it's free
+  with no monthly limit.
+- **Its sources are weaker,** and some results were off topic: World Rugby
+  for archaeology, *Hannibal* for *Starfleet Academy*.
+- **It found nothing at all for the Louvre heist.**
+- **Its dates are misleading.** Every result has one, but many are when the
+  page was crawled, not published: NPR's October 2025 Nobel story came back
+  as 2026-08-29, and Wikipedia pages as August 2026. The research model
+  repeats those dates as publication dates.
+
+**Linkup is last.**
+
+- **None of its results has a date,** which matters most for current events.
+- **Its sources lean to SEO and aggregator pages:** prediction markets, news
+  roundup blogs, a crossword site.
+- **It was stale where it counted:** spring news roundups for "this week",
+  and no postseason scores.
+
+**The research model is the weak link, not the searches.**
+
+- **DeepSeek V4.1 Flash broke down in 5 of 53 summaries:**
+  - three trailed into its own thinking ("wait, careful… Let me simply
+    quote");
+  - two ended in word salad, the World Cup final's from LangSearch and from
+    Linkup.
+- **9 summaries ran past the 1,500-character limit,** up to 2,684.
+- **One call timed out** and succeeded on the retry.
+
+A bot must never get a summary like that. Otherwise the research
+instructions worked:
+
+- every service's summary said Harlow Springs turned up nothing, and named
+  the other towns' libraries for what they were;
+- the summaries kept to the results, named their sources, and flagged old or
+  undated material.
+
+**Where independent services agreed** on things past the models' training,
+that's some evidence the results are sound:
+
+- the Fed's September rise to 3.75–4%: all three;
+- Spain 1–0 Argentina in the World Cup final: Exa and Linkup;
+- Artemis II's flight, 1–10 April: all three.
+
+**Recommended:**
+
+- Exa as the bots' search, with LangSearch as the fallback when Exa fails or
+  its credit runs out;
+- Linkup dropped;
+- a second round on the research model before the tool is built: the same
+  Exa results summarized by a few candidate models, so the one that bots
+  rely on is one that doesn't break.
