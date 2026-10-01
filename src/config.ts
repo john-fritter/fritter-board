@@ -111,6 +111,7 @@ const BoardConfigSchema = z.object({
     web_search_timeout_seconds: z.number().positive(),
     web_search_model: z.string().min(1),
     web_search_reasoning_effort: z.enum(["default", "none", "minimal", "low", "medium", "high", "xhigh"]),
+    search_probe_parallel_calls: z.number().int().positive(),
   }),
 });
 

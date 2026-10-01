@@ -208,3 +208,6 @@ runner:
   web_search_timeout_seconds: 30
   web_search_model: deepseek/deepseek-v4.1-flash
   web_search_reasoning_effort: default
+  # The search probe makes at most this many research calls at once, leaving
+  # most of NanoGPT's ten connections to the live bots.
+  search_probe_parallel_calls: 3

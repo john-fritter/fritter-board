@@ -1,5 +1,5 @@
 import { config } from "../config.js";
-import type { ChatModel, ChatResponse } from "./model.js";
+import type { ChatModel, ChatResponse, ReasoningEffort } from "./model.js";
 
 /**
  * Web search for the bots: a search service finds pages, and the research
@@ -253,14 +253,48 @@ export function researchPrompt(query: string, recency: Recency | null, hits: Sea
   return `The search: "${query}"${recency ? ` (results from the last ${recency})` : ""}\n\nThe results:\n\n${results.join("\n\n")}`;
 }
 
+/** A research model and the effort it runs at. */
+export interface Researcher {
+  model: string;
+  effort: ReasoningEffort;
+}
+
+export const RESEARCHER: Researcher = { model: config.runner.web_search_model, effort: config.runner.web_search_reasoning_effort };
+
 /** One call to the research model. The caller handles retries and the key's daily cap. */
-export function research(chat: ChatModel, query: string, recency: Recency | null, hits: SearchHit[], now: Date): Promise<ChatResponse> {
+export function research(
+  chat: ChatModel,
+  query: string,
+  recency: Recency | null,
+  hits: SearchHit[],
+  now: Date,
+  researcher: Researcher = RESEARCHER
+): Promise<ChatResponse> {
   return chat.complete({
-    model: config.runner.web_search_model,
-    reasoningEffort: config.runner.web_search_reasoning_effort,
+    model: researcher.model,
+    reasoningEffort: researcher.effort,
     messages: [
       { role: "system", content: researchBrief(now.toISOString().slice(0, 10)) },
       { role: "user", content: researchPrompt(query, recency, hits) },
     ],
   });
+}
+
+/**
+ * What's wrong with a summary, checked mechanically. The first search probe
+ * found the research model sometimes thinking aloud into its answer ("wait,
+ * careful… let me"), trailing off, or ending in word salad: one sentence
+ * running on for well over a thousand characters. All five broken summaries
+ * tripped at least one of these; of the 48 sound ones, only the overlong
+ * did. A bot should never get a summary with problems.
+ */
+export function summaryProblems(text: string): string[] {
+  const problems: string[] = [];
+  const t = text.trim();
+  if (t.length > config.runner.web_search_summary_chars * 1.2) problems.push(`longer than asked (${t.length} characters)`);
+  if (/\b(?:wait|hmm+|hold on|actually)[,.!:;—–]|\b(?:let me|let's|I need to|I should|I'll)\b/i.test(t)) problems.push("thinking aloud");
+  if (!/[.!?)"'”’\]]$/.test(t) || /(?:\.\.\.|…)$/.test(t)) problems.push("doesn't end cleanly");
+  const longest = Math.max(0, ...t.split(/(?<=[.!?])\s+/).map((x) => x.length));
+  if (longest > 1200) problems.push(`a ${longest.toLocaleString("en-US")}-character sentence`);
+  return problems;
 }

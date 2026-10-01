@@ -78,6 +78,7 @@ npm run runner -- probe --key-env VAR <model>... # test NanoGPT models for tools
 npm run runner -- probe --key-env VAR --voice penny,sexton <model>... > report.md   # and sample posts
 #   … --voice … --effort low,high --no-checks <model>...   # each sample at each effort; skip the checks
 npm run runner -- search-probe --key-env VAR > report.md  # compare web search services (config/search-probe.yaml)
+#   … --only exa --models vendor/a@low,vendor/b > report.md   # compare research models on the same results
 ```
 
 A local Postgres for tests: any throwaway database works as

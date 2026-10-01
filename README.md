@@ -185,7 +185,11 @@ The search probe compares the web search services the bots may use
 `runner.web_search_keys`; a service without one is skipped). Each query in
 `config/search-probe.yaml` goes to every service, the research model writes
 the factual summary a bot would get from each one's results, and the report
-puts them side by side. `--only exa,linkup` limits it to some services.
+puts them side by side. `--only exa,linkup` limits it to some services, and
+`--models a/b@low,c/d` has each of these research models summarize every
+result set instead of the configured one, to compare them. The report flags
+summaries with mechanical problems (`summaryProblems` in
+`src/runner/websearch.ts`).
 
 How a wake goes:
 

@@ -10,6 +10,7 @@ import {
   researchBrief,
   researchPrompt,
   SearchError,
+  summaryProblems,
   type SearchBackend,
   type SearchService,
 } from "../src/runner/websearch.js";
@@ -208,7 +209,7 @@ async function main() {
   const chat: ChatModel = {
     async complete(req) {
       researched.push(req);
-      return reply("Fact one, says a.example (2026-09-30). ```odd```");
+      return reply("Fact one, says a.example (2026-09-30), ```odd```.");
     },
   };
   const slept: number[] = [];
@@ -229,14 +230,16 @@ async function main() {
   assert.match(researched[0]!.messages[1]!.content ?? "", /^The search: "fed rates" \(results from the last month\)/);
   assert.match(report, /^# Search probe, 2026-10-02 /);
   assert.match(report, /- Services: langsearch, exa, linkup\.\n- Queries: 2 \(1 current events, 0 recent history, 1 other\)/);
-  assert.match(report, /\| langsearch \| 2 \| 0 \| 0 \| 4 \| 100% \| [\d.]+s \| 2 \| – \|/, "the service table");
-  assert.match(report, /\| exa \| 2 \| 0 \| 2 \| 0 \| – \| [\d.]+s \| 0 \| \$0\.0140 \|/, "costs add up");
+  assert.match(report, /- Research model: deepseek\/deepseek-v4\.1-flash, effort default\. It writes a summary/);
+  assert.match(report, /\| langsearch \| 2 \| 0 \| 0 \| 4 \| 100% \| [\d.]+s \| – \|/, "the service table");
+  assert.match(report, /\| exa \| 2 \| 0 \| 2 \| 0 \| – \| [\d.]+s \| \$0\.0140 \|/, "costs add up");
+  assert.match(report, /\| deepseek\/deepseek-v4\.1-flash \| default \| 2 \| 2 \| 0 \| 0 \| 0 \| 0 \| 0 \| 0 \| 49 \| [\d.]+s \|/, "the research model table");
   assert.match(report, /\| linkup \| 2 \| 2 \|/);
   assert.match(report, /\| fed-rates \| current \| 2 results, 2 dated, newest 2026-09-30, [\d.]+s \| 0 results, [\d.]+s \| search failed \|/, "the query table");
   assert.match(report, /## fed-rates: "fed rates"\n\n\*current events, results from the last month\.\*\n\nCheck: Check the range\./);
   assert.match(report, /### fed-rates: langsearch\n\n\*2 results, [\d.]+s\*\n\n1\. \*\*One \| two\*\*, a\.example, 2026-09-30  \n   Fact one\./);
-  assert.match(report, /Summary \([\d.]+s, \d+ characters\):\n\n````text\nFact one, says a\.example \(2026-09-30\)\. ```odd```\n````/, "fenced so the text can't close it");
-  assert.match(report, /### fed-rates: exa\n\n\*0 results, [\d.]+s, \$0\.0070\*\n\nNo summary\. \*\*no results, so no summary\*\*\./);
+  assert.match(report, /#### fed-rates: langsearch, deepseek\/deepseek-v4\.1-flash, effort default\n\n\*[\d.]+s, 49 characters\*\n\n````text\nFact one, says a\.example \(2026-09-30\), ```odd```\.\n````/, "fenced so the text can't close it");
+  assert.match(report, /### fed-rates: exa\n\n\*0 results, [\d.]+s, \$0\.0070\*\n\nNo summary: no results\./);
   assert.match(report, /### fed-rates: linkup\n\n\*failed, [\d.]+s\*\. \*\*linkup 503: busy\*\*/);
   assert.match(report, /## etymology: "quarantine"\n\n\*other, any age\.\*/);
   assert.match(report, /## The research model's instructions\n\n```text\nYou are a research assistant/);
@@ -254,10 +257,45 @@ async function main() {
   report = await runSearchProbe({ ...deps, chat: capping }, { queries: [...two, { name: "third", kind: "recent", query: "never searched" }], skipped: ["exa"] });
   assert.match(report, /Skipped, with no key: exa\./);
   assert.match(report, /\*\*Stopped early:\*\* The probe key reached its daily cap\./);
-  assert.match(report, /No summary\. \*\*used the whole output limit without writing anything\*\*/);
-  assert.match(report, /No summary\. \*\*not written: the probe key reached its daily cap\*\*/, "the capped search's results are still reported");
+  assert.match(report, /\*[\d.]+s\*\. \*\*used the whole output limit without writing anything\*\*/);
+  assert.match(report, /\*[\d.]+s\*\. \*\*not written: the probe key reached its daily cap\*\*/, "the capped search's results are still reported");
   assert.equal(calls, 2, "no call after the cap");
   assert.ok(!report.includes("## third"), "and the run stops there");
+
+  // Several research models on the same results: one refuses
+  // reasoning_effort and runs at default from then on, one thinks aloud, and
+  // the same model can run at two efforts.
+  const asked: string[] = [];
+  const models: ChatModel = {
+    async complete(req) {
+      asked.push(`${req.model}@${req.reasoningEffort}`);
+      if (req.model === "picky/m" && req.reasoningEffort !== "default") throw new ModelError("400", 400, "unsupported_reasoning_effort", null);
+      if (req.model === "chatty/m") return reply("Fact one (a.example, 2026-09-30). Wait, careful: let me check that again");
+      return reply(`Fact one (a.example, 2026-09-30), by ${req.model} at ${req.reasoningEffort}.`);
+    },
+  };
+  const researchers = [
+    { model: "steady/m", effort: "default" as const },
+    { model: "steady/m", effort: "low" as const },
+    { model: "picky/m", effort: "low" as const },
+    { model: "chatty/m", effort: "low" as const },
+  ];
+  report = await runSearchProbe({ ...deps, backends: [backends[0]!], chat: models }, { queries: two, skipped: [], researchers });
+  assert.equal(asked.filter((a) => a.startsWith("picky/m@low")).length, 1, "a refused effort is found out once");
+  assert.equal(asked.filter((a) => a === "picky/m@default").length, 2, "then default for every summary");
+  assert.equal(asked.length, 4 * 2 + 1, "every model, every result set, plus the one refusal");
+  assert.match(report, /- Research models: steady\/m, effort default; steady\/m, effort low; picky\/m, effort low; chatty\/m, effort low\. Each writes/);
+  assert.match(report, /\| steady\/m \| default \| 2 \| 2 \| 0 \| 0 \|[^\n]*\n\| steady\/m \| low \| 2 \| 2 \| 0 \| 0 \|/, "one model at two efforts gets two rows");
+  assert.match(report, /\| chatty\/m \| low \| 2 \| 2 \| 0 \| 2 \| 2 \| 2 \| 0 \| 0 \|/, "problems counted");
+  assert.match(report, /#### fed-rates: langsearch, steady\/m, effort default\n[\s\S]*#### fed-rates: langsearch, steady\/m, effort low\n[\s\S]*#### fed-rates: langsearch, picky\/m, effort default\n[\s\S]*#### fed-rates: langsearch, chatty\/m, effort low\n\n\*[\d.]+s, \d+ characters\*\. \*\*thinking aloud; doesn't end cleanly\*\*/, "in the order asked, with the effort used");
+
+  // ── Summary problems ──
+  const fine = "The Fed raised rates to 3.75%–4% on 16 September (Reuters, 2026-09-16). Venice extended the wait to 40 days in 1448 (Wikipedia).";
+  assert.deepEqual(summaryProblems(fine), [], "the wait to 40 days is not thinking aloud");
+  assert.deepEqual(summaryProblems("Polls show Democrats ahead. Let me stick close—wait exact readings"), ["thinking aloud", "doesn't end cleanly"]);
+  assert.deepEqual(summaryProblems("Regular-season outcomes: Rays first. Brewers confirmed elsewhere soon enough..."), ["doesn't end cleanly"]);
+  const salad = `Spain won. ${"steadfast neutrality invoked responses accordingly ".repeat(40)}stop.`;
+  assert.deepEqual(summaryProblems(salad), [`longer than asked (${salad.length} characters)`, `a ${(salad.length - 11).toLocaleString("en-US")}-character sentence`]);
 }
 
 main()

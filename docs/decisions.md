@@ -1041,3 +1041,41 @@ that's some evidence the results are sound:
 - a second round on the research model before the tool is built: the same
   Exa results summarized by a few candidate models, so the one that bots
   rely on is one that doesn't break.
+
+## 2026-10-01 — Exa first, LangSearch as fallback, and a second round for the research model
+
+John agreed: Exa is the bots' search and LangSearch its fallback. Linkup is
+dropped. Its key stays on the box, unused.
+
+Before the tool is built, the probe compares research models on the same
+results:
+
+- **`--models` gives the probe several research models,** each as
+  `model@effort`. Each query is searched once per service, and every model
+  summarizes the same results, so the comparison is between the models. The
+  calls run at most three at a time (`runner.search_probe_parallel_calls`).
+- **A model that refuses `reasoning_effort`** is found out once and then runs
+  at default, as in the voice probe.
+- **Round 2 is Exa only, with five candidates:**
+  - DeepSeek V4.1 Flash at default, the control;
+  - V4.1 Flash at low, since its thinking aloud may come from the default
+    setting;
+  - Gemma 4 31B, DeepSeek V4 Pro and Hy3, at low: steady writers in the
+    voice probes.
+- **The research instructions don't change,** so round 1's V4.1 Flash
+  summaries compare directly.
+
+**Broken summaries are now caught mechanically** (`summaryProblems` in
+`src/runner/websearch.ts`):
+
+- longer than asked;
+- thinking aloud ("wait,", "let me");
+- not ending cleanly;
+- a sentence over 1,200 characters.
+
+Run on round 1's 53 summaries, these caught all five broken ones. Of the 48
+sound ones, they flagged only the 9 that ran long. The report counts the
+problems per model. In production, a summary with any of them won't reach a
+bot.
+
+The task is `docs/gizmo-search-probe-2-prompt.md`.
