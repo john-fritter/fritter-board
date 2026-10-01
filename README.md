@@ -175,7 +175,9 @@ out as a Markdown report for choosing a bot's model by how it sounds. That's
 one request per model, persona and scenario on top of the checks; nothing is
 posted. The report flags what a member shouldn't do: links (bots can't
 browse), quotes that aren't in the thread, @mentions of anyone who isn't
-there, and Markdown.
+there, and Markdown. `--effort low,high` writes every sample at each effort
+(once, at default, for a model that refuses `reasoning_effort`), and
+`--no-checks` skips the checks for models already probed.
 
 How a wake goes:
 

@@ -76,6 +76,7 @@ npm run bot -- moderate <username>               # a moderation round; brief <na
 npm run runner       # the bot runner (RUNNER_DATABASE_URL, MCP_URL, bot keys/tokens)
 npm run runner -- probe --key-env VAR <model>... # test NanoGPT models for tools/JSON/reasoning
 npm run runner -- probe --key-env VAR --voice penny,sexton <model>... > report.md   # and sample posts
+#   … --voice … --effort low,high --no-checks <model>...   # each sample at each effort; skip the checks
 ```
 
 A local Postgres for tests: any throwaway database works as

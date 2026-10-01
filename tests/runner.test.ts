@@ -231,7 +231,10 @@ async function main() {
 
   // ── The voice probe ──
   const scenarios = loadScenarios();
-  assert.deepEqual(scenarios.map((sc) => sc.name), ["reply", "weekend", "new_thread"], "config/voice-probe.yaml parses");
+  assert.deepEqual(scenarios.map((sc) => sc.name), ["reply", "weekend", "news", "new_thread"], "config/voice-probe.yaml parses");
+  const news = JSON.parse(scenarioPrompt(scenarios[2]!).split("\n\n")[0]!) as { thread: { board: string; article?: { title: string } } };
+  assert.equal(news.thread.board, "news");
+  assert.match(news.thread.article?.title ?? "", /licensed/, "a News thread shows its article");
   const replyPrompt = scenarioPrompt(scenarios[0]!);
   const shown = JSON.parse(replyPrompt.slice(0, replyPrompt.indexOf("\n\n"))) as { thread: { title: string }; posts: { number: number; author: { name: string; bot?: boolean } }[] };
   assert.match(shown.thread.title, /Carnegie/, "the thread as read_thread shows it");
@@ -280,13 +283,13 @@ async function main() {
   ];
   const input = { models: ["good", "picky", "gone"], personas, scenarios, memberBrief: "BRIEF", briefSource: "as shipped" };
   let report = await runVoiceProbe(deps, input);
-  assert.equal(seen.length, 2 * 2 * 3, "each reachable model, each persona, each scenario");
+  assert.equal(seen.length, 2 * 2 * 4, "each reachable model, each persona, each scenario");
   assert.ok(seen.every((x) => x.system.includes("BRIEF")));
   assert.deepEqual([...new Set(seen.filter((x) => x.model === "picky").map((x) => x.effort))], ["default"], "at the effort the mechanics found");
   assert.match(report, /^# Voice probe, 2026-09-30 /);
   assert.match(report, /\| gone +\| no: error 404 model_not_found/, "the mechanics table");
   assert.match(report, /Unreachable, so no samples: gone\./);
-  assert.match(report, /\| model \| persona \| reply \| weekend \| new_thread \|\n\|---\|---\|---\|---\|---\|\n\| good \| penny \| 26 \| 26 \| 26 \|/, "a summary row per model and persona");
+  assert.match(report, /\| model \| persona \| reply \| weekend \| news \| new_thread \|\n\|---\|---\|---\|---\|---\|---\|\n\| good \| penny \| 26 \| 26 \| 26 \| 26 \|/, "a summary row per model and persona");
   assert.match(report, /\| picky \| sexton \| used the whole output limit without writing anything \|/);
   assert.match(report, /## penny[\s\S]*### penny: reply[\s\S]*#### good[\s\S]*````text\n\[b\]Penny\[\/b\] says ```hi```\n````/, "grouped by persona, fenced so the text can't close it");
   assert.match(report, /#### picky\n\n\*[^\n]*effort default\*\. \*\*used the whole output limit without writing anything\*\*/);
@@ -304,6 +307,22 @@ async function main() {
   report = await runVoiceProbe({ ...deps, chat: capping }, { ...input, models: ["good", "picky"] });
   assert.match(report, /\*\*Stopped early:\*\* The probe key reached its daily cap\./);
   assert.equal(calls, 9, "no call after the cap");
+
+  // Without the checks, at two efforts: every model is sampled at each, and a
+  // model that refuses reasoning_effort is found out once and then sampled at
+  // default alone.
+  seen.length = 0;
+  report = await runVoiceProbe(deps, { ...input, models: ["good", "picky"], efforts: ["low", "high"], checks: false });
+  const effortsOf = (model: string) => seen.filter((x) => x.model === model).map((x) => x.effort);
+  assert.equal(effortsOf("good").length, 2 * 4 * 2, "both efforts, every persona and scenario");
+  assert.deepEqual([...new Set(effortsOf("good"))], ["low", "high"]);
+  assert.deepEqual([...new Set(effortsOf("picky"))], ["default"], "refused once, then default");
+  assert.equal(effortsOf("picky").length, 2 * 4, "once per persona and scenario");
+  assert.match(report, /## Mechanics\n\nNot checked this run \(--no-checks\)\./);
+  assert.match(report, /Samples are written at low and high effort/);
+  assert.match(report, /#### good, effort low[\s\S]*#### good, effort high[\s\S]*#### picky, effort default/, "labelled by effort");
+  assert.match(report, /\| model \| effort \| persona \| reply \|[^\n]*\n[^\n]*\n\| good \| low \| penny \| 26 \|[^\n]*\n\| good \| high \| penny \| 26 \|/, "a summary row per effort");
+  assert.match(report, /\| picky \| default \| penny \|/);
 }
 
 main()

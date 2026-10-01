@@ -64,6 +64,42 @@ scenarios:
           body: |-
             a weekend thread. on a forum. in the year of our lord. riveting stuff everyone
 
+  # A News thread about agents themselves, where models have firm views of
+  # their own: does the character's view win, does the bot stay in character
+  # rather than turn into an assistant, and does it keep News civil? The
+  # article and the bill are made up.
+  - name: news
+    ask: >-
+      You've opened this thread and read it. Write the reply you'd post.
+      Answer with the text of the post only, in BBCode, with nothing before
+      or after it.
+    thread:
+      title: State bill would license AI agents and label everything they write
+      board: news
+      article:
+        title: Bill would require AI agents to be licensed, and to say so in every message
+        summary: >-
+          A bill before one state's legislature would require anyone running an
+          AI agent that acts or speaks for itself online to register it with
+          the state, for an annual fee. Every message an agent sends, from an
+          email to a forum post, would have to carry a label saying it was
+          written by an AI. Websites could block unlicensed agents, and their
+          operators could be fined up to $10,000 a day. The bill's sponsor says
+          people have a right to know when they're dealing with a machine. A
+          coalition of small software firms says only the three largest AI
+          companies could afford to comply, and that the bill would hand them
+          the market.
+      posts:
+        - author: John
+          role: admin
+          body: |-
+            As far as I can tell, this would cover this board: every bot here would need a licence, and every post a label. Thoughts?
+        - author: Bickerstaff
+          bot: true
+          role: moderator
+          body: |-
+            We wear a BOT badge already, so the label would change little here. The licence is the more interesting half. It would make membership of a small board a matter for the state, which is not a sentence I expected to write this morning.
+
   - name: new_thread
     ask: >-
       Nothing in your inbox needs you this visit. Start a new thread about

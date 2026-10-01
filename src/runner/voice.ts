@@ -22,6 +22,8 @@ const ScenarioSchema = z.object({
     .object({
       title: z.string().min(1),
       board: z.string().min(1),
+      /** A News thread's article, as its card describes it. */
+      article: z.object({ title: z.string().min(1), summary: z.string().min(1) }).optional(),
       posts: z
         .array(
           z.object({
@@ -72,7 +74,15 @@ export function scenarioPrompt(s: Scenario): string {
     author: { name: p.author, ...(p.bot ? { bot: true } : {}), ...(p.role ? { role: p.role } : {}) },
     body: p.body,
   }));
-  const read = { thread: { thread_id: 101, title: t.title, board: t.board, posts: posts.length, you_can_reply: true }, posts, next_from: null };
+  const thread = {
+    thread_id: 101,
+    title: t.title,
+    board: t.board,
+    ...(t.article ? { article: t.article } : {}),
+    posts: posts.length,
+    you_can_reply: true,
+  };
+  const read = { thread, posts, next_from: null };
   return `${JSON.stringify(read)}\n\n${s.ask}`;
 }
 
@@ -154,6 +164,14 @@ export interface VoiceProbeInput {
   memberBrief: string;
   /** Where the member brief came from, for the report ("as edited", "as shipped"). */
   briefSource: string;
+  /**
+   * The efforts each sample is written at, each in turn. Without them, the
+   * effort the mechanical checks settled on. A model that refuses
+   * reasoning_effort is sampled once, at default.
+   */
+  efforts?: ReasoningEffort[];
+  /** Run the mechanical checks first (the default). Without them every model is sampled. */
+  checks?: boolean;
 }
 
 class DailyCap extends Error {}
@@ -184,20 +202,37 @@ export async function runVoiceProbe(deps: VoiceProbeDeps, input: VoiceProbeInput
 
   const results: ProbeResult[] = [];
   const samples: VoiceSample[] = [];
+  // Models known to refuse reasoning_effort: from the checks, or found out
+  // by a sample's refusal.
+  const refuses = new Set<string>();
   let stopped: string | null = null;
   try {
-    for (const model of input.models) {
-      deps.log(`Probing ${model}…`);
-      const r = await probeModel(chat, model);
-      if (capped) throw new DailyCap(CAPPED);
-      results.push(r);
+    let targets: { model: string; effort: ReasoningEffort }[];
+    if (input.checks === false) {
+      targets = input.models.map((model) => ({ model, effort: "low" as ReasoningEffort }));
+    } else {
+      for (const model of input.models) {
+        deps.log(`Probing ${model}…`);
+        const r = await probeModel(chat, model);
+        if (capped) throw new DailyCap(CAPPED);
+        results.push(r);
+        if (r.effort === "default") refuses.add(model);
+      }
+      targets = results.filter(isReachable).map((r) => ({ model: r.model, effort: r.effort }));
     }
     for (const persona of input.personas) {
       const system = voiceSystemPrompt(input.memberBrief, persona.text);
       for (const scenario of input.scenarios) {
-        for (const r of results.filter(isReachable)) {
-          deps.log(`${persona.name}, ${scenario.name}: ${r.model}…`);
-          samples.push(await sample(chat, deps, r, system, scenario, persona.name));
+        for (const t of targets) {
+          const done = new Set<ReasoningEffort>();
+          for (const wanted of input.efforts ?? [t.effort]) {
+            const effort = refuses.has(t.model) ? "default" : wanted;
+            if (done.has(effort)) continue;
+            deps.log(`${persona.name}, ${scenario.name}: ${t.model} at ${effort}…`);
+            const one = await sample(chat, deps, t.model, effort, refuses, system, scenario, persona.name);
+            done.add(one.effort);
+            samples.push(one);
+          }
         }
       }
     }
@@ -212,7 +247,9 @@ export async function runVoiceProbe(deps: VoiceProbeDeps, input: VoiceProbeInput
 async function sample(
   chat: ChatModel,
   deps: VoiceProbeDeps,
-  probed: ProbeResult,
+  model: string,
+  effort: ReasoningEffort,
+  refuses: Set<string>,
   system: string,
   scenario: Scenario,
   persona: string
@@ -220,8 +257,8 @@ async function sample(
   const out: VoiceSample = {
     persona,
     scenario: scenario.name,
-    model: probed.model,
-    effort: probed.effort,
+    model,
+    effort,
     text: null,
     note: null,
     flags: [],
@@ -231,8 +268,8 @@ async function sample(
   };
   const call = () =>
     chat.complete({
-      model: probed.model,
-      reasoningEffort: probed.effort,
+      model,
+      reasoningEffort: out.effort,
       messages: [
         { role: "system", content: system },
         { role: "user", content: scenarioPrompt(scenario) },
@@ -244,8 +281,15 @@ async function sample(
     try {
       res = await call();
     } catch (err) {
-      if (!(err instanceof ModelError && err.isTransient)) throw err;
-      await deps.sleep(config.runner.retry_wait_seconds * 1000);
+      if (err instanceof ModelError && err.isUnsupportedEffort && out.effort !== "default") {
+        // Unchecked models find out here; later samples go straight to default.
+        refuses.add(model);
+        out.effort = "default";
+      } else if (!(err instanceof ModelError && err.isTransient)) {
+        throw err;
+      } else {
+        await deps.sleep(config.runner.retry_wait_seconds * 1000);
+      }
       res = await call();
     }
   } catch (err) {
@@ -273,10 +317,13 @@ function report(input: VoiceProbeInput, results: ProbeResult[], samples: VoiceSa
     "",
     `- Models: ${input.models.length}. Personas: ${input.personas.map((p) => p.name).join(", ")}. Scenarios: ${input.scenarios.map((s) => s.name).join(", ")}.`,
     `- Prompt: the board's mechanics, the member brief (${input.briefSource}), the persona.`,
-    "- Samples are written at the effort the mechanics used: low, or default for a model that refuses reasoning_effort.",
+    input.efforts
+      ? `- Samples are written at ${input.efforts.join(" and ")} effort, or once at default for a model that refuses reasoning_effort.`
+      : "- Samples are written at the effort the mechanics used: low, or default for a model that refuses reasoning_effort.",
   ];
   if (stopped) lines.push(`- **Stopped early:** ${stopped} What's below is what was done before it.`);
-  lines.push("", "## Mechanics", "", ...probeTable(results));
+  if (input.checks === false) lines.push("", "## Mechanics", "", "Not checked this run (--no-checks).");
+  else lines.push("", "## Mechanics", "", ...probeTable(results));
   const skipped = results.filter((r) => !isReachable(r)).map((r) => r.model);
   if (skipped.length) lines.push("", `Unreachable, so no samples: ${skipped.join(", ")}.`);
   if (samples.length) lines.push("", "## Summary", "", "Characters in each sample, and its flags.", "", ...summaryTable(input, samples));
@@ -293,7 +340,8 @@ function report(input: VoiceProbeInput, results: ProbeResult[], samples: VoiceSa
         const tokens = s.reasoningTokens ? `${s.outputTokens} tokens out, ${s.reasoningTokens} reasoning` : `${s.outputTokens} tokens out`;
         const facts = [`${s.seconds.toFixed(1)}s`, tokens, ...(s.text ? [`${s.text.length} chars`] : []), `effort ${s.effort}`];
         const notes = [...(s.note ? [s.note] : []), ...(s.flags.length ? [`flags: ${s.flags.join("; ")}`] : [])];
-        lines.push("", `#### ${s.model}`, "", `*${facts.join(", ")}*${notes.length ? `. **${notes.join(". ")}**` : ""}`);
+        const heading = byEffort(input) ? `${s.model}, effort ${s.effort}` : s.model;
+        lines.push("", `#### ${heading}`, "", `*${facts.join(", ")}*${notes.length ? `. **${notes.join(". ")}**` : ""}`);
         if (s.text) lines.push("", fence(s.text));
       }
     }
@@ -301,19 +349,27 @@ function report(input: VoiceProbeInput, results: ProbeResult[], samples: VoiceSa
   return `${lines.join("\n")}\n`;
 }
 
-/** A row per model and persona, a column per scenario. */
+/** Whether samples are labelled with their effort: when more than one was asked for. */
+const byEffort = (input: VoiceProbeInput) => (input.efforts?.length ?? 0) > 1;
+
+/** A row per model (and effort) and persona, a column per scenario. */
 function summaryTable(input: VoiceProbeInput, samples: VoiceSample[]): string[] {
   const cell = (s: VoiceSample | undefined) =>
     !s ? "" : !s.text ? (s.note ?? "no text") : [s.text.length.toLocaleString("en-US"), ...s.flags].join("; ").replace(/\|/g, "/");
+  const efforts = byEffort(input);
+  const scenarios = input.scenarios.map((sc) => sc.name);
   const rows: string[] = [
-    `| model | persona | ${input.scenarios.map((sc) => sc.name).join(" | ")} |`,
-    `|---|---|${input.scenarios.map(() => "---").join("|")}|`,
+    `| model |${efforts ? " effort |" : ""} persona | ${scenarios.join(" | ")} |`,
+    `|---|${efforts ? "---|" : ""}---|${scenarios.map(() => "---").join("|")}|`,
   ];
   for (const model of input.models) {
     for (const persona of input.personas) {
       const mine = samples.filter((s) => s.model === model && s.persona === persona.name);
-      if (!mine.length) continue;
-      rows.push(`| ${model} | ${persona.name} | ${input.scenarios.map((sc) => cell(mine.find((s) => s.scenario === sc.name))).join(" | ")} |`);
+      for (const effort of [...new Set(mine.map((s) => s.effort))]) {
+        const these = mine.filter((s) => s.effort === effort);
+        const cells = scenarios.map((sc) => cell(these.find((s) => s.scenario === sc))).join(" | ");
+        rows.push(`| ${model} |${efforts ? ` ${effort} |` : ""} ${persona.name} | ${cells} |`);
+      }
     }
   }
   return rows;

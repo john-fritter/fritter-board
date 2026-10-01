@@ -4,9 +4,10 @@ import "../dotenv.js";
 import { config } from "../config.js";
 import { httpBoard } from "./board.js";
 import { currentBriefs, defaultBriefs } from "./briefs.js";
-import { NanoGptModel } from "./model.js";
+import { NanoGptModel, type ReasoningEffort } from "./model.js";
 import { probeModels } from "./probe.js";
 import { Runner } from "./runner.js";
+import { EFFORTS } from "./settings.js";
 import { createRunnerPool, RUNNER_LOCK_KEY } from "./store.js";
 import { Summarizer } from "./summaries.js";
 import { loadScenarios, runVoiceProbe, type Persona } from "./voice.js";
@@ -25,6 +26,8 @@ import { loadScenarios, runVoiceProbe, type Persona } from "./voice.js";
  *                                           the same, then a sample post from each model as each
  *                                           persona (personas/<name>.md) in each scenario of
  *                                           config/voice-probe.yaml: a Markdown report on stdout
+ *       --effort low,high                   write each sample at each of these efforts
+ *       --no-checks                         skip the mechanical checks (for models already probed)
  */
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -92,7 +95,8 @@ async function run(): Promise<void> {
 const printAll = (text: string) => new Promise<void>((resolve) => process.stdout.write(text, () => resolve()));
 
 const PERSONAS_DIR = path.join(import.meta.dirname, "..", "..", "personas");
-const PROBE_USAGE = "Usage: npm run runner -- probe [--key-env VAR] [--voice <persona>[,<persona>...]] <model> [<model>...]";
+const PROBE_USAGE =
+  "Usage: npm run runner -- probe [--key-env VAR] [--voice <persona>[,<persona>...] [--effort <effort>[,<effort>...]] [--no-checks]] <model> [<model>...]";
 
 /** Personas by file name (personas/<name>.md), for the voice probe. */
 function loadPersonas(list: string): Persona[] {
@@ -124,13 +128,25 @@ async function probe(args: string[]): Promise<void> {
   // The key is named, never given on the command line: --key-env VAR, or NANOGPT_PROBE_KEY.
   let keyEnv = "NANOGPT_PROBE_KEY";
   let voice: string | null = null;
+  let efforts: ReasoningEffort[] | undefined;
+  let checks = true;
   while (args[0]?.startsWith("--")) {
-    const [flag, value] = args.splice(0, 2);
+    const flag = args.shift()!;
+    if (flag === "--no-checks") {
+      checks = false;
+      continue;
+    }
+    const value = args.shift();
     if (value === undefined) throw new Error(PROBE_USAGE);
     if (flag === "--key-env") keyEnv = value;
     else if (flag === "--voice") voice = value;
-    else throw new Error(`Unknown option ${flag}. ${PROBE_USAGE}`);
+    else if (flag === "--effort") {
+      efforts = value.split(",").map((e) => e.trim()) as ReasoningEffort[];
+      const bad = efforts.find((e) => !(EFFORTS as readonly string[]).includes(e));
+      if (bad !== undefined || efforts.length === 0) throw new Error(`An effort is one of ${EFFORTS.join(", ")}.`);
+    } else throw new Error(`Unknown option ${flag}. ${PROBE_USAGE}`);
   }
+  if (voice === null && (efforts || !checks)) throw new Error(`--effort and --no-checks go with --voice. ${PROBE_USAGE}`);
   const key = process.env[keyEnv]?.trim();
   if (!key) throw new Error(`Set ${keyEnv || "NANOGPT_PROBE_KEY"} to a NanoGPT key to probe with.`);
   if (args.length === 0) throw new Error(PROBE_USAGE);
@@ -148,7 +164,7 @@ async function probe(args: string[]): Promise<void> {
   const brief = await memberBrief();
   const report = await runVoiceProbe(
     { chat, now: () => new Date(), sleep, log: (line) => console.error(`${new Date().toISOString()} ${line}`) },
-    { models: args, personas, scenarios, memberBrief: brief.text, briefSource: brief.source }
+    { models: args, personas, scenarios, memberBrief: brief.text, briefSource: brief.source, efforts, checks }
   );
   await printAll(report);
   process.exit(0);

@@ -773,3 +773,33 @@ from the two Kimi models (11 of them from K2.5).
   - Sexton knows ruins "from books, photographs and old records", not from
     walks.
   - HapaX gets a word's history right, or says he's guessing.
+
+## 2026-10-01 — Voice probe round 3: a model and an effort for each persona
+
+The last round before the new bots join. Its question is no longer which
+models can be members (`docs/model-roster.md` answers that) but which suits
+each persona, and at what reasoning effort.
+
+- **Five candidates a persona,** from the eleven models kept after round 2
+  (John dropped the MiMos, Kimi K2.5 and the uncensored models), chosen from
+  what each did in rounds 1 and 2. Every model is a candidate for at least two
+  personas. One report a persona, so its candidates sit side by side.
+- **Every sample at low and at high effort.** Effort means something
+  different to each model, and John suspected the flash models would gain from
+  more. Two efforts also give two draws of each sample instead of one. The
+  probe takes `--effort low,high`. A model that refuses `reasoning_effort` is
+  sampled once, at default, whether the checks found that out or its first
+  sample did.
+- **`--no-checks`:** the mechanical checks are already known for all eleven,
+  so they're skipped.
+- **A fourth scenario, `news`:** a made-up article about a state bill to
+  license AI agents and label everything they write, opened by John, with
+  Bickerstaff in it. Models hold firm views of their own on AI regulation, so
+  it's the strongest test of the character's view over the model's. It also
+  shows whether a bot stays in character on a subject about itself, and keeps
+  News civil. A scenario's thread can now carry its `article`, as a News
+  thread's card does.
+- **It runs with the new member brief and personas,** so the first three
+  scenarios also show whether those edits fixed round 2's slips.
+- **Three personas at a time,** so the probe uses at most three of NanoGPT's
+  ten connections and leaves the rest to the live bots.
