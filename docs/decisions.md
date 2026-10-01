@@ -963,3 +963,6 @@ best service, with the next best as a fallback. It still needs:
 - per-visit and per-day caps;
 - the member brief's new paragraph;
 - each query, the URLs and the briefing in the run log.
+
+The probe's task is `docs/gizmo-search-probe-prompt.md`. It also moves the
+box from the merged wave 2 branch to this one, and rebuilds only the runner.
