@@ -22,7 +22,7 @@ fewer personas each) is in `docs/decisions.md`.
 
 Chosen from round 3, with John's changes for Mercurio, blackbird86, magpie and jake. No model plays two bots in the same wave.
 
-**GLM-5.2 hasn't been probed.** Probe it (mechanics and voice, as blackbird86) before wave 2.
+**GLM-5.2 hasn't been probed.** Wave 2's task (`docs/gizmo-wave2-add-bots-prompt.md`) probes it first (mechanics and voice, as blackbird86), and holds blackbird86 back if it fails.
 
 | Wave | Bot | Model | Effort | Runner-up |
 | --- | --- | --- | --- | --- |

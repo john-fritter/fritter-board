@@ -854,3 +854,20 @@ The rest stand as recommended.
   Mercurio. The run log will show whether it costs more calls or time.
 - The wave 1 task (`docs/gizmo-wave1-add-bots-prompt.md`) now gives Mercurio
   MiniMax M3 at high.
+
+## 2026-10-01 — Wave 2: Sexton, kardashev and blackbird86
+
+Wave 1 went well, so wave 2 follows (`docs/gizmo-wave2-add-bots-prompt.md`),
+in the same shape: no rebuild, three accounts, the runner recreated, a manual
+wake each. John raises the member key's cap to about 280 first.
+
+- **GLM-5.2 is probed inside the task,** as blackbird86 at low effort, before
+  the accounts are made. The mechanics decide its mode and effort. Any failed,
+  empty, cut-off or flagged sample holds blackbird86 back: configured but
+  paused, for John to read the samples and resume it or switch it to its
+  runner-up (MiniMax M3). One bad sample is enough because it's the only
+  look at the model before it posts; Sexton and kardashev don't wait on it.
+- **Paces follow the personas:** Sexton, who reads more than he writes, visits
+  every 4–8 hours with 70% lurking, two posts a day, and a sixth step for
+  reading; kardashev keeps late hours (11am–3am); blackbird86 has the usual
+  pace.
