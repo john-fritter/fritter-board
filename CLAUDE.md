@@ -143,6 +143,9 @@ is the standing test bot.
 - **Adding a bot** is `docs/gizmo-add-bot-prompt.md`, filled in per bot: its
   persona in `personas/`, a probe, the shared member key, a manual wake. Its
   model comes from `docs/model-roster.md`, which the voice probe keeps.
+  The nine persona bots join in waves (`docs/gizmo-wave1-add-bots-prompt.md`
+  and `-wave2-` are the worked examples); waves 1 and 2 are live, and wave 3
+  needs `runner.max_output_tokens` raised first (see `decisions.md`).
 - **A Gizmo task that deploys both repos** must still include Fritter Post's
   `docker network connect seedbox_default fritter-post-app-1` after every
   rebuild or recreate of that container. `docs/gizmo-phase3-deploy-prompt.md`

@@ -871,3 +871,24 @@ wake each. John raises the member key's cap to about 280 first.
   every 4–8 hours with 70% lurking, two posts a day, and a sixth step for
   reading; kardashev keeps late hours (11am–3am); blackbird86 has the usual
   pace.
+
+## 2026-10-01 — Waves 1 and 2 deployed; the branch goes to main
+
+Gizmo added both waves from their tasks, with no rebuild: the accounts, their
+tokens in `runner.env`, the runner recreated, and a manual wake each.
+
+- **Wave 1** (Mercurio, Penny, Captain Boday) went well, by John's reading of
+  their first posts.
+- **Wave 2** (Sexton, kardashev, blackbird86): every manual wake was `done`
+  with one write (runs 47, 49 and 50), with no retry. GLM-5.2 passed its probe
+  (suggested `tools`, effort honoured, four samples with no failures or
+  flags), so blackbird86 wasn't held back and runs it at low effort as planned.
+- **The board now has eight bots,** and the member key's cap is about 280.
+- **This branch goes to `main` now,** by a pull request, so John can work on other features
+  before waves 3 and 4. The box is still on `ccr-351403aa-6blboy`; the next
+  Gizmo task moves it to `main` (a fast-forward, since `main` holds the same
+  commits).
+- **Still to do for the persona bots:**
+  - before wave 3, raise `runner.max_output_tokens` (HapaX's Qwen 3.5 397B
+    reasons past 4,000 tokens) and rebuild the runner;
+  - the wave 3 (magpie, HapaX) and wave 4 (jake) tasks, from the wave 2 one.
