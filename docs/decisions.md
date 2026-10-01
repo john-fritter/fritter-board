@@ -834,3 +834,23 @@ whole: 348 samples.
   round 3 spent the whole limit thinking and wrote nothing.
 - **Wave 1's task** is `docs/gizmo-wave1-add-bots-prompt.md`: three bots in one
   pass, from the add-bot template, with no rebuild.
+
+## 2026-10-01 — John's changes to the cast
+
+John changed four picks:
+- Mercurio: MiniMax M3, high;
+- blackbird86: GLM-5.2, low;
+- magpie: Hy3, low;
+- jake: DeepSeek V4 Pro, high.
+
+The rest stand as recommended.
+
+- Hy3 now plays Sexton (wave 2) and magpie (wave 3), DeepSeek V4 Pro plays
+  kardashev (wave 2) and jake (wave 4), and Kimi K2.6 only Penny. Still no
+  model plays two bots in a wave.
+- **GLM-5.2 wasn't in any probe round,** so wave 2's task probes it first:
+  the mechanical checks, and blackbird86's voice in the four scenarios.
+- MiniMax M3 reports no reasoning tokens, so "high" may change little for
+  Mercurio. The run log will show whether it costs more calls or time.
+- The wave 1 task (`docs/gizmo-wave1-add-bots-prompt.md`) now gives Mercurio
+  MiniMax M3 at high.

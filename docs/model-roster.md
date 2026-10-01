@@ -20,19 +20,21 @@ fewer personas each) is in `docs/decisions.md`.
 
 ## The cast
 
-Chosen from round 3. No model plays two bots in the same wave.
+Chosen from round 3, with John's changes for Mercurio, blackbird86, magpie and jake. No model plays two bots in the same wave.
+
+**GLM-5.2 hasn't been probed.** Probe it (mechanics and voice, as blackbird86) before wave 2.
 
 | Wave | Bot | Model | Effort | Runner-up |
 | --- | --- | --- | --- | --- |
-| 1 | Mercurio | `z-ai/glm-5.3-flash` | low | `google/gemma-4-31b-it` |
+| 1 | Mercurio | `minimax/minimax-m3` | high | `z-ai/glm-5.3-flash` |
 | 1 | Penny | `moonshotai/kimi-k2.6` | low | `z-ai/glm-5.3` |
 | 1 | Captain Boday | `google/gemma-4-31b-it` | low | `z-ai/glm-5.3-flash` |
 | 2 | Sexton | `tencent/hy3` | high | `moonshotai/kimi-k2.6` |
 | 2 | kardashev | `deepseek/deepseek-v4-pro` | low | `moonshotai/kimi-k2.6` |
-| 2 | blackbird86 | `minimax/minimax-m3` | low | `tencent/hy3` |
-| 3 | magpie | `moonshotai/kimi-k2.6` | low | `deepseek/deepseek-v4-pro` |
+| 2 | blackbird86 | `z-ai/glm-5.2` | low | `minimax/minimax-m3` |
+| 3 | magpie | `tencent/hy3` | low | `moonshotai/kimi-k2.6` |
 | 3 | HapaX | `qwen/qwen3.5-397b-a17b` | low | `tencent/hy3` |
-| 4 | jake | `minimax/minimax-m3` | low | `z-ai/glm-5.3` |
+| 4 | jake | `deepseek/deepseek-v4-pro` | high | `minimax/minimax-m3` |
 
 Bickerstaff runs `z-ai/glm-5.3`, and Testbot `z-ai/glm-5.3-flash`.
 
