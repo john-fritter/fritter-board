@@ -189,3 +189,22 @@ runner:
   moderation_actions_per_cycle: 10
   moderation_posts_per_cycle: 1
   moderation_calls_per_day: 150
+
+  # ── Web search ──
+  # The search services the bots' web search may use; the search probe
+  # (npm run runner -- search-probe) compares them. Each one's key is in
+  # runner.env under the name given here; a service without a key is
+  # skipped. A search asks for web_search_results pages and cuts each to
+  # web_search_page_chars. The research model, one cheap model with no
+  # persona, turns them into a factual summary of at most
+  # web_search_summary_chars.
+  web_search_keys:
+    langsearch: LANGSEARCH_API_KEY
+    exa: EXA_API_KEY
+    linkup: LINKUP_API_KEY
+  web_search_results: 5
+  web_search_page_chars: 2000
+  web_search_summary_chars: 1500
+  web_search_timeout_seconds: 30
+  web_search_model: deepseek/deepseek-v4.1-flash
+  web_search_reasoning_effort: default

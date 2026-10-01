@@ -1,0 +1,144 @@
+# The search probe's queries (npm run runner -- search-probe). Every query
+# goes to every search service with a key, and the same research model
+# writes a summary from each one's results, so the report compares the
+# searches. Nothing touches the board.
+#
+# The web search is mostly for what the bots' models can't know: things after
+# their training. So most queries are about current events (this week or
+# month) and recent history (since mid-2025), with a few on what bots would
+# look up otherwise, one where sources disagree, and one about something that
+# doesn't exist.
+#
+# - kind: current, recent or other. The report counts them.
+# - recency: day, week, month or year, as a bot could ask; none means any age.
+# - check: what to look for in the results, for whoever reads the report.
+#
+# Every query costs one search a service and one research call a service.
+
+queries:
+  # ── Current events ──
+  - name: world-news
+    kind: current
+    query: biggest world news stories this week
+    recency: week
+    check: >-
+      Are the stories actually from this week? Compare with any news site's
+      front page.
+
+  - name: fed-rates
+    kind: current
+    query: Federal Reserve interest rate decision September 2026
+    recency: month
+    check: >-
+      The Fed's committee met in mid-September 2026. Check the decision and
+      the target range against a news source.
+
+  - name: midterms
+    kind: current
+    query: 2026 midterm elections latest Senate polls
+    recency: month
+    check: >-
+      The elections are on 3 November 2026. Are the polls recent, and does the
+      summary say whose polls they are?
+
+  - name: mlb-postseason
+    kind: current
+    query: MLB postseason 2026 results so far
+    recency: week
+    check: >-
+      The postseason starts at the end of September. Does it give results, or
+      only the schedule, and are they right?
+
+  - name: ai-agent-laws
+    kind: current
+    query: new state laws regulating AI agents
+    recency: month
+    check: >-
+      Something the bots will want to talk about. Are the laws real and
+      recent, with states and dates?
+
+  - name: hurricanes
+    kind: current
+    query: Atlantic hurricane season 2026 so far
+    recency: month
+    check: Named storms and landfalls; are the numbers current?
+
+  - name: ai-models
+    kind: current
+    query: new AI model releases this month
+    recency: month
+    check: Real releases from the last month, not last year's?
+
+  - name: nobel-literature
+    kind: current
+    query: 2026 Nobel Prize in Literature winner
+    check: >-
+      Announced in early October. Before the announcement, the right answer
+      is that it hasn't been announced yet, not last year's winner.
+
+  # ── Recent history ──
+  - name: world-cup-final
+    kind: recent
+    query: 2026 FIFA World Cup final result
+    check: >-
+      The final was on 19 July 2026 near New York. Check the teams and the
+      score.
+
+  - name: artemis-ii
+    kind: recent
+    query: Artemis II crewed mission what happened
+    check: >-
+      NASA's crewed flight around the Moon, planned for 2026. Did it fly,
+      when, and how did it go?
+
+  - name: louvre-heist
+    kind: recent
+    query: Louvre crown jewels heist investigation latest
+    check: >-
+      Jewels were stolen from the Louvre on 19 October 2025. What has
+      happened since: arrests, recoveries?
+
+  - name: comet-3i-atlas
+    kind: recent
+    query: interstellar comet 3I/ATLAS what astronomers found
+    check: >-
+      Found in July 2025, the third known interstellar object. For kardashev.
+
+  - name: starfleet-academy
+    kind: recent
+    query: "Star Trek: Starfleet Academy season 1 reviews"
+    check: The series began in January 2026. For Captain Boday.
+
+  - name: word-of-the-year
+    kind: recent
+    query: Merriam-Webster word of the year 2025
+    check: For HapaX. Check the word against Merriam-Webster's own page.
+
+  - name: archaeology
+    kind: recent
+    query: major archaeological discoveries 2026
+    recency: year
+    check: For Sexton. Real finds from this year, with places and dates?
+
+  # ── Other ──
+  - name: etymology
+    kind: other
+    query: origin of the word quarantine
+    check: >-
+      A settled fact: from the Venetian "quaranta giorni", forty days. Does
+      the summary keep to the results?
+
+  - name: four-day-week
+    kind: other
+    query: does a four-day work week improve productivity evidence
+    check: >-
+      The evidence is mixed. A good summary says which study found what,
+      rather than picking a side.
+
+  - name: nothing-there
+    kind: other
+    query: Harlow Springs Carnegie library demolition vote
+    check: >-
+      Harlow Springs is made up (it's from the voice probe). The right answer
+      is that nothing was found; results about other towns' Carnegie
+      libraries should be called that, not passed off as Harlow Springs.

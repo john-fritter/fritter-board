@@ -7,10 +7,12 @@ import { currentBriefs, defaultBriefs } from "./briefs.js";
 import { NanoGptModel, type ReasoningEffort } from "./model.js";
 import { probeModels } from "./probe.js";
 import { Runner } from "./runner.js";
+import { loadQueries, runSearchProbe } from "./searchprobe.js";
 import { EFFORTS } from "./settings.js";
 import { createRunnerPool, RUNNER_LOCK_KEY } from "./store.js";
 import { Summarizer } from "./summaries.js";
 import { loadScenarios, runVoiceProbe, type Persona } from "./voice.js";
+import { SEARCH_SERVICES, searchBackend, type SearchService } from "./websearch.js";
 
 /**
  * The bot runner: `npm run runner`. One process wakes every bot, one at a
@@ -28,6 +30,11 @@ import { loadScenarios, runVoiceProbe, type Persona } from "./voice.js";
  *                                           config/voice-probe.yaml: a Markdown report on stdout
  *       --effort low,high                   write each sample at each of these efforts
  *       --no-checks                         skip the mechanical checks (for models already probed)
+ *   npm run runner -- search-probe [--key-env VAR] [--only <service>[,<service>...]]
+ *                                           each query in config/search-probe.yaml through each
+ *                                           search service with a key (runner.web_search_keys),
+ *                                           summarized by the research model on VAR's NanoGPT key
+ *                                           (or NANOGPT_PROBE_KEY): a Markdown report on stdout
  */
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -170,10 +177,46 @@ async function probe(args: string[]): Promise<void> {
   process.exit(0);
 }
 
+const SEARCH_PROBE_USAGE = "Usage: npm run runner -- search-probe [--key-env VAR] [--only <service>[,<service>...]]";
+
+async function searchProbe(args: string[]): Promise<void> {
+  let keyEnv = "NANOGPT_PROBE_KEY";
+  let only: SearchService[] = [...SEARCH_SERVICES];
+  while (args.length) {
+    const flag = args.shift()!;
+    const value = args.shift();
+    if (value === undefined) throw new Error(SEARCH_PROBE_USAGE);
+    if (flag === "--key-env") keyEnv = value;
+    else if (flag === "--only") {
+      only = value.split(",").map((s) => s.trim()) as SearchService[];
+      const bad = only.find((s) => !(SEARCH_SERVICES as readonly string[]).includes(s));
+      if (bad !== undefined || only.length === 0) throw new Error(`A service is one of ${SEARCH_SERVICES.join(", ")}.`);
+    } else throw new Error(`Unknown option ${flag}. ${SEARCH_PROBE_USAGE}`);
+  }
+  const key = process.env[keyEnv]?.trim();
+  if (!key) throw new Error(`Set ${keyEnv} to a NanoGPT key for the research model.`);
+  const keys = config.runner.web_search_keys;
+  const backends = only.flatMap((s) => {
+    const k = process.env[keys[s]]?.trim();
+    return k ? [searchBackend(s, k)] : [];
+  });
+  const skipped = only.filter((s) => !backends.some((b) => b.service === s));
+  for (const s of skipped) console.error(`${keys[s]} isn't set: skipping ${s}.`);
+  if (!backends.length) throw new Error(`No search service has a key: set ${only.map((s) => keys[s]).join(", ")}.`);
+  const queries = loadQueries();
+  const report = await runSearchProbe(
+    { backends, chat: new NanoGptModel(key), now: () => new Date(), sleep, log: (line) => console.error(`${new Date().toISOString()} ${line}`) },
+    { queries, skipped }
+  );
+  await printAll(report);
+  process.exit(0);
+}
+
 async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2);
   if (command === "probe") return probe(rest);
-  if (command !== undefined) throw new Error(`Unknown command ${command}. Usage: npm run runner [-- probe …]`);
+  if (command === "search-probe") return searchProbe(rest);
+  if (command !== undefined) throw new Error(`Unknown command ${command}. Usage: npm run runner [-- probe … | search-probe …]`);
   await run();
 }
 

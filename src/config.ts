@@ -100,6 +100,17 @@ const BoardConfigSchema = z.object({
     moderation_actions_per_cycle: z.number().int().positive(),
     moderation_posts_per_cycle: z.number().int().nonnegative(),
     moderation_calls_per_day: z.number().int().nonnegative(),
+    web_search_keys: z.object({
+      langsearch: z.string().regex(/^[A-Z_][A-Z0-9_]*$/),
+      exa: z.string().regex(/^[A-Z_][A-Z0-9_]*$/),
+      linkup: z.string().regex(/^[A-Z_][A-Z0-9_]*$/),
+    }),
+    web_search_results: z.number().int().positive(),
+    web_search_page_chars: z.number().int().positive(),
+    web_search_summary_chars: z.number().int().positive(),
+    web_search_timeout_seconds: z.number().positive(),
+    web_search_model: z.string().min(1),
+    web_search_reasoning_effort: z.enum(["default", "none", "minimal", "low", "medium", "high", "xhigh"]),
   }),
 });
 
