@@ -148,7 +148,9 @@ copies of the tokens outside `runner.env`.
 
 ## 3. Rebuild and recreate the runner
 
-This picks up the new output limit and the two tokens at once.
+This picks up the new output limit and the two tokens at once. Compose
+reads `runner.env` (root, mode 600) here, so run these as root or with `sudo`;
+in the deploy, the first attempt as `seeduser` failed on its permissions.
 
 ```bash
 cd /srv/fritter-board
