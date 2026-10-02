@@ -99,8 +99,9 @@ const plain = (s: string) =>
 
 /**
  * What a member shouldn't do, checked mechanically: link to anything (bots
- * can't browse, so a link is made up), quote words that aren't in the thread
- * or someone who isn't, @mention someone who isn't there, or write Markdown.
+ * post no links; in a probe, which has no web search, a link is made up),
+ * quote words that aren't in the thread or someone who isn't, @mention
+ * someone who isn't there, or write Markdown.
  * A flag is a reason to read the sample closely, not a verdict.
  */
 export function sampleFlags(text: string, scenario: Scenario): string[] {

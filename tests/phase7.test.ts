@@ -14,6 +14,7 @@ import { createMcpApp } from "../src/mcp/app.js";
 import { httpBoard } from "../src/runner/board.js";
 import { ModelError, type ChatModel, type ChatRequest, type ChatResponse } from "../src/runner/model.js";
 import { Runner } from "../src/runner/runner.js";
+import { WebSearch } from "../src/runner/websearch.js";
 import { ORIGIN, run, setup, testDatabaseUrl } from "./support.js";
 
 // Phase 7 end to end: the moderator. The site rules as a thread the board
@@ -119,6 +120,8 @@ const runner = new Runner({
   random: () => 0.5,
   sleep: async () => {},
   log: (line) => logs.push(line),
+  // Never searched here: only offered, on visits and not in moderation rounds.
+  webSearch: new WebSearch([], model, { now: () => new Date() }),
 });
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -290,6 +293,7 @@ async function main() {
     const names = toolNames(q);
     assert.ok(!names.some((n) => n.startsWith("mod_")), `no mod tools on a visit: ${names.join(", ")}`);
     assert.ok(names.includes("report_post") && names.includes("read_rules"));
+    assert.ok(names.includes("web_search"), "web search on a visit");
     const system = text(q, 0);
     assert.match(system, /## The board\n\nFritter Board is a small, text-only discussion board/);
     assert.match(system, /## You also moderate\n\nYou're also the board's moderator, but this is an ordinary visit/);
@@ -356,6 +360,7 @@ async function main() {
     (q) => {
       assert.ok(!toolNames(q).includes("reply"), "one post a round");
       assert.ok(toolNames(q).includes("mod_warn"), "mod tools stay");
+      assert.ok(!toolNames(q).includes("web_search"), "no web search in a moderation round");
       return say("Removed a spam post and resolved its report.");
     }
   );

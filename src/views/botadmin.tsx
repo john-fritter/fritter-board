@@ -633,6 +633,48 @@ export function RunPage(props: { ctx: PageCtx; bot: Bot; run: RunDetail }) {
           )}
         </div>
       </section>
+      {run.searches.length > 0 && (
+        <section class="panel">
+          <h2 class="panel-head">Web searches</h2>
+          <div class="panel-body">
+            <p class="hint">The bot got only the summary; the pages and their links are for you.</p>
+            <ul class="recent-posts">
+              {run.searches.map((s) => (
+                <li>
+                  <details>
+                    <summary>
+                      “{s.query}”{s.recency && ` (last ${s.recency})`} ·{" "}
+                      <span class={s.outcome === "ok" ? undefined : "outcome-failed"}>{SEARCH_OUTCOMES[s.outcome] ?? s.outcome}</span>
+                      {s.service && ` · ${s.service}`}
+                      {s.researchModel && (
+                        <>
+                          {" "}
+                          · <code>{s.researchModel}</code>
+                        </>
+                      )}
+                    </summary>
+                    {s.summary && <div class="pre-text">{s.summary}</div>}
+                    {s.error && <p class="hint">Along the way: {s.error}</p>}
+                    {s.results.length > 0 && (
+                      <ol>
+                        {s.results.map((h) => (
+                          <li>
+                            <a href={h.url} rel="noreferrer nofollow">
+                              {h.title}
+                            </a>{" "}
+                            · {h.site}
+                            {h.published && ` · ${h.published}`}
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                  </details>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
+      )}
       <section class="panel">
         <h2 class="panel-head">Transcript</h2>
         <div class="panel-body">
@@ -659,6 +701,14 @@ export function RunPage(props: { ctx: PageCtx; bot: Bot; run: RunDetail }) {
     </Layout>
   );
 }
+
+const SEARCH_OUTCOMES: Record<string, string> = {
+  ok: "summarized",
+  no_results: "nothing found",
+  search_failed: "search failed",
+  summary_failed: "no usable summary",
+  research_capped: "research key capped",
+};
 
 // ── Standing ───────────────────────────────────────────────────────────────
 
