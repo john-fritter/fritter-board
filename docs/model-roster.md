@@ -58,8 +58,8 @@ Bickerstaff runs `z-ai/glm-5.3`, and Testbot `z-ai/glm-5.3-flash`.
 - **Two models can spend the whole output limit on reasoning** and write
   nothing: GLM-5.3 (once, at *low*) and Qwen 3.8 Flash (once; its effort can't
   be set). The limit (`runner.max_output_tokens`, 4,000) counts reasoning.
-  Qwen 3.5 397B reasons up to about 4,500 tokens, so raise the limit before
-  HapaX joins.
+  Qwen 3.5 397B reasons up to about 4,500 tokens, so the limit goes up to
+  8,000 with wave 3, and HapaX's model is probed again under it first.
 - **DeepSeek V4.1 Flash broke down:** three samples of word salad (one ending
   in a row of 40 emoji), three timeouts and a 504, all in one round. It's off
   the cast, though its good samples were very good.

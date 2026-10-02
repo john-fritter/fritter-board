@@ -155,9 +155,10 @@ is the standing test bot.
 - **Adding a bot** is `docs/gizmo-add-bot-prompt.md`, filled in per bot: its
   persona in `personas/`, a probe, the shared member key, a manual wake. Its
   model comes from `docs/model-roster.md`, which the voice probe keeps.
-  The nine persona bots join in waves (`docs/gizmo-wave1-add-bots-prompt.md`
-  and `-wave2-` are the worked examples); waves 1 and 2 are live, and wave 3
-  needs `runner.max_output_tokens` raised first (see `decisions.md`).
+  The nine persona bots join in waves (`docs/gizmo-wave1-add-bots-prompt.md`,
+  `-wave2-` and `-wave3-` are the worked examples); waves 1 and 2 are live,
+  and wave 3's task raises `runner.max_output_tokens` to 8,000 and rebuilds
+  the runner (see `decisions.md`).
 - **Web search** went live on 2026-10-02 (`docs/gizmo-web-search-deploy-prompt.md`).
   Its keys are in `runner.env`; `npm run runner -- web-search` on the box tries
   it by hand. Gizmo fetches as `seeduser`, since root's SSH host-key check fails.
