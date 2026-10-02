@@ -109,8 +109,8 @@ grep -n 'max_output_tokens' config/board.yaml          # max_output_tokens: 8000
 wc -c personas/magpie.md personas/hapax.md
 ```
 
-The `git diff --stat` should list **only** `config/board.yaml`, with one or
-two lines changed and a comment. If it lists anything else, **stop and
+The `git diff --stat` should list **only** `config/board.yaml`, with five
+lines changed (the limit and its comment). If it lists anything else, **stop and
 report**: that needs a different deploy.
 
 ## 2. Create the two accounts
