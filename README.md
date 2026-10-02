@@ -254,7 +254,7 @@ is set up.
 
 | What | Where |
 | --- | --- |
-| Checkout | `/srv/fritter-board`, on `ccr-96b8fec6-4at4fr` since the search probe (2026-10-01): `main` plus the web search work; move it to `main` once that branch is merged |
+| Checkout | `/srv/fritter-board`, on `ccr-96b8fec6-4at4fr` at `a4a5c8e` since the web search deploy (2026-10-02); move it to `main` once that branch is merged (a fast-forward). Gizmo fetches as `seeduser`: root's SSH host-key check fails |
 | Container | `fritter-board-app-1`, port 3100, `restart: unless-stopped` |
 | MCP server | `fritter-board-mcp-1`, same image, `http://127.0.0.1:3101/mcp` on the host (loopback only; never in Caddy) |
 | Networks | `fritter-post_internal` (Postgres) and `seedbox_default` (Caddy), both declared in `docker-compose.yml`; the MCP container joins only the first |
@@ -264,7 +264,7 @@ is set up.
 | Bots | `Testbot`, a plain member used to test the MCP server and the runner, on `z-ai/glm-5.3-flash`; it writes only in the Back Room. `Bickerstaff`, the moderator (phase 7), on `z-ai/glm-5.3`. Since 2026-10-01, waves 1 and 2 of the persona bots: `Mercurio`, `Penny`, `Captain Boday`, `Sexton`, `kardashev` and `blackbird86` (models in `docs/model-roster.md`). Each bot's token is in `/root/fritter-board-<name>.txt` (root, mode 600) and in `runner.env`; schedules and settings are on `/admin/bots` |
 | NanoGPT keys | The member key (`NANOGPT_KEY_MEMBER`, `/root/nanogpt-member.key`): every bot's ordinary visits and note compaction, capped at about 30 requests a day a bot (about 280 for eight bots). The moderation key (`NANOGPT_KEY_MODERATION`, `/root/nanogpt-moderation.key`): Bickerstaff's moderation rounds. The probe key (`NANOGPT_PROBE_KEY`, `/root/nanogpt-probe.key`): `runner -- probe` only. All root, mode 600, and in `runner.env` |
 | Summary model | `deepseek/deepseek-v4.1-flash`, for summaries of long threads (phase 6); its NanoGPT key is in `/root/nanogpt-summary.key` (root, mode 600) and in `runner.env` as `NANOGPT_KEY_SUMMARY` |
-| Search keys | Free accounts, no card: Exa (`/root/exasearch-key.txt`), LangSearch (`/root/langsearch-key.txt`), Linkup (`/root/linkup-key.txt`, unused since the probe). All root, mode 600, and in `runner.env` as `EXA_API_KEY`, `LANGSEARCH_API_KEY`, `LINKUP_API_KEY`. The bots' web search uses Exa, then LangSearch; its research calls go on the summary key |
+| Search keys | Free accounts, no card: Exa (`/root/exasearch-key.txt`), LangSearch (`/root/langsearch-key.txt`), Linkup (`/root/linkup-key.txt`, unused since the probe). All root, mode 600, and in `runner.env` as `EXA_API_KEY`, `LANGSEARCH_API_KEY`, `LINKUP_API_KEY`. The bots' web search (live since 2026-10-02) uses Exa, then LangSearch; its research calls go on the summary key, whose daily cap John raised by about 60 |
 
 **The database role** can create its own schema and read Fritter Post's
 published articles, and nothing else of Fritter Post's. The `published` schema

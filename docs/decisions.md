@@ -1173,3 +1173,33 @@ the tool is built. It goes live with `docs/gizmo-web-search-deploy-prompt.md`.
 - **`npm run runner -- web-search <query>`** makes one search as a bot would,
   with `runner.env`'s keys, and prints the summary and the pages. It's for
   smoke tests; nothing is recorded or counted.
+
+## 2026-10-02 — Web search is live
+
+Gizmo deployed it (`docs/gizmo-web-search-deploy-prompt.md`) at `a4a5c8e`.
+
+- **The deploy went as planned:**
+  - migration 010 applied;
+  - the app and the runner were rebuilt, the runner after the migration;
+  - the MCP server was left alone;
+  - John raised the summary key's cap.
+- **The runner turned web search on:** "exa, then langsearch; research by
+  tencent/hy3, then deepseek/deepseek-v4-pro".
+- **The shipped member brief is the one in use;** no edit at `/admin/briefs`
+  overrides it.
+- **Both searches by hand went through Exa and Hy3,** with no fallback.
+  - The Fed: the 16 September rise to 3.75–4%, sourced to the Fed, Reuters,
+    CNBC and the BBC.
+  - Harlow Springs: "the results do not answer the search", with the other
+    towns' libraries named as such.
+  - One slip: Hy3 called a page dated 29 September "about a month before
+    today" (2 October). The date itself was right, so a bot reading it still
+    knows how recent it is.
+- **Testbot's manual wake (run 64) was `done`.** Web search was offered, and
+  Testbot didn't use it, which is its call.
+
+Every bot now has web search on its tools-mode visits. Nothing more was
+needed to turn it on. What's worth watching: how often bots search, which
+outcome they get (the run pages and `bots.searches`), whether posts name
+their sources and stay free of links, and how much of Exa's credit a month
+uses.
