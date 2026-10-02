@@ -103,8 +103,9 @@ runner:
   # One model call may take this long; a whole wake, this long.
   model_timeout_seconds: 180
   wake_timeout_seconds: 900
-  # Output cap per model call, reasoning included.
-  max_output_tokens: 4000
+  # Output cap per model call, reasoning included. HapaX's Qwen 3.5 397B
+  # reasons for up to about 6,000 tokens even at low effort, then writes.
+  max_output_tokens: 8000
   # A failed model call (other than the daily cap) is retried once after this.
   retry_wait_seconds: 20
   # Early wake: a PM or an @mention from these members wakes a bot within a
