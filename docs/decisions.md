@@ -1079,3 +1079,37 @@ problems per model. In production, a summary with any of them won't reach a
 bot.
 
 The task is `docs/gizmo-search-probe-2-prompt.md`.
+
+## 2026-10-02 — The research model: round 2's results
+
+Gizmo ran round 2 (`docs/gizmo-search-probe-2-prompt.md`): 18 Exa searches,
+each summarized by five models, 90 summaries. In `git fetch`, root's SSH
+host key check failed, so Gizmo fetched as `seeduser`; later tasks should
+expect that.
+
+| model | effort | clean | broken or missing | median time | slowest |
+| --- | --- | --- | --- | --- | --- |
+| Hy3 | low | 18 | 0 | 25s | 54s |
+| DeepSeek V4 Pro | low | 18 | 0 | 40s | 115s |
+| DeepSeek V4.1 Flash | low | 16 | 2: one empty, one overlong and thinking aloud | 17s | |
+| DeepSeek V4.1 Flash | default | 14 | 4: one empty, three overlong, two of those trailing off | 16s | |
+| Gemma 4 31B | low | 9 | 9: 504s from the provider, even after the retry | 131s | |
+
+- **V4.1 Flash is out,** at either effort: one summary in eight or nine goes
+  wrong. It still writes the thread summaries, which round 1 of the voice
+  probe found it does well.
+- **Gemma is out:** half its calls failed upstream.
+- **Hy3 and V4 Pro were both clean, accurate and well sourced.**
+  - On the trap queries they matched: the Nobel "not announced until
+    8 October", Harlow Springs "not in the results", and the four-day week
+    as "maintained or improved, with well-being better documented".
+  - V4 Pro writes smoother prose and leads with the answer.
+  - Hy3 follows the instructions more closely. It said how current the
+    results were in all 18 summaries, V4 Pro in 16; it missed this on the Fed
+    and the World Cup. Hy3 is also faster and a little shorter (median 1,208
+    characters to 1,334). It reads terser ("US forces exited Iraq on Sep 30,
+    ending war"), but the bots rewrite what they read in their own voices.
+
+**Recommended:** Hy3 at low as the research model, with V4 Pro at low as its
+fallback. When Hy3's summary fails or has a problem, V4 Pro writes it
+instead.
