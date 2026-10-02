@@ -1,5 +1,6 @@
 import type { Hono } from "hono";
 import type { AppEnv, Services } from "../app.js";
+import { config } from "../config.js";
 import { articleForThread } from "../forum/articles.js";
 import { getBoard, listIndex, listThreads, listVisibleBoards } from "../forum/boards.js";
 import { invalid } from "../forum/errors.js";
@@ -9,17 +10,18 @@ import { getRules, setRulesThread } from "../forum/rules.js";
 import { canPost, canReply, isModerator } from "../forum/permissions.js";
 import { firstUnreadPostId, markAllRead, markThreadRead } from "../forum/reads.js";
 import { search } from "../forum/search.js";
-import { createThread, getPost, getThread, listPosts, locatePost, reply } from "../forum/threads.js";
+import { createThread, getThread, listPosts, locatePost, quotablePosts, reply } from "../forum/threads.js";
 import { whoIsOnline } from "../forum/users.js";
-import { quoteFor } from "../markup/bbcode.js";
+import { quotesFor } from "../markup/bbcode.js";
 import { ArticleCard } from "../views/articles.js";
 import { BoardPage, ComposePage, IndexPage, ThreadPage } from "../views/forum.js";
 import { SearchPage } from "../views/search.js";
 import { rssXml } from "./rss.js";
-import { formError, parseId, readForm, render } from "./util.js";
+import { clearSelection, readSelection, saveSelection } from "./multiquote.js";
+import { formError, parseId, readForm, render, safeNext } from "./util.js";
 
 export function registerForumRoutes(app: Hono<AppEnv>, s: Services): void {
-  const { forum, url } = s;
+  const { forum, url, env } = s;
   const loginFirst = (here: string) => url(`/login?next=${encodeURIComponent(here)}`);
 
   app.get("/", async (c) => {
@@ -73,9 +75,12 @@ export function registerForumRoutes(app: Hono<AppEnv>, s: Services): void {
     const { posts, page } = await listPosts(forum, viewer, thread, c.req.query("page"));
     const lastOnPage = posts[posts.length - 1];
     if (viewer && lastOnPage) await markThreadRead(forum, viewer, thread.id, lastOnPage.id);
-    const [moveTargets, article] = await Promise.all([
+    const replies = canReply(viewer, thread);
+    const selection = replies ? readSelection(c, thread.id) : [];
+    const [moveTargets, article, quoting] = await Promise.all([
       isModerator(viewer) ? listVisibleBoards(forum, viewer) : Promise.resolve([]),
       thread.fpArticleId !== null ? articleForThread(forum, thread.fpArticleId) : Promise.resolve(null),
+      selection.length > 0 ? quotablePosts(forum, thread, selection) : Promise.resolve([]),
     ]);
     return render(
       c,
@@ -84,7 +89,8 @@ export function registerForumRoutes(app: Hono<AppEnv>, s: Services): void {
         thread={thread}
         posts={posts}
         page={page}
-        canReply={canReply(viewer, thread)}
+        canReply={replies}
+        quoting={quoting.map((p) => p.id)}
         moveTargets={moveTargets}
         articleCard={
           article && thread.fpArticleId !== null && (
@@ -164,6 +170,8 @@ export function registerForumRoutes(app: Hono<AppEnv>, s: Services): void {
     );
   });
 
+  // Opens the reply form with the multi-quote selection quoted, and the post
+  // whose Quote link was followed, all in thread order.
   app.get("/t/:id/reply", async (c) => {
     const viewer = c.get("viewer");
     const thread = await getThread(forum, viewer, parseId(c.req.param("id")));
@@ -171,12 +179,13 @@ export function registerForumRoutes(app: Hono<AppEnv>, s: Services): void {
       if (viewer === null) return c.redirect(loginFirst(c.get("page").here), 303);
       return c.redirect(url(`/t/${thread.id}`), 303);
     }
-    let body = "";
-    const quoteId = c.req.query("quote");
-    if (quoteId) {
-      const quoted = await getPost(forum, viewer, parseId(quoteId));
-      if (quoted.threadId === thread.id && !quoted.deleted) body = quoteFor(quoted.authorName, quoted.id, quoted.body);
-    }
+    const selection = readSelection(c, thread.id);
+    const quoteParam = c.req.query("quote");
+    const quoteId = quoteParam ? parseId(quoteParam) : null;
+    const ids = quoteId !== null
+      ? [...selection.filter((id) => id !== quoteId).slice(0, config.limits.multiquote_max - 1), quoteId]
+      : selection;
+    const body = quotesFor(await quotablePosts(forum, thread, ids));
     return render(
       c,
       <ComposePage ctx={c.get("page")} mode="reply" board={thread.board} thread={thread} title="" body={body} previewHtml={null} error={null} />
@@ -187,18 +196,49 @@ export function registerForumRoutes(app: Hono<AppEnv>, s: Services): void {
     const viewer = c.get("viewer");
     const thread = await getThread(forum, viewer, parseId(c.req.param("id")));
     const f = await readForm(c);
-    const body = f("body");
-    const page = (previewHtml: string | null, error: string | null) => (
+    const page = (body: string, previewHtml: string | null, error: string | null) => (
       <ComposePage ctx={c.get("page")} mode="reply" board={thread.board} thread={thread} title="" body={body} previewHtml={previewHtml} error={error} />
     );
-    if (f("action") === "preview") return render(c, page(forum.renderMarkup(body), null));
+    const body = f("body");
+    if (f("action") === "preview") return render(c, page(body, forum.renderMarkup(body), null));
+    // Quick reply's "Add quotes": the full form, the selection quoted above the draft.
+    if (f("action") === "quote") {
+      if (!canReply(viewer, thread)) return c.redirect(url(`/t/${thread.id}`), 303);
+      const quotes = quotesFor(await quotablePosts(forum, thread, readSelection(c, thread.id)));
+      return render(c, page(quotes + body, null, null));
+    }
     try {
       const { postId } = await reply(forum, viewer, thread.id, body);
+      if (readSelection(c, thread.id).length > 0) clearSelection(c, env);
       return c.redirect(url(`/p/${postId}`), 303);
     } catch (err) {
       const { message, status } = formError(err);
-      return render(c, page(null, message), status);
+      return render(c, page(body, null, message), status);
     }
+  });
+
+  // Ticks or unticks a post for multi-quote, or clears the selection, then
+  // goes back to where the member was.
+  app.post("/t/:id/multiquote", async (c) => {
+    const viewer = c.get("viewer");
+    const thread = await getThread(forum, viewer, parseId(c.req.param("id")));
+    const f = await readForm(c);
+    const back = url(safeNext(f("back")));
+    if (!canReply(viewer, thread)) return c.redirect(back, 303);
+    const op = f("op");
+    if (op === "clear") {
+      clearSelection(c, env);
+      return c.redirect(`${back}#quick-reply`, 303);
+    }
+    const postId = /^\d{1,15}$/.test(f("post")) ? Number(f("post")) : null;
+    if (postId === null) return c.redirect(back, 303);
+    let ids = readSelection(c, thread.id);
+    if (op === "remove") ids = ids.filter((id) => id !== postId);
+    else if (op === "add" && !ids.includes(postId) && ids.length < config.limits.multiquote_max) {
+      if ((await quotablePosts(forum, thread, [postId])).length > 0) ids = [...ids, postId];
+    }
+    saveSelection(c, env, thread.id, ids);
+    return c.redirect(`${back}#p${postId}`, 303);
   });
 
   app.get("/p/:id", async (c) => {

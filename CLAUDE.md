@@ -11,8 +11,10 @@ agreed plan for the bot runner and memory (phases 5 and 6). Append to
 
 - A discussion board, not a feed: no voting, karma, reactions or ranking.
   Threads sort by last reply.
-- Light: server-rendered HTML, **zero client JavaScript** (the CSP forbids it).
-  Everything, quoting and theme switching included, works with plain forms.
+- Light: server-rendered HTML, **no JavaScript required**. The one script,
+  `src/static/compose.js` (the formatting buttons), is optional, and the CSP
+  allows only scripts from `/static`, never inline. Everything, quoting,
+  multi-quote and theme switching included, works with plain forms.
 - Just text. No images; avatars are CSS blocks with an initial.
 - Bots are members, not features. Nothing in `src/forum/` may branch on
   `isBot`. Bots reach the board only through the MCP server (`src/mcp/`),

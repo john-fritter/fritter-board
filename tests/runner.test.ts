@@ -253,6 +253,13 @@ async function main() {
   assert.deepEqual(sampleFlags("[quote]something nobody here ever said[/quote] and [quote]no end", library), ["quote not in the thread", "unbalanced quote tags"]);
   assert.deepEqual(sampleFlags("See [url=https://example.com/story]this[/url], @Maple and @John.", library), ["link", "@Maple: not in the thread"]);
   assert.deepEqual(sampleFlags("This is **bold**.", library), ["markdown"]);
+  assert.deepEqual(
+    sampleFlags('[quote="John" post=1003]The only entrance is up fourteen steps[/quote]\nTrue.\n[quote="Bickerstaff" post=1002]nine million to mend a building[/quote]\nCheap.', library),
+    [],
+    "two quotes, each from its own post"
+  );
+  assert.deepEqual(sampleFlags("[list][*]one[*]two", library), ["unbalanced list tags"]);
+  assert.deepEqual(sampleFlags("[list=1][*]one\n[*]two[/list]\n- a dash line is fine as text", library), []);
   const system = voiceSystemPrompt("THE MEMBER BRIEF", "Your name is Penny.");
   assert.ok(system.includes("BBCode, not Markdown") && system.indexOf("THE MEMBER BRIEF") < system.indexOf("Your name is Penny."), "mechanics, brief, persona");
 

@@ -54,7 +54,7 @@ export function loadScenarios(file = SCENARIOS_FILE): Scenario[] {
  */
 const BOARD_NOTE = `This is ${config.site.name}, a small text-only discussion board styled on a 2006 forum. You are a member. Threads sort by last reply; there is no voting, and nothing rewards volume.
 
-Posts use BBCode, not Markdown: [b]bold[/b], [i]italic[/i], [u]underline[/u], [s]strike[/s], [url=https://example.com]a link[/url], [code]…[/code], and quotes with [quote="Name" post=123]…[/quote]. Plain URLs are linked automatically. No images and no HTML. Refer to a member as @Name.`;
+Posts use BBCode, not Markdown: [b]bold[/b], [i]italic[/i], [u]underline[/u], [s]strike[/s], [code]…[/code], lists as [list][*]one[*]two[/list] ([list=1] numbers them), [url=https://example.com]a link[/url], and quotes with [quote="Name" post=123]…[/quote] (post is the post_id quoted; it links to it). To answer several posts, quote each in its own block, cut to the part you're answering, with your answer after it. Plain URLs are linked automatically. No images and no HTML. Refer to a member as @Name.`;
 
 /** The prompt a sample is written under: the board, the member brief, the persona, as on a visit. */
 export function voiceSystemPrompt(memberBrief: string, persona: string): string {
@@ -92,7 +92,7 @@ const QUOTE = /\[quote(?:=(?:"([^"\]]*)"|([^\s\]]+)))?(?:\s+post=(\d+))?\]([\s\S
 const plain = (s: string) =>
   s
     .toLowerCase()
-    .replace(/\[\/?[a-z]+(?:=[^\]]*)?\]/g, " ")
+    .replace(/\[\/?(?:[a-z]+|\*)(?:=[^\]]*)?\]/g, " ")
     .replace(/[\\"'“”‘’]/g, "")
     .replace(/\s+/g, " ")
     .trim();
@@ -121,6 +121,7 @@ export function sampleFlags(text: string, scenario: Scenario): string[] {
     if (!sources.length || pieces.some((f) => !sources.some((p) => plain(p.body).includes(f)))) flags.add("quote not in the thread");
   }
   if ((text.match(/\[quote/gi)?.length ?? 0) !== (text.match(/\[\/quote\]/gi)?.length ?? 0)) flags.add("unbalanced quote tags");
+  if ((text.match(/\[list/gi)?.length ?? 0) !== (text.match(/\[\/list\]/gi)?.length ?? 0)) flags.add("unbalanced list tags");
   const present = new Set(posts.map((p) => p.author.toLowerCase()));
   for (const m of text.matchAll(/(?:^|[^\w@])@([A-Za-z0-9][\w.-]*)/g)) {
     const who = m[1]!.replace(/[.-]+$/, "");

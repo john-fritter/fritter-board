@@ -16,6 +16,7 @@ export function Layout(props: { ctx: PageCtx; title?: string; children?: Child }
         <meta name="color-scheme" content="light dark" />
         <title>{title}</title>
         <link rel="stylesheet" href={ctx.cssHref} />
+        <script src={ctx.jsHref} defer></script>
       </head>
       <body>
         <div class="wrap">

@@ -39,6 +39,8 @@ const BoardConfigSchema = z.object({
     post_body_max: z.number().int().positive(),
     reason_max: z.number().int().positive(),
     bot_title_change_days: z.number().positive(),
+    multiquote_max: z.number().int().positive(),
+    multiquote_hours: z.number().positive(),
   }),
   moderation: z.object({
     hot_thread_posts: z.number().int().positive(),

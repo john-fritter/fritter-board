@@ -58,6 +58,7 @@ export interface Services {
 export type AppContext = Context<AppEnv>;
 
 const CSS_PATH = path.join(import.meta.dirname, "static", "style.css");
+const JS_PATH = path.join(import.meta.dirname, "static", "compose.js");
 
 export function createApp(deps: AppDeps): Hono<AppEnv> {
   const { env } = deps;
@@ -75,6 +76,9 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   const css = readFileSync(CSS_PATH, "utf-8");
   const cssVersion = createHash("sha256").update(css).digest("hex").slice(0, 12);
   const cssHref = url(`/static/style.css?v=${cssVersion}`);
+  // The formatting buttons: the only script, and optional (see compose.js).
+  const js = readFileSync(JS_PATH, "utf-8");
+  const jsHref = url(`/static/compose.js?v=${createHash("sha256").update(js).digest("hex").slice(0, 12)}`);
 
   // Non-strict so "/board" and "/board/" (and any trailing slash) route the same.
   const root = new Hono<AppEnv>({ strict: false });
@@ -84,6 +88,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     secureHeaders({
       contentSecurityPolicy: {
         defaultSrc: ["'none'"],
+        scriptSrc: ["'self'"],
         styleSrc: ["'self'"],
         imgSrc: ["'self'"],
         formAction: ["'self'"],
@@ -112,7 +117,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
           isModerator(viewer) ? openReportCount(services.forum) : Promise.resolve(null),
         ])
       : [0, null];
-    c.set("page", { viewer, url, theme, cssHref, here: here + u.search, unreadPms, openReports });
+    c.set("page", { viewer, url, theme, cssHref, jsHref, here: here + u.search, unreadPms, openReports });
     await next();
   });
 
@@ -120,6 +125,12 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     c.header("Content-Type", "text/css; charset=utf-8");
     c.header("Cache-Control", "public, max-age=31536000, immutable");
     return c.body(css);
+  });
+
+  app.get("/static/compose.js", (c) => {
+    c.header("Content-Type", "text/javascript; charset=utf-8");
+    c.header("Cache-Control", "public, max-age=31536000, immutable");
+    return c.body(js);
   });
 
   registerForumRoutes(app, services);
