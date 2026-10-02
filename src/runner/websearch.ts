@@ -1,5 +1,5 @@
 import { config } from "../config.js";
-import type { ChatModel, ChatResponse, ReasoningEffort } from "./model.js";
+import { ModelError, nextUtcMidnight, type ChatModel, type ChatResponse, type ReasoningEffort } from "./model.js";
 
 /**
  * Web search for the bots: a search service finds pages, and the research
@@ -29,6 +29,8 @@ export interface SearchHit {
   site: string;
   /** YYYY-MM-DD, when the service gives a publication date. */
   published: string | null;
+  /** Set when the service's dates are often when the page was crawled, not published (LangSearch). */
+  crawled?: true;
   text: string;
 }
 
@@ -165,7 +167,10 @@ export class LangSearch implements SearchBackend {
     const pages = ((json["data"] as Record<string, unknown> | undefined)?.["webPages"] as Record<string, unknown> | undefined)?.["value"];
     const hits = (Array.isArray(pages) ? (pages as Record<string, unknown>[]) : [])
       .map((p) => hit(p["name"], p["url"], p["datePublished"], str(p["text"]) || str(p["summary"]) || str(p["snippet"])))
-      .filter((h): h is SearchHit => h !== null);
+      .filter((h): h is SearchHit => h !== null)
+      // Its "datePublished" is often the crawl date: a 2025 story came back
+      // dated August 2026. The research model is told so.
+      .map((h) => (h.published ? { ...h, crawled: true as const } : h));
     return { hits, costDollars: null };
   }
 }
@@ -249,7 +254,9 @@ Today is ${today}. Write plain text, not Markdown, in at most ${config.runner.we
 
 /** The research model's input: the search, then each result with its site and date. */
 export function researchPrompt(query: string, recency: Recency | null, hits: SearchHit[]): string {
-  const results = hits.map((h, i) => `[${i + 1}] ${h.title}\nSite: ${h.site || "unknown"}. Published: ${h.published ?? "no date given"}.\n${h.text}`);
+  const date = (h: SearchHit) =>
+    !h.published ? "Published: no date given." : h.crawled ? `Dated ${h.published}, which may be when the page was seen rather than published.` : `Published: ${h.published}.`;
+  const results = hits.map((h, i) => `[${i + 1}] ${h.title}\nSite: ${h.site || "unknown"}. ${date(h)}\n${h.text}`);
   return `The search: "${query}"${recency ? ` (results from the last ${recency})` : ""}\n\nThe results:\n\n${results.join("\n\n")}`;
 }
 
@@ -259,7 +266,9 @@ export interface Researcher {
   effort: ReasoningEffort;
 }
 
-export const RESEARCHER: Researcher = { model: config.runner.web_search_model, effort: config.runner.web_search_reasoning_effort };
+/** The research models, in the order they're tried. */
+export const RESEARCHERS: Researcher[] = config.runner.web_search_models;
+export const RESEARCHER: Researcher = RESEARCHERS[0]!;
 
 /** One call to the research model. The caller handles retries and the key's daily cap. */
 export function research(
@@ -297,4 +306,115 @@ export function summaryProblems(text: string): string[] {
   const longest = Math.max(0, ...t.split(/(?<=[.!?])\s+/).map((x) => x.length));
   if (longest > 1200) problems.push(`a ${longest.toLocaleString("en-US")}-character sentence`);
   return problems;
+}
+
+// ── The bots' web search ───────────────────────────────────────────────────
+
+export type SearchOutcome = "ok" | "no_results" | "search_failed" | "summary_failed" | "research_capped";
+
+/** One search, as it went: what the bot gets, and what the run log keeps. */
+export interface WebSearchRecord {
+  query: string;
+  recency: Recency | null;
+  outcome: SearchOutcome;
+  /** The service whose results were used. */
+  service: SearchService | null;
+  hits: SearchHit[];
+  researchModel: string | null;
+  summary: string | null;
+  /** What went wrong along the way, fallbacks included. */
+  errors: string[];
+  researchCalls: number;
+}
+
+/**
+ * The bots' web search: the services in order until one finds something,
+ * then the research models in order until one writes a summary with no
+ * problems. Anything going wrong ends in a record that says so, never an
+ * exception: a search is a convenience, never a reason for a visit to fail.
+ * When the research key hits its daily cap, searches stop until it resets.
+ */
+export class WebSearch {
+  private pausedUntil = 0;
+
+  constructor(
+    readonly backends: SearchBackend[],
+    private readonly chat: ChatModel,
+    private readonly deps: { now(): Date },
+    readonly researchers: Researcher[] = RESEARCHERS
+  ) {}
+
+  /** Whether the research key is usable now. */
+  get ready(): boolean {
+    return this.deps.now().getTime() >= this.pausedUntil;
+  }
+
+  async search(query: string, recency: Recency | null): Promise<WebSearchRecord> {
+    const out: WebSearchRecord = { query, recency, outcome: "search_failed", service: null, hits: [], researchModel: null, summary: null, errors: [], researchCalls: 0 };
+    const now = this.deps.now();
+    if (!this.ready) {
+      out.outcome = "research_capped";
+      return out;
+    }
+    let answered = false;
+    for (const backend of this.backends) {
+      try {
+        const result = await backend.search(query, { recency, now });
+        answered = true;
+        if (result.hits.length) {
+          out.service = backend.service;
+          out.hits = result.hits;
+          break;
+        }
+        out.errors.push(`${backend.service}: no results`);
+      } catch (err) {
+        out.errors.push(err instanceof Error ? err.message.slice(0, 200) : String(err));
+      }
+    }
+    if (!out.hits.length) {
+      out.outcome = answered ? "no_results" : "search_failed";
+      return out;
+    }
+    for (const r of this.researchers) {
+      try {
+        out.researchCalls++;
+        const res = await research(this.chat, query, recency, out.hits, now, r);
+        const text = res.content?.trim() ?? "";
+        const problems = res.finishReason === "length" ? ["cut off at the output limit"] : text ? summaryProblems(text) : ["empty reply"];
+        if (!problems.length) {
+          out.outcome = "ok";
+          out.researchModel = r.model;
+          out.summary = text;
+          return out;
+        }
+        out.errors.push(`${r.model}: ${problems.join("; ")}`);
+      } catch (err) {
+        if (err instanceof ModelError && err.isDailyCap) {
+          const t = this.deps.now();
+          this.pausedUntil = (err.retryAfterSeconds ? new Date(t.getTime() + err.retryAfterSeconds * 1000) : nextUtcMidnight(t)).getTime();
+          out.errors.push(`${r.model}: the research key reached its daily cap`);
+          out.outcome = "research_capped";
+          return out;
+        }
+        out.errors.push(`${r.model}: ${err instanceof Error ? err.message.slice(0, 200) : String(err)}`);
+      }
+    }
+    out.outcome = "summary_failed";
+    return out;
+  }
+}
+
+/** What the bot sees: the summary, or plainly why there isn't one. Never a URL. */
+export function searchResultText(r: WebSearchRecord, searchesLeft: number): string {
+  const left = { searches_left_this_visit: searchesLeft };
+  switch (r.outcome) {
+    case "ok":
+      return JSON.stringify({ search: r.query, summary: r.summary, ...left });
+    case "no_results":
+      return JSON.stringify({ search: r.query, summary: "The web search found nothing for that.", ...left });
+    case "research_capped":
+      return JSON.stringify({ search: r.query, error: "Web search is out of use until tomorrow. Carry on without it." });
+    default:
+      return JSON.stringify({ search: r.query, error: "The web search didn't work just now. Carry on without it.", ...left });
+  }
 }

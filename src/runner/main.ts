@@ -12,14 +12,25 @@ import { EFFORTS } from "./settings.js";
 import { createRunnerPool, RUNNER_LOCK_KEY } from "./store.js";
 import { Summarizer } from "./summaries.js";
 import { loadScenarios, runVoiceProbe, type Persona } from "./voice.js";
-import { SEARCH_SERVICES, searchBackend, type Researcher, type SearchService } from "./websearch.js";
+import {
+  RECENCIES,
+  RESEARCHER,
+  SEARCH_SERVICES,
+  searchBackend,
+  searchResultText,
+  WebSearch,
+  type Recency,
+  type Researcher,
+  type SearchService,
+} from "./websearch.js";
 
 /**
  * The bot runner: `npm run runner`. One process wakes every bot, one at a
  * time, on its schedule. It needs RUNNER_DATABASE_URL (the fritter_bots role,
  * which has the bots schema only), MCP_URL (the board's MCP server), and each
  * bot's NanoGPT key and board token under the env var names in its config,
- * and the summary model's key (runner.summary_key_env).
+ * the summary model's key (runner.summary_key_env), and for web search the
+ * research key (runner.web_search_key_env) and the search services' keys.
  *
  *   npm run runner                          run until stopped
  *   npm run runner -- probe [--key-env VAR] <model>...
@@ -36,6 +47,9 @@ import { SEARCH_SERVICES, searchBackend, type Researcher, type SearchService } f
  *                                           summarized by the research model on VAR's NanoGPT key
  *                                           (or NANOGPT_PROBE_KEY): a Markdown report on stdout
  *       --models <model>[@<effort>],...     summarize each result set with each of these instead
+ *   npm run runner -- web-search [--recent day|week|month|year] <query>...
+ *                                           one search as a bot would make it, with runner.env's
+ *                                           keys, printed with its pages; nothing is recorded
  */
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -71,9 +85,11 @@ async function run(): Promise<void> {
   const summaryKey = process.env[config.runner.summary_key_env]?.trim();
   if (!summaryKey) log(`${config.runner.summary_key_env} isn't set: bots will read long threads without summaries.`);
   const summarizer = summaryKey ? new Summarizer(new NanoGptModel(summaryKey), { now: () => new Date(), sleep }) : null;
+  const webSearch = webSearchFromEnv();
 
   const runner = new Runner({
     summarizer,
+    webSearch,
     db: pool,
     connectBoard: httpBoard(mcpUrl),
     modelFor: (key) => new NanoGptModel(key),
@@ -93,6 +109,28 @@ async function run(): Promise<void> {
     }
     await sleep(config.runner.tick_seconds * 1000);
   }
+}
+
+/**
+ * The bots' web search, from runner.env: the services with keys, in the
+ * configured order, and the research key. Without the research key or any
+ * service, bots get no web_search, and the log says why.
+ */
+function webSearchFromEnv(): WebSearch | null {
+  const r = config.runner;
+  const researchKey = process.env[r.web_search_key_env]?.trim();
+  const backends = r.web_search_services.flatMap((s) => {
+    const k = process.env[r.web_search_keys[s]]?.trim();
+    return k ? [searchBackend(s, k)] : [];
+  });
+  const missing = r.web_search_services.filter((s) => !backends.some((b) => b.service === s)).map((s) => r.web_search_keys[s]);
+  if (!researchKey || !backends.length) {
+    log(`Web search is off: ${!researchKey ? `${r.web_search_key_env} isn't set` : `no search service has a key (${missing.join(", ")})`}.`);
+    return null;
+  }
+  if (missing.length) log(`Web search runs without ${missing.join(", ")}.`);
+  log(`Web search: ${backends.map((b) => b.service).join(", then ")}; research by ${r.web_search_models.map((m) => m.model).join(", then ")}.`);
+  return new WebSearch(backends, new NanoGptModel(researchKey), { now: () => new Date() });
 }
 
 /**
@@ -184,7 +222,7 @@ const SEARCH_PROBE_USAGE =
 /** `vendor/model@low,other/model`: research models, each at an effort (the configured one if none). */
 function parseResearchers(list: string): Researcher[] {
   return list.split(",").map((item) => {
-    const [model = "", effort = config.runner.web_search_reasoning_effort, extra] = item.trim().split("@");
+    const [model = "", effort = RESEARCHER.effort, extra] = item.trim().split("@");
     const problem = modelIdProblem(model);
     if (problem) throw new Error(problem);
     if (extra !== undefined || !(EFFORTS as readonly string[]).includes(effort)) throw new Error(`${item.trim()}: an effort is one of ${EFFORTS.join(", ")}.`);
@@ -227,11 +265,41 @@ async function searchProbe(args: string[]): Promise<void> {
   process.exit(0);
 }
 
+const WEB_SEARCH_USAGE = "Usage: npm run runner -- web-search [--recent day|week|month|year] <query>...";
+
+/** One search through the bots' web search, to try it: printed, never recorded or counted. */
+async function webSearchOnce(args: string[]): Promise<void> {
+  let recency: Recency | null = null;
+  if (args[0] === "--recent") {
+    args.shift();
+    const r = args.shift();
+    if (!(RECENCIES as readonly (string | undefined)[]).includes(r)) throw new Error(WEB_SEARCH_USAGE);
+    recency = r as Recency;
+  }
+  const query = args.join(" ").trim();
+  if (!query) throw new Error(WEB_SEARCH_USAGE);
+  const web = webSearchFromEnv();
+  if (!web) process.exit(1);
+  const r = await web.search(query, recency);
+  const lines = [
+    `Search: "${query}"${recency ? ` (last ${recency})` : ""}`,
+    `Outcome: ${r.outcome}. Service: ${r.service ?? "none"}. Research: ${r.researchModel ?? "none"} (${r.researchCalls} call${r.researchCalls === 1 ? "" : "s"}).`,
+    ...(r.errors.length ? [`Along the way: ${r.errors.join(" | ")}`] : []),
+    "",
+    "What the bot would get:",
+    searchResultText(r, 0),
+    ...(r.hits.length ? ["", "Pages:", ...r.hits.map((h, i) => `${i + 1}. ${h.title} (${h.site}, ${h.published ?? "undated"}) ${h.url}`)] : []),
+  ];
+  await printAll(`${lines.join("\n")}\n`);
+  process.exit(r.outcome === "ok" || r.outcome === "no_results" ? 0 : 1);
+}
+
 async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2);
   if (command === "probe") return probe(rest);
   if (command === "search-probe") return searchProbe(rest);
-  if (command !== undefined) throw new Error(`Unknown command ${command}. Usage: npm run runner [-- probe … | search-probe …]`);
+  if (command === "web-search") return webSearchOnce(rest);
+  if (command !== undefined) throw new Error(`Unknown command ${command}. Usage: npm run runner [-- probe … | search-probe … | web-search …]`);
   await run();
 }
 

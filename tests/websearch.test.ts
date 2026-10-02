@@ -9,8 +9,11 @@ import {
   pageText,
   researchBrief,
   researchPrompt,
+  RESEARCHER,
   SearchError,
+  searchResultText,
   summaryProblems,
+  WebSearch,
   type SearchBackend,
   type SearchService,
 } from "../src/runner/websearch.js";
@@ -71,9 +74,9 @@ async function main() {
     freshness: "oneMonth",
   });
   assert.deepEqual(r.hits, [
-    { title: "Fed holds rates", url: "https://www.reuters.com/markets/fed", site: "reuters.com", published: "2026-09-16", text: "The Fed held rates steady." },
+    { title: "Fed holds rates", url: "https://www.reuters.com/markets/fed", site: "reuters.com", published: "2026-09-16", crawled: true, text: "The Fed held rates steady." },
     { title: "Snippet only", url: "https://example.org/a", site: "example.org", published: null, text: "A snippet." },
-  ], "pages without text or a URL are dropped");
+  ], "pages without text or a URL are dropped; LangSearch's dates may be crawl dates");
   assert.equal(r.costDollars, null);
   sent = [];
   await new LangSearch("k", { fetch: scripted(200, { code: 200, data: { webPages: { value: [] } } }, sent) }).search("q", { recency: null, now: NOW });
@@ -225,20 +228,20 @@ async function main() {
   assert.equal(flaky, 4, "a transient failure is retried once");
   assert.deepEqual(slept, [config.runner.retry_wait_seconds * 1000, config.runner.retry_wait_seconds * 1000]);
   assert.equal(researched.length, 2, "a summary only where there are results");
-  assert.equal(researched[0]!.model, config.runner.web_search_model);
-  assert.equal(researched[0]!.reasoningEffort, config.runner.web_search_reasoning_effort);
+  assert.equal(researched[0]!.model, RESEARCHER.model);
+  assert.equal(researched[0]!.reasoningEffort, RESEARCHER.effort);
   assert.match(researched[0]!.messages[1]!.content ?? "", /^The search: "fed rates" \(results from the last month\)/);
   assert.match(report, /^# Search probe, 2026-10-02 /);
   assert.match(report, /- Services: langsearch, exa, linkup\.\n- Queries: 2 \(1 current events, 0 recent history, 1 other\)/);
-  assert.match(report, /- Research model: deepseek\/deepseek-v4\.1-flash, effort default\. It writes a summary/);
+  assert.match(report, /- Research model: tencent\/hy3, effort low\. It writes a summary/);
   assert.match(report, /\| langsearch \| 2 \| 0 \| 0 \| 4 \| 100% \| [\d.]+s \| – \|/, "the service table");
   assert.match(report, /\| exa \| 2 \| 0 \| 2 \| 0 \| – \| [\d.]+s \| \$0\.0140 \|/, "costs add up");
-  assert.match(report, /\| deepseek\/deepseek-v4\.1-flash \| default \| 2 \| 2 \| 0 \| 0 \| 0 \| 0 \| 0 \| 0 \| 49 \| [\d.]+s \|/, "the research model table");
+  assert.match(report, /\| tencent\/hy3 \| low \| 2 \| 2 \| 0 \| 0 \| 0 \| 0 \| 0 \| 0 \| 49 \| [\d.]+s \|/, "the research model table");
   assert.match(report, /\| linkup \| 2 \| 2 \|/);
   assert.match(report, /\| fed-rates \| current \| 2 results, 2 dated, newest 2026-09-30, [\d.]+s \| 0 results, [\d.]+s \| search failed \|/, "the query table");
   assert.match(report, /## fed-rates: "fed rates"\n\n\*current events, results from the last month\.\*\n\nCheck: Check the range\./);
   assert.match(report, /### fed-rates: langsearch\n\n\*2 results, [\d.]+s\*\n\n1\. \*\*One \| two\*\*, a\.example, 2026-09-30  \n   Fact one\./);
-  assert.match(report, /#### fed-rates: langsearch, deepseek\/deepseek-v4\.1-flash, effort default\n\n\*[\d.]+s, 49 characters\*\n\n````text\nFact one, says a\.example \(2026-09-30\), ```odd```\.\n````/, "fenced so the text can't close it");
+  assert.match(report, /#### fed-rates: langsearch, tencent\/hy3, effort low\n\n\*[\d.]+s, 49 characters\*\n\n````text\nFact one, says a\.example \(2026-09-30\), ```odd```\.\n````/, "fenced so the text can't close it");
   assert.match(report, /### fed-rates: exa\n\n\*0 results, [\d.]+s, \$0\.0070\*\n\nNo summary: no results\./);
   assert.match(report, /### fed-rates: linkup\n\n\*failed, [\d.]+s\*\. \*\*linkup 503: busy\*\*/);
   assert.match(report, /## etymology: "quarantine"\n\n\*other, any age\.\*/);
@@ -296,6 +299,81 @@ async function main() {
   assert.deepEqual(summaryProblems("Regular-season outcomes: Rays first. Brewers confirmed elsewhere soon enough..."), ["doesn't end cleanly"]);
   const salad = `Spain won. ${"steadfast neutrality invoked responses accordingly ".repeat(40)}stop.`;
   assert.deepEqual(summaryProblems(salad), [`longer than asked (${salad.length} characters)`, `a ${(salad.length - 11).toLocaleString("en-US")}-character sentence`]);
+
+  // ── The bots' web search: fallbacks ──
+  const hitsA = [{ title: "Fed", url: "https://www.reuters.com/fed", site: "reuters.com", published: "2026-09-16", text: "Rates rose." }];
+  const svc = (service: SearchService, search: SearchBackend["search"]): SearchBackend => ({ service, search });
+  const failing = svc("exa", async () => {
+    throw new SearchError("exa 402: Insufficient credits", 402);
+  });
+  const empty = svc("exa", async () => ({ hits: [], costDollars: 0.007 }));
+  const good = svc("langsearch", async () => ({ hits: hitsA, costDollars: null }));
+  const scriptedChat = (...replies: (ChatResponse | Error)[]): ChatModel & { asked: string[] } => {
+    const asked: string[] = [];
+    return {
+      asked,
+      async complete(req) {
+        asked.push(req.model);
+        const next = replies.shift();
+        if (!next) throw new Error("called too often");
+        if (next instanceof Error) throw next;
+        return next;
+      },
+    };
+  };
+  const two2 = [
+    { model: "tencent/hy3", effort: "low" as const },
+    { model: "deepseek/deepseek-v4-pro", effort: "low" as const },
+  ];
+  const at = { now: () => NOW };
+
+  // Exa out of credit: LangSearch answers, Hy3 summarizes.
+  let chat2 = scriptedChat(reply("Rates rose to 3.75%–4% (Reuters, 2026-09-16)."));
+  let rec = await new WebSearch([failing, good], chat2, at, two2).search("fed rates", "month");
+  assert.equal(rec.outcome, "ok");
+  assert.equal(rec.service, "langsearch");
+  assert.equal(rec.researchModel, "tencent/hy3");
+  assert.deepEqual(rec.errors, ["exa 402: Insufficient credits"]);
+  let shown = searchResultText(rec, 1);
+  assert.deepEqual(JSON.parse(shown), { search: "fed rates", summary: "Rates rose to 3.75%–4% (Reuters, 2026-09-16).", searches_left_this_visit: 1 });
+  assert.ok(!shown.includes("https://"), "the bot never sees a URL");
+
+  // Exa finds nothing: LangSearch is tried. Hy3 thinks aloud and V4 Pro times out... then nothing usable.
+  chat2 = scriptedChat(reply("Rates rose. Wait, let me check"), new ModelError("timed out", null, null, null));
+  rec = await new WebSearch([empty, good], chat2, at, two2).search("fed rates", null);
+  assert.equal(rec.outcome, "summary_failed");
+  assert.deepEqual(chat2.asked, ["tencent/hy3", "deepseek/deepseek-v4-pro"]);
+  assert.match(rec.errors.join(" | "), /^exa: no results \| tencent\/hy3: thinking aloud; doesn't end cleanly \| deepseek\/deepseek-v4-pro: timed out$/);
+  assert.match(searchResultText(rec, 0), /didn't work just now/);
+
+  // A summary cut off at the output limit goes to the next model.
+  chat2 = scriptedChat(reply("Rates rose and", "length"), reply("Rates rose (Reuters, 2026-09-16)."));
+  rec = await new WebSearch([good], chat2, at, two2).search("fed rates", null);
+  assert.equal(rec.researchModel, "deepseek/deepseek-v4-pro");
+  assert.equal(rec.researchCalls, 2);
+
+  // Nothing anywhere, and every service down.
+  rec = await new WebSearch([empty], scriptedChat(), at, two2).search("Harlow Springs", null);
+  assert.equal(rec.outcome, "no_results");
+  assert.equal(JSON.parse(searchResultText(rec, 1)).summary, "The web search found nothing for that.");
+  rec = await new WebSearch([failing], scriptedChat(), at, two2).search("anything", null);
+  assert.equal(rec.outcome, "search_failed");
+
+  // The research key's daily cap stops searches until it resets.
+  const clock2 = { t: NOW.getTime() };
+  const web = new WebSearch([good], scriptedChat(new ModelError("cap", 429, "daily_rpd_limit_exceeded", null)), { now: () => new Date(clock2.t) }, two2);
+  rec = await web.search("fed rates", null);
+  assert.equal(rec.outcome, "research_capped");
+  assert.equal(web.ready, false);
+  rec = await web.search("again", null);
+  assert.equal(rec.outcome, "research_capped", "no search, no call");
+  assert.equal(rec.service, null);
+  assert.match(searchResultText(rec, 1), /out of use until tomorrow/);
+  clock2.t = Date.parse("2026-10-03T00:00:01Z");
+  assert.equal(web.ready, true, "back after midnight UTC");
+
+  // LangSearch's dates are labelled for the research model.
+  assert.match(researchPrompt("q", null, [{ ...hitsA[0]!, crawled: true }]), /Dated 2026-09-16, which may be when the page was seen rather than published\./);
 }
 
 main()

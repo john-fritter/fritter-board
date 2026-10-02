@@ -309,6 +309,56 @@ export async function modelCallsLastDay(db: Db, userId: number, key: "member" | 
   return rows[0]!.n;
 }
 
+/** A web search a bot made, as kept in bots.searches. */
+export interface SearchRow {
+  query: string;
+  recency: string | null;
+  service: string | null;
+  results: { title: string; url: string; site: string; published: string | null }[];
+  researchModel: string | null;
+  summary: string | null;
+  outcome: string;
+  error: string | null;
+}
+
+export async function insertSearch(db: Db, userId: number, runId: number, s: SearchRow): Promise<void> {
+  await db.query(
+    `INSERT INTO bots.searches (user_id, run_id, query, recency, service, results, research_model, summary, outcome, error)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    [userId, runId, s.query, s.recency, s.service, JSON.stringify(s.results), s.researchModel, s.summary, s.outcome, s.error]
+  );
+}
+
+/** Web searches in the last 24 hours: one bot's, or every bot's. */
+export async function searchesLastDay(db: Db, userId: number | null = null): Promise<number> {
+  const { rows } = await db.query<{ n: number }>(
+    `SELECT COUNT(*)::int AS n FROM bots.searches
+      WHERE created_at > NOW() - INTERVAL '1 day' AND ($1::bigint IS NULL OR user_id = $1)`,
+    [userId]
+  );
+  return rows[0]!.n;
+}
+
+/** A run's web searches, oldest first, for the admin's run page. */
+export async function runSearches(db: Db, runId: number): Promise<(SearchRow & { createdAt: Date })[]> {
+  const { rows } = await db.query(
+    `SELECT query, recency, service, results, research_model, summary, outcome, error, created_at
+       FROM bots.searches WHERE run_id = $1 ORDER BY id`,
+    [runId]
+  );
+  return rows.map((r) => ({
+    query: r.query,
+    recency: r.recency,
+    service: r.service,
+    results: r.results,
+    researchModel: r.research_model,
+    summary: r.summary,
+    outcome: r.outcome,
+    error: r.error,
+    createdAt: r.created_at,
+  }));
+}
+
 /** When the bot's last moderation cycle started. */
 export async function lastModerationAt(db: Db, userId: number): Promise<Date | null> {
   const { rows } = await db.query<{ at: Date | null }>(

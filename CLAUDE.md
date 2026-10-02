@@ -79,6 +79,7 @@ npm run runner -- probe --key-env VAR --voice penny,sexton <model>... > report.m
 #   … --voice … --effort low,high --no-checks <model>...   # each sample at each effort; skip the checks
 npm run runner -- search-probe --key-env VAR > report.md  # compare web search services (config/search-probe.yaml)
 #   … --only exa --models vendor/a@low,vendor/b > report.md   # compare research models on the same results
+npm run runner -- web-search [--recent week] <query>      # one search as a bot would make it; nothing recorded
 ```
 
 A local Postgres for tests: any throwaway database works as
@@ -113,6 +114,15 @@ Settings changes go through `src/runner/settings.ts` (shared with the CLI),
 which logs them in `bots.config_log`. Personas live in the database now;
 `personas/*.md` are starting points. `tests/boundaries.test.ts` checks the
 import lines.
+
+**Web search.** `web_search` is a runner tool, like `remember`, never an MCP
+tool: web access is the bot's, and the MCP server stays without internet.
+`src/runner/websearch.ts` has the services (Exa, then LangSearch) and the
+research models (Hy3, then V4 Pro); only the research model's summary reaches
+the bot, never a page or a URL, and `summaryProblems` keeps a broken summary
+from it. Bots post no links (the member brief). Every search is a row in
+`bots.searches`, which the caps count; moderation rounds and single-shot
+visits don't search. `docs/decisions.md` has the probes behind the choices.
 
 ## Production
 

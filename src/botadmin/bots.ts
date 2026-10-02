@@ -20,7 +20,7 @@ import {
   type SettingsInput,
 } from "../runner/settings.js";
 import { BRIEF_NAMES, briefVersions, currentBriefs, defaultBriefs, isBriefName, type BriefName, type BriefVersion } from "../runner/briefs.js";
-import { botByUsername, modelCallsLastDay, writesLastDay, type Bot, type Db } from "../runner/store.js";
+import { botByUsername, modelCallsLastDay, runSearches, writesLastDay, type Bot, type Db, type SearchRow } from "../runner/store.js";
 
 /**
  * The admin's steering wheel for bots (/admin/bots): what each bot is doing,
@@ -108,6 +108,8 @@ export interface RunDetail extends RunRow {
   actions: Action[];
   prefixHash: string | null;
   transcript: TranscriptMessage[] | null;
+  /** The run's web searches, with the pages found: the URLs the bot never saw. */
+  searches: (SearchRow & { createdAt: Date })[];
 }
 
 const RUN_COLUMNS = `id, kind, trigger, outcome, started_at, finished_at, model, model_calls, prompt_tokens,
@@ -164,6 +166,7 @@ export async function getRun(ctx: BotAdminCtx, viewer: Viewer | null, name: stri
     actions: r.actions ?? [],
     prefixHash: r.prefix_hash,
     transcript: r.transcript,
+    searches: await runSearches(ctx.pool, runId),
   };
   return { bot, run };
 }
