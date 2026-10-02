@@ -1096,8 +1096,8 @@ expect that.
 | Gemma 4 31B | low | 9 | 9: 504s from the provider, even after the retry | 131s | |
 
 - **V4.1 Flash is out,** at either effort: one summary in eight or nine goes
-  wrong. It still writes the thread summaries, which round 1 of the voice
-  probe found it does well.
+  wrong. It still writes the thread summaries, which it has done without
+  trouble.
 - **Gemma is out:** half its calls failed upstream.
 - **Hy3 and V4 Pro were both clean, accurate and well sourced.**
   - On the trap queries they matched: the Nobel "not announced until
