@@ -4,6 +4,7 @@
  *   [b] [i] [u] [s]          bold, italic, underline, strike
  *   [quote] [quote=name]     a quote, optionally attributed; `post=123` links the source
  *   [code]                   preformatted; nothing inside is parsed
+ *   [list] [list=1] [*]      a bulleted or numbered list; [*] starts each item
  *   [url] [url=https://…]    links (http and https only); bare URLs are linked too
  *
  * Safety comes from the shape of the renderer, not from a sanitizer pass:
@@ -12,14 +13,14 @@
  * well-formed tag is shown literally.
  */
 
-export const MARKUP_VERSION = 1;
+export const MARKUP_VERSION = 2;
 
 export interface RenderOptions {
   /** URL of a post permalink, used to link attributed quotes to their source. */
   postUrl: (postId: number) => string;
 }
 
-type Tag = "b" | "i" | "u" | "s" | "quote" | "code" | "url";
+type Tag = "b" | "i" | "u" | "s" | "quote" | "code" | "url" | "list" | "*";
 
 interface TextNode {
   kind: "text";
@@ -37,8 +38,8 @@ interface ElementNode {
 
 type Node = TextNode | ElementNode;
 
-const TAG_RE = /\[(\/?)(b|i|u|s|quote|code|url)(?:=([^\]\n]*))?\]/gi;
-const BLOCK_TAGS: ReadonlySet<Tag> = new Set(["quote", "code"]);
+const TAG_RE = /\[(\/?)(b|i|u|s|quote|code|url|list|\*)(?:=([^\]\n]*))?\]/gi;
+const BLOCK_TAGS: ReadonlySet<Tag> = new Set(["quote", "code", "list"]);
 const MAX_DEPTH = 24;
 
 export function escapeHtml(s: string): string {
@@ -67,6 +68,8 @@ function attrIsValid(tag: Tag, attr: string | null): boolean {
       return attr === null || isHttpUrl(attr.trim());
     case "quote":
       return true;
+    case "list":
+      return attr === null || attr === "1";
     default:
       return attr === null;
   }
@@ -85,10 +88,12 @@ function parse(src: string): Node[] {
   };
   // An element that never closed is shown as it was typed: its opening tag
   // as text, then its children, all moved up into its parent.
+  // An unclosed list's item markers go back to being text too.
   const flatten = (el: ElementNode) => {
     pushText(el.raw);
     for (const child of el.children) {
       if (child.kind === "text") pushText(child.text);
+      else if (child.tag === "*") pushText(child.raw);
       else top().children.push(child);
     }
   };
@@ -101,6 +106,14 @@ function parse(src: string): Node[] {
     const tag = name!.toLowerCase() as Tag;
     pushText(src.slice(pos, m.index));
     pos = m.index + raw.length;
+
+    // [*] marks the start of an item, directly inside a list and nowhere
+    // else; a [/*] there is tolerated and dropped.
+    if (tag === "*") {
+      if (top().tag !== "list" || attr !== undefined) pushText(raw);
+      else if (!slash) top().children.push({ kind: "element", tag, attr: null, raw, children: [] });
+      continue;
+    }
 
     if (slash) {
       const idx = stack.findLastIndex((el, i) => i > 0 && el.tag === tag);
@@ -213,6 +226,18 @@ function trimBlockEdges(children: Node[]): Node[] {
   return out;
 }
 
+/** Trims the spaces and line breaks around a list item's text. */
+function trimItemEdges(children: Node[]): Node[] {
+  if (children.length === 0) return children;
+  const out = children.slice();
+  const first = out[0]!;
+  if (first.kind === "text") out[0] = { kind: "text", text: first.text.replace(/^\s+/, "") };
+  const lastIdx = out.length - 1;
+  const last = out[lastIdx]!;
+  if (last.kind === "text") out[lastIdx] = { kind: "text", text: last.text.replace(/\s+$/, "") };
+  return out;
+}
+
 function renderNodes(nodes: Node[], opts: RenderOptions, inLink: boolean): string {
   let out = "";
   let afterBlock = false;
@@ -256,6 +281,25 @@ function renderElement(el: ElementNode, opts: RenderOptions, inLink: boolean): s
       }
       return escapeHtml(el.raw) + inner() + "[/url]";
     }
+    case "list": {
+      // Items run from one [*] to the next; anything before the first that
+      // isn't blank is an item too. A list with no items stays as typed.
+      const items: Node[][] = [];
+      let current: Node[] | null = null;
+      for (const child of el.children) {
+        if (child.kind === "element" && child.tag === "*") items.push((current = []));
+        else if (current) current.push(child);
+        else if (child.kind === "element" || child.text.trim() !== "") items.push((current = [child]));
+      }
+      if (!el.children.some((c) => c.kind === "element" && c.tag === "*")) {
+        return escapeHtml(el.raw) + inner() + "[/list]";
+      }
+      const list = el.attr === "1" ? "ol" : "ul";
+      const lis = items.map((item) => `<li>${renderNodes(trimItemEdges(item), opts, inLink)}</li>`).join("");
+      return `<${list}>${lis}</${list}>`;
+    }
+    case "*":
+      return escapeHtml(el.raw);
     case "quote": {
       const { name, postId } = parseQuoteAttr(el.attr);
       let cite = "";
@@ -294,4 +338,9 @@ export function stripQuotes(body: string): string {
  */
 export function quoteFor(username: string, postId: number, body: string): string {
   return `[quote="${username}" post=${postId}]\n${stripQuotes(body).trim()}\n[/quote]\n`;
+}
+
+/** Several posts quoted one after another, for a multi-quote reply. */
+export function quotesFor(posts: readonly { authorName: string; id: number; body: string }[]): string {
+  return posts.map((p) => quoteFor(p.authorName, p.id, p.body)).join("");
 }

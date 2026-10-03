@@ -212,13 +212,22 @@ function ThreadPages(props: { ctx: PageCtx; thread: ThreadListItem }) {
   );
 }
 
-export function PostView(props: { ctx: PageCtx; post: Post; thread: { locked: boolean } }) {
+/** A post's multi-quote toggle state, on thread pages where the viewer can reply. */
+export interface MultiQuoteState {
+  selected: boolean;
+  /** The selection holds as many posts as a reply can quote. */
+  full: boolean;
+}
+
+export function PostView(props: { ctx: PageCtx; post: Post; thread: { locked: boolean }; multiQuote?: MultiQuoteState }) {
   const { ctx, post } = props;
   const v = ctx.viewer;
   const a = post.author;
   const removed = post.deleted;
-  const actions: { label: string; href: string }[] = [];
-  if (!removed && canReply(v, props.thread)) actions.push({ label: "Quote", href: `/t/${post.threadId}/reply?quote=${post.id}` });
+  const actions: { label: string; href: string; multiQuote?: boolean }[] = [];
+  if (!removed && canReply(v, props.thread)) {
+    actions.push({ label: "Quote", href: `/t/${post.threadId}/reply?quote=${post.id}`, multiQuote: true });
+  }
   if (canEditPost(v, { authorId: a.id, deleted: removed }, props.thread)) actions.push({ label: "Edit", href: `/p/${post.id}/edit` });
   if (post.editedAt && canSeeEditHistory(v, { authorId: a.id })) actions.push({ label: "History", href: `/p/${post.id}/history` });
   if (!removed && isMember(v) && v.id !== a.id) actions.push({ label: "Report", href: `/p/${post.id}/report` });
@@ -265,6 +274,9 @@ export function PostView(props: { ctx: PageCtx; post: Post; thread: { locked: bo
               <>
                 {i > 0 && " · "}
                 <a href={ctx.url(act.href)}>{act.label}</a>
+                {act.multiQuote && props.multiQuote && (
+                  <> · <MultiQuoteToggle ctx={ctx} post={post} state={props.multiQuote} /></>
+                )}
               </>
             ))}
           </footer>
@@ -325,18 +337,52 @@ function ModPanel(props: { ctx: PageCtx; thread: Thread; boards: { slug: string;
   );
 }
 
+/** Ticks a post for quoting in the next reply; the selection carries across the thread's pages. */
+function MultiQuoteToggle(props: { ctx: PageCtx; post: Post; state: MultiQuoteState }) {
+  const { ctx, post, state } = props;
+  return (
+    <form method="post" action={ctx.url(`/t/${post.threadId}/multiquote`)} class="inline-form">
+      <input type="hidden" name="post" value={String(post.id)} />
+      <input type="hidden" name="back" value={ctx.here} />
+      <button
+        type="submit"
+        name="op"
+        value={state.selected ? "remove" : "add"}
+        class="linkish multiquote"
+        aria-pressed={state.selected ? "true" : "false"}
+        disabled={!state.selected && state.full}
+        title={
+          state.selected
+            ? "Selected to quote in your reply. Click to unselect."
+            : state.full
+              ? `A reply can quote at most ${config.limits.multiquote_max} posts.`
+              : "Select this post to quote in your reply, with others from any page of the thread."
+        }
+      >
+        {state.selected ? "✓ Multi-quote" : "+ Multi-quote"}
+      </button>
+    </form>
+  );
+}
+
 export function ThreadPage(props: {
   ctx: PageCtx;
   thread: Thread;
   posts: Post[];
   page: Page;
   canReply: boolean;
+  /** Posts selected for multi-quote, from any page of the thread. */
+  quoting: number[];
   /** Boards a moderator can move this thread to; empty for everyone else. */
   moveTargets: { slug: string; name: string }[];
   /** The Fritter Post article card, for a thread that discusses one. */
   articleCard?: Child;
 }) {
   const { ctx, thread } = props;
+  const quoting = props.quoting.length;
+  const quotes = quoting === 1 ? "1 quote" : `${quoting} quotes`;
+  const multiQuote = (p: Post): MultiQuoteState | undefined =>
+    props.canReply ? { selected: props.quoting.includes(p.id), full: quoting >= config.limits.multiquote_max } : undefined;
   return (
     <Layout ctx={ctx} title={thread.title}>
       <Crumbs ctx={ctx} trail={[{ label: thread.board.name, href: `/b/${thread.board.slug}` }, { label: thread.title }]} />
@@ -349,25 +395,34 @@ export function ThreadPage(props: {
       <div class="toolbar">
         {props.canReply && (
           <a class="button" href={ctx.url(`/t/${thread.id}/reply`)}>
-            Reply
+            {quoting > 0 ? `Reply with ${quotes}` : "Reply"}
           </a>
         )}
         <Pagination ctx={ctx} base={`/t/${thread.id}`} page={props.page} />
       </div>
       <div class="posts">
         {props.posts.map((p) => (
-          <PostView ctx={ctx} post={p} thread={thread} />
+          <PostView ctx={ctx} post={p} thread={thread} multiQuote={multiQuote(p)} />
         ))}
       </div>
       <div class="toolbar">
         <Pagination ctx={ctx} base={`/t/${thread.id}`} page={props.page} />
       </div>
       {props.canReply ? (
-        <section class="panel">
+        <section class="panel" id="quick-reply">
           <h2 class="panel-head">Quick reply</h2>
           <div class="panel-body">
+            {quoting > 0 && (
+              <form method="post" action={ctx.url(`/t/${thread.id}/multiquote`)} class="multiquote-note hint">
+                <input type="hidden" name="back" value={ctx.here} />
+                {quoting === 1 ? "1 post is" : `${quoting} posts are`} selected to quote.{" "}
+                <button type="submit" name="op" value="clear" class="linkish">
+                  Unselect all
+                </button>
+              </form>
+            )}
             <form method="post" action={ctx.url(`/t/${thread.id}/reply`)} class="compose">
-              <textarea name="body" rows={6} required maxlength={config.limits.post_body_max} aria-label="Reply"></textarea>
+              <textarea name="body" rows={6} required maxlength={config.limits.post_body_max} aria-label="Reply" data-editor></textarea>
               <div class="form-actions">
                 <button type="submit" name="action" value="post">
                   Post reply
@@ -375,6 +430,11 @@ export function ThreadPage(props: {
                 <button type="submit" name="action" value="preview" class="secondary">
                   Preview
                 </button>
+                {quoting > 0 && (
+                  <button type="submit" name="action" value="quote" class="secondary" formnovalidate>
+                    Add {quotes}
+                  </button>
+                )}
               </div>
             </form>
           </div>
@@ -392,7 +452,7 @@ export function ThreadPage(props: {
 }
 
 export const MARKUP_HELP =
-  "[b]bold[/b]  [i]italic[/i]  [u]underline[/u]  [s]strike[/s]  [quote]…[/quote]  [code]…[/code]  [url=https://…]link[/url]";
+  "[b]bold[/b]  [i]italic[/i]  [u]underline[/u]  [s]strike[/s]  [quote]…[/quote]  [code]…[/code]  [list][*]one [*]two[/list]  [list=1]…[/list]  [url=https://…]link[/url]";
 
 export function ComposePage(props: {
   ctx: PageCtx;
@@ -448,7 +508,7 @@ export function ComposePage(props: {
         )}
         <label>
           Message
-          <textarea name="body" rows={14} required maxlength={config.limits.post_body_max}>
+          <textarea name="body" rows={14} required maxlength={config.limits.post_body_max} data-editor>
             {props.body}
           </textarea>
         </label>

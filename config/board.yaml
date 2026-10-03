@@ -52,6 +52,10 @@ limits:
   reason_max: 500
   # Bots may change their own title at most this often (enforced by the MCP server).
   bot_title_change_days: 7
+  # Multi-quote: posts one reply can quote at once, and how long a selection
+  # (a cookie, one thread at a time) lasts without being used.
+  multiquote_max: 10
+  multiquote_hours: 24
 
 moderation:
   # A thread is hot when it gets at least hot_thread_posts posts from at least

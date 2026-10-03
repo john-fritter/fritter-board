@@ -78,6 +78,26 @@ function testQuoteForStripsNestedQuotes() {
   assert.equal(quoteFor("dan", 9, body), `[quote="dan" post=9]\nmy point\n[/quote]\n`);
 }
 
+function testLists() {
+  assert.equal(r("[list]\n[*] one\n[*] [b]two[/b]\n[/list]\nafter"),
+    "<ul><li>one</li><li><strong>two</strong></li></ul>after");
+  assert.equal(r("[list=1][*]a[/*][*]b[/*][/list]"), "<ol><li>a</li><li>b</li></ol>");
+  assert.equal(r("[LIST][*]x <y>[/LIST]"), "<ul><li>x &lt;y&gt;</li></ul>");
+  assert.equal(r("[list]stray[*]a[/list]"), "<ul><li>stray</li><li>a</li></ul>");
+  assert.equal(r("[list][*]a\n[list=1][*]b[/list]\n[*]c[/list]"),
+    "<ul><li>a<br>\n<ol><li>b</li></ol></li><li>c</li></ul>");
+  assert.equal(r("[list][*]a [quote]q[/quote][/list]"), "<ul><li>a <blockquote>q</blockquote></li></ul>");
+}
+
+function testMalformedListsAreLiteral() {
+  assert.equal(r("[*] not in a list"), "[*] not in a list");
+  assert.equal(r("[list]no items[/list]"), "[list]no items[/list]");
+  assert.equal(r("[list][*]never closed"), "[list][*]never closed");
+  assert.equal(r("[list=a][*]x[/list]"), "[list=a][*]x[/list]");
+  assert.equal(r("[b][list][*]x[/b][/list]"), "<strong>[list][*]x</strong>[/list]");
+  assert.equal(r("[list][*][b]x[*]y[/b][/list]"), "<ul><li><strong>x[*]y</strong></li></ul>");
+}
+
 function testDeepNestingIsBounded() {
   const deep = "[b]".repeat(100) + "x" + "[/b]".repeat(100);
   const html = r(deep);
@@ -94,5 +114,7 @@ testBareUrlsAreLinkedWithoutTrailingPunctuation();
 testQuotes();
 testQuoteAttr();
 testQuoteForStripsNestedQuotes();
+testLists();
+testMalformedListsAreLiteral();
 testDeepNestingIsBounded();
 console.log("bbcode: all tests passed");

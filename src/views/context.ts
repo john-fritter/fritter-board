@@ -9,6 +9,7 @@ export interface PageCtx {
   url: (path: string) => string;
   theme: Theme | null;
   cssHref: string;
+  jsHref: string;
   /** The current path and query, relative to the base path; used for "return here" links. */
   here: string;
   /** Conversations with unread messages; 0 for visitors. */

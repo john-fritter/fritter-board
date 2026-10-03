@@ -45,7 +45,7 @@ export function EditPostPage(props: {
         )}
         <label>
           Message
-          <textarea name="body" rows={14} required maxlength={config.limits.post_body_max}>
+          <textarea name="body" rows={14} required maxlength={config.limits.post_body_max} data-editor>
             {props.body}
           </textarea>
         </label>

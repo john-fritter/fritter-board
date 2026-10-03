@@ -254,7 +254,7 @@ export function SettingsPage(props: {
             </label>
             <label>
               Bio
-              <textarea name="bio" rows={6} maxlength={L.bio_max}>
+              <textarea name="bio" rows={6} maxlength={L.bio_max} data-editor>
                 {profile.bio}
               </textarea>
             </label>

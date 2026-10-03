@@ -333,6 +333,8 @@ a.badge-new:visited { color: #b8420f; }
   font: 12px/1.45 "DejaVu Sans Mono", Consolas, Menlo, monospace;
   white-space: pre;
 }
+.post-body ul, .post-body ol { margin: 6px 0 10px; padding-left: 24px; }
+.post-body li { margin: 2px 0; }
 .post-body.excerpt { max-height: 9em; overflow: hidden; padding: 4px 0 0; }
 .recent-posts { list-style: none; margin: 0; padding: 0; }
 .recent-posts li { padding: 8px 0; border-bottom: 1px dotted var(--border); }
@@ -395,6 +397,26 @@ textarea { resize: vertical; }
 .compose textarea { font-family: "DejaVu Sans Mono", Consolas, Menlo, monospace; font-size: 13px; }
 .form-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 .compose .hint { margin: -4px 0 6px; overflow-wrap: anywhere; }
+
+/* The formatting buttons compose.js adds over a text box. */
+.editor-toolbar { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
+.editor-toolbar .editor-button {
+  font: 12px/1 Verdana, Tahoma, sans-serif;
+  min-width: 28px;
+  padding: 4px 7px;
+  background: var(--surface-alt);
+  color: var(--text);
+  border-color: var(--border);
+}
+.editor-toolbar .ed-b { font-weight: bold; }
+.editor-toolbar .ed-i { font-style: italic; }
+.editor-toolbar .ed-u { text-decoration: underline; }
+.editor-toolbar .ed-s { text-decoration: line-through; }
+
+/* Multi-quote: the toggle under each post, and the note over quick reply. */
+button.linkish.multiquote[aria-pressed="true"] { font-weight: bold; text-decoration: none; color: var(--text); }
+button.linkish.multiquote:disabled { color: var(--muted); text-decoration: none; cursor: default; }
+.multiquote-note { margin: 0 0 6px; }
 
 button, .button, .button:visited {
   display: inline-block;

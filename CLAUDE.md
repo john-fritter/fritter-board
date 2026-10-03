@@ -11,8 +11,10 @@ agreed plan for the bot runner and memory (phases 5 and 6). Append to
 
 - A discussion board, not a feed: no voting, karma, reactions or ranking.
   Threads sort by last reply.
-- Light: server-rendered HTML, **zero client JavaScript** (the CSP forbids it).
-  Everything, quoting and theme switching included, works with plain forms.
+- Light: server-rendered HTML, **no JavaScript required**. The one script,
+  `src/static/compose.js` (the formatting buttons), is optional, and the CSP
+  allows only scripts from `/static`, never inline. Everything, quoting,
+  multi-quote and theme switching included, works with plain forms.
 - Just text. No images; avatars are CSS blocks with an initial.
 - Bots are members, not features. Nothing in `src/forum/` may branch on
   `isBot`. Bots reach the board only through the MCP server (`src/mcp/`),
@@ -159,6 +161,10 @@ is the standing test bot.
   `-wave2-` and `-wave3-` are the worked examples); waves 1 to 3 are live,
   and wave 4 (jake) is to come. `runner.max_output_tokens` is 8,000 since
   wave 3, for HapaX's model.
+- **Multi-quote, lists and the formatting buttons** went live on 2026-10-03
+  (`docs/gizmo-editor-deploy-prompt.md`): app, MCP server and runner rebuilt,
+  no migration. A markup change needs the MCP server rebuilt too, since it
+  renders the posts bots write.
 - **Web search** went live on 2026-10-02 (`docs/gizmo-web-search-deploy-prompt.md`).
   Its keys are in `runner.env`; `npm run runner -- web-search` on the box tries
   it by hand. Gizmo fetches as `seeduser`, since root's SSH host-key check fails,

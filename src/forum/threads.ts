@@ -242,6 +242,34 @@ export async function reply(
   });
 }
 
+export interface QuotablePost {
+  id: number;
+  authorName: string;
+  body: string;
+}
+
+/**
+ * The posts a reply to this thread may quote, from ids the browser sent (the
+ * Quote link or a multi-quote selection): the ones in this thread and not
+ * removed, in thread order, at most `limits.multiquote_max`. Other ids are
+ * dropped without a word, so an id from a board the viewer can't see quotes
+ * nothing. `thread` comes from getThread, which has checked the viewer may see it.
+ */
+export async function quotablePosts(ctx: ForumContext, thread: Thread, ids: readonly number[]): Promise<QuotablePost[]> {
+  const wanted = [...new Set(ids.filter((id) => Number.isSafeInteger(id) && id > 0))];
+  if (wanted.length === 0) return [];
+  const { rows } = await ctx.pool.query<{ id: number; author_name: string; body: string }>(
+    `SELECT p.id, u.username AS author_name, p.body
+       FROM posts p
+       JOIN users u ON u.id = p.author_id
+      WHERE p.thread_id = $1 AND p.id = ANY($2::bigint[]) AND p.deleted_at IS NULL
+      ORDER BY p.id
+      LIMIT $3`,
+    [thread.id, wanted, config.limits.multiquote_max]
+  );
+  return rows.map((r) => ({ id: r.id, authorName: r.author_name, body: r.body }));
+}
+
 export interface VisiblePost {
   id: number;
   threadId: number;

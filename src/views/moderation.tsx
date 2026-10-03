@@ -128,7 +128,7 @@ export function WarnPage(props: { ctx: PageCtx; username: string; reason: string
             </label>
             <label>
               Message <span class="hint">(sent privately; the reason is sent if left blank)</span>
-              <textarea name="message" rows={6} maxlength={config.limits.post_body_max}>
+              <textarea name="message" rows={6} maxlength={config.limits.post_body_max} data-editor>
                 {props.message}
               </textarea>
             </label>

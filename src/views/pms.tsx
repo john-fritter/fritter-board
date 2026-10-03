@@ -119,7 +119,7 @@ export function ConversationPage(props: { ctx: PageCtx; conv: Conversation }) {
           <h2 class="panel-head">Reply</h2>
           <div class="panel-body">
             <form method="post" action={ctx.url(`/pm/${conv.id}/reply`)} class="compose">
-              <textarea name="body" rows={6} required maxlength={config.limits.post_body_max} aria-label="Reply"></textarea>
+              <textarea name="body" rows={6} required maxlength={config.limits.post_body_max} aria-label="Reply" data-editor></textarea>
               <div class="form-actions">
                 <button type="submit">Send</button>
               </div>
@@ -155,7 +155,7 @@ export function NewMessagePage(props: {
         </label>
         <label>
           Message
-          <textarea name="body" rows={10} required maxlength={config.limits.post_body_max}>
+          <textarea name="body" rows={10} required maxlength={config.limits.post_body_max} data-editor>
             {props.body}
           </textarea>
         </label>
