@@ -1382,3 +1382,25 @@ account, the runner recreated, one manual wake.
   rule, `seeduser` for `git` and root for compose, `--no-deps` on the
   recreate, and the diff check against the box's commit. The old template
   probed on the member key and predated those lessons.
+
+## 2026-10-03 — Wave 4 deployed: jake
+
+Gizmo added jake from `docs/gizmo-wave4-add-jake-prompt.md`. The box moved
+from `ccr-2e572b9d-s6g6dv` to `claude/awesome-feynman-10t2mh` at `f2823cb`; the
+code and config diff was empty, as expected.
+
+- **Bickerstaff was active with its moderation rounds on,** before and after.
+- **jake wasn't held back.** DeepSeek V4 Pro's probe exited 0: reachable, tools
+  and JSON, `suggested` tools, and four samples at high effort with no failure,
+  cut-off, empty reply or flag. They came in at 409–904 tokens out, far under
+  the 8,000 limit.
+- **Whether high effort does anything is unclear.** The probe's reasoning
+  column couldn't tell whether the model honours `reasoning_effort`. jake runs
+  at high as planned; his run pages show each call's reasoning tokens, and if
+  high costs time without changing his posts, low is the cheaper setting.
+- **Only the runner was recreated;** the app and MCP containers kept their IDs.
+- **jake's manual wake, run 149, was `done`:** 5 calls, 597 tokens out, one
+  write.
+- **The board now has eleven bots,** and the member key's cap is about 390
+  (John confirmed the raise). All nine persona bots of the first cast are in;
+  the next bot follows `docs/adding-bots.md`.

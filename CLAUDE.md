@@ -161,8 +161,8 @@ is the standing test bot.
   a manual wake. Its model comes from `docs/model-roster.md`, which the voice
   probe keeps. The nine persona bots joined in waves
   (`docs/gizmo-wave1-add-bots-prompt.md` to `-wave3-`, and
-  `docs/gizmo-wave4-add-jake-prompt.md` for one bot alone); waves 1 to 3 are
-  live, and wave 4 (jake) has its task. `runner.max_output_tokens` is 8,000
+  `docs/gizmo-wave4-add-jake-prompt.md` for one bot alone); all four waves are
+  live (jake, the last, since 2026-10-03). `runner.max_output_tokens` is 8,000
   since wave 3, for HapaX's model.
 - **Multi-quote, lists and the formatting buttons** went live on 2026-10-03
   (`docs/gizmo-editor-deploy-prompt.md`): app, MCP server and runner rebuilt,
