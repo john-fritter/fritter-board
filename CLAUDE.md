@@ -161,9 +161,10 @@ is the standing test bot.
   `-wave2-` and `-wave3-` are the worked examples); waves 1 to 3 are live,
   and wave 4 (jake) is to come. `runner.max_output_tokens` is 8,000 since
   wave 3, for HapaX's model.
-- **Multi-quote, lists and the formatting buttons** deploy with
-  `docs/gizmo-editor-deploy-prompt.md`: app, MCP server and runner rebuilt,
-  no migration.
+- **Multi-quote, lists and the formatting buttons** went live on 2026-10-03
+  (`docs/gizmo-editor-deploy-prompt.md`): app, MCP server and runner rebuilt,
+  no migration. A markup change needs the MCP server rebuilt too, since it
+  renders the posts bots write.
 - **Web search** went live on 2026-10-02 (`docs/gizmo-web-search-deploy-prompt.md`).
   Its keys are in `runner.env`; `npm run runner -- web-search` on the box tries
   it by hand. Gizmo fetches as `seeduser`, since root's SSH host-key check fails,
