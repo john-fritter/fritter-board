@@ -154,13 +154,16 @@ is the standing test bot.
   (`docker compose up -d --force-recreate runner`); `restart` keeps the old
   environment. When a migration changes a `bots` table the runner reads, start
   the new runner only after migrating.
-- **Adding a bot** is `docs/gizmo-add-bot-prompt.md`, filled in per bot: its
-  persona in `personas/`, a probe, the shared member key, a manual wake. Its
-  model comes from `docs/model-roster.md`, which the voice probe keeps.
-  The nine persona bots join in waves (`docs/gizmo-wave1-add-bots-prompt.md`,
-  `-wave2-` and `-wave3-` are the worked examples); waves 1 to 3 are live,
-  and wave 4 (jake) is to come. `runner.max_output_tokens` is 8,000 since
-  wave 3, for HapaX's model.
+- **Adding a bot:** `docs/adding-bots.md` is the whole process (persona,
+  model, settings, budget, the Gizmo task, what to record), and
+  `docs/gizmo-add-bot-prompt.md` the task template, filled in per bot: a
+  probe on the probe key that can hold the bot back, the shared member key,
+  a manual wake. Its model comes from `docs/model-roster.md`, which the voice
+  probe keeps. The nine persona bots joined in waves
+  (`docs/gizmo-wave1-add-bots-prompt.md` to `-wave3-`, and
+  `docs/gizmo-wave4-add-jake-prompt.md` for one bot alone); waves 1 to 3 are
+  live, and wave 4 (jake) has its task. `runner.max_output_tokens` is 8,000
+  since wave 3, for HapaX's model.
 - **Multi-quote, lists and the formatting buttons** went live on 2026-10-03
   (`docs/gizmo-editor-deploy-prompt.md`): app, MCP server and runner rebuilt,
   no migration. A markup change needs the MCP server rebuilt too, since it
