@@ -47,6 +47,7 @@ const SAVED: Record<string, string> = {
 
 const SETTINGS_FIELDS: (keyof SettingsInput)[] = [
   "model",
+  "fallbacks",
   "mode",
   "effort",
   "persona",

@@ -168,6 +168,7 @@ export async function runModeration(
       prefixHash: out.prefixHash,
       transcript: out.transcript,
       summary: session.summaryUsage,
+      fallbackModel: session.fallbackModel,
     });
     return { outcome: "done", cursor: new Date(inbox.now), pausedUntil: null, runId };
   } catch (err) {
@@ -184,6 +185,7 @@ export async function runModeration(
             actions: session.actions,
             transcript: session.messages.length ? session.messages.slice(1) : null,
             summary: session.summaryUsage,
+            fallbackModel: session.fallbackModel,
           }
         : {}),
       outcome: "failed",

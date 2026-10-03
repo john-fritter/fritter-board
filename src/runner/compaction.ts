@@ -79,6 +79,7 @@ export async function runCompaction(deps: WakeDeps, bot: Bot, trigger: Trigger):
       outcome,
       modelCalls: m.modelCalls,
       ...m.usage,
+      fallbackModel: m.fallbackModel,
       prefixHash: messages[0] ? createHash("sha256").update(String(messages[0].content)).digest("hex").slice(0, 16) : null,
       transcript: messages.length > 1 ? messages.slice(1) : null,
       ...extra,

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { issueBotToken } from "../src/auth/bot-tokens.js";
-import { parsePublicUrl } from "../src/config.js";
+import { config, parsePublicUrl } from "../src/config.js";
 import { insertUser } from "../src/forum/accounts.js";
 import { sendNewMessage } from "../src/forum/pms.js";
 import { createThread, reply } from "../src/forum/threads.js";
@@ -354,6 +354,85 @@ async function main() {
   assert.equal(await runCount(testbotId), runsBefore, "a paused bot isn't woken");
   assert.equal(cli(["resume", "Testbot"]).code, 0);
   assert.equal((await state(testbotId)).paused_until, null, "resuming lifts the pause");
+
+  // ── Fallback models, and trying a failed visit again ──
+  const timedOut = () => {
+    throw new ModelError("NanoGPT 504: Request timed out.", 504, null, null);
+  };
+  const models = () => model.requests.map((q) => q.model);
+  const retryDue = (id: number) => pool.query("UPDATE bots.state SET early_wake_at = NOW() - INTERVAL '1 minute' WHERE user_id = $1", [id]);
+  await setConfig(testbotId, "model_calls_per_day = 1000");
+  assert.match(cli(["config", "Testbot", "--fallbacks", "vendor/fb:online"]).err, /bills outside the subscription/);
+  c = cli(["config", "Testbot", "--fallbacks", "vendor/fb-1, vendor/fb-2"]);
+  assert.equal(c.code, 0, c.err);
+  assert.match(c.out, /fallbacks\s+vendor\/fb-1, vendor\/fb-2/);
+  model.script(timedOut, timedOut, timedOut, () => use("recall", {}), () => say("On the fallback."));
+  await makeDue(testbotId);
+  await runner.tick();
+  r = await lastRun(testbotId);
+  assert.equal(r.outcome, "done", r.error);
+  assert.deepEqual(
+    models(),
+    ["vendor/model-a", "vendor/model-a", "vendor/fb-1", "vendor/fb-2", "vendor/fb-2"],
+    "its own model is retried once, then each fallback once; the one that answers stays for the run"
+  );
+  assert.equal(r.model, "vendor/model-a");
+  assert.equal(r.fallback_model, "vendor/fb-2");
+  assert.equal(r.model_calls, 5);
+  assert.equal((await state(testbotId)).early_wake_at, null, "a visit that worked isn't tried again");
+
+  assert.equal(cli(["config", "Testbot", "--fallbacks", "vendor/fb-1"]).code, 0);
+  model.script(timedOut, timedOut, timedOut);
+  await makeDue(testbotId);
+  const before = Date.now();
+  await runner.tick();
+  r = await lastRun(testbotId);
+  assert.equal(r.outcome, "failed");
+  assert.match(r.error, /^vendor\/model-a: NanoGPT 504.* Then vendor\/fb-1: NanoGPT 504/);
+  st = await state(testbotId);
+  assert.equal(st.early_wake_trigger, "retry", "a passing failure is tried again soon");
+  const min = config.runner.wake_retry_min_minutes * 60_000;
+  const max = config.runner.wake_retry_max_minutes * 60_000;
+  assert.ok(st.early_wake_at.getTime() >= before + min && st.early_wake_at.getTime() <= Date.now() + max);
+  assert.ok(st.next_wake_at > st.early_wake_at, "the schedule carries on beside the retry");
+
+  await setConfig(testbotId, "lurk_bias = 1");
+  for (let n = 1; n <= config.runner.wake_retries; n++) {
+    model.script(timedOut, timedOut, timedOut);
+    await retryDue(testbotId);
+    await runner.tick();
+    r = await lastRun(testbotId);
+    assert.equal(r.trigger, "retry");
+    assert.equal(r.outcome, "failed", "a retry doesn't lurk");
+    st = await state(testbotId);
+    if (n < config.runner.wake_retries) assert.equal(st.early_wake_trigger, "retry");
+  }
+  assert.equal(st.early_wake_at, null, `at most ${config.runner.wake_retries} retries in a row`);
+
+  await setConfig(testbotId, "lurk_bias = 0");
+  model.script(() => {
+    throw new ModelError("NanoGPT 400: bad request", 400, null, null);
+  });
+  await makeDue(testbotId);
+  await runner.tick();
+  assert.equal((await lastRun(testbotId)).outcome, "failed");
+  assert.equal((await state(testbotId)).early_wake_at, null, "a failure that won't pass isn't retried");
+
+  model.script(timedOut, timedOut, timedOut);
+  await makeDue(testbotId);
+  await runner.tick();
+  assert.equal((await state(testbotId)).early_wake_trigger, "retry", "the count starts again after a scheduled visit");
+  await setConfig(testbotId, "lurk_bias = 1");
+  model.script(() => say("Back."));
+  await retryDue(testbotId);
+  await runner.tick();
+  r = await lastRun(testbotId);
+  assert.equal(r.trigger, "retry");
+  assert.equal(r.outcome, "done", r.error);
+  assert.equal(r.fallback_model, null);
+  assert.equal((await state(testbotId)).early_wake_at, null);
+  await setConfig(testbotId, "lurk_bias = 0, model_calls_per_day = NULL");
+  assert.equal(cli(["config", "Testbot", "--fallbacks", "none"]).code, 0);
 
   model.script(() => {
     throw new Error("The model was never meant to be called.");

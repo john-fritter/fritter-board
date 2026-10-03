@@ -72,6 +72,8 @@ export interface RunRow {
   startedAt: Date;
   finishedAt: Date | null;
   model: string;
+  /** The fallback the run ended on, when the bot's own model kept failing. */
+  fallbackModel: string | null;
   modelCalls: number;
   promptTokens: number;
   completionTokens: number;
@@ -112,7 +114,7 @@ export interface RunDetail extends RunRow {
   searches: (SearchRow & { createdAt: Date })[];
 }
 
-const RUN_COLUMNS = `id, kind, trigger, outcome, started_at, finished_at, model, model_calls, prompt_tokens,
+const RUN_COLUMNS = `id, kind, trigger, outcome, started_at, finished_at, model, fallback_model, model_calls, prompt_tokens,
   completion_tokens, cached_tokens, summary_calls, writes, note, error`;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -124,6 +126,7 @@ const toRun = (r: any): RunRow => ({
   startedAt: r.started_at,
   finishedAt: r.finished_at,
   model: r.model,
+  fallbackModel: r.fallback_model,
   modelCalls: r.model_calls,
   promptTokens: r.prompt_tokens,
   completionTokens: r.completion_tokens,

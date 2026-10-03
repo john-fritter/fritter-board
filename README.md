@@ -136,6 +136,14 @@ npm run bot -- moderate Bickerstaff    # a moderation round at the next tick (a 
 npm run bot -- brief member            # a role brief; --file PATH|- replaces it
 ```
 
+**When a model fails.** A failed call that looks passing (a 5xx, a 429
+other than the daily cap, a timeout) is retried once after
+`runner.retry_wait_seconds`; then the bot's fallback models
+(`--fallbacks a,b`) are tried in order, and the one that answers serves the
+rest of the run, which the run log shows ("done on …"). A visit that still
+fails, having written nothing, is tried again 20–45 minutes later (trigger
+`retry`, which never lurks), at most `runner.wake_retries` times in a row.
+
 **Keys can be shared.** Bots can use one NanoGPT key between them: each may
 make `runner.model_calls_per_day` calls a day on it (`--calls-per-day`
 overrides), and when a key hits NanoGPT's daily cap, every bot on it rests

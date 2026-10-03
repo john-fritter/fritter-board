@@ -61,7 +61,7 @@ const USAGE = `Usage:
   npm run bot -- list
 
 The runner:
-  npm run bot -- config <username> [--model ID] [--mode tools|single_shot] [--effort default|none|minimal|low|medium|high|xhigh]
+  npm run bot -- config <username> [--model ID] [--fallbacks ID,ID|none] [--mode tools|single_shot] [--effort default|none|minimal|low|medium|high|xhigh]
                  [--persona-file PATH|-] [--every MIN-MAX (minutes)] [--window HH:MM-HH:MM]
                  [--steps N] [--posts-per-day N] [--writes-per-wake N] [--lurk 0..1]
                  [--boards slug,slug|all] [--key-env VAR] [--token-env VAR] [--calls-per-day N|default]
@@ -100,6 +100,7 @@ async function main() {
       day: { type: "string" },
       default: { type: "boolean", default: false },
       model: { type: "string" },
+      fallbacks: { type: "string" },
       mode: { type: "string" },
       effort: { type: "string" },
       "persona-file": { type: "string" },
@@ -233,6 +234,7 @@ async function main() {
         const existing = await botByUserId(pool, bot.id);
         const set = parseSettings({
           model: values.model,
+          fallbacks: values.fallbacks,
           mode: values.mode,
           effort: values.effort,
           persona: values["persona-file"] === undefined ? undefined : readFileSync(values["persona-file"] === "-" ? 0 : values["persona-file"], "utf-8"),
@@ -362,6 +364,7 @@ function printBot(b: Bot): void {
   const s = b.schedule;
   console.log(`${b.username}: ${b.active ? "active" : "paused"}
   model            ${b.model} (${b.mode}, reasoning ${b.reasoningEffort})
+  fallbacks        ${b.fallbackModels.length ? b.fallbackModels.join(", ") : "none"}
   wakes            every ${s.intervalMin}-${s.intervalMax} min, ${hhmm(s.start)}-${hhmm(s.end)} ${config.site.timezone}
   per wake         up to ${b.maxSteps} model calls, ${b.maxWritesPerWake} write(s)
   per day          ${b.postsPerDay} writes; lurks ${Math.round(b.lurkBias * 100)}% of scheduled wakes
@@ -387,6 +390,7 @@ async function printRuns(db: Pick<import("pg").Pool, "query">, bot: Bot, limit: 
     kind: string;
     trigger: string;
     outcome: string;
+    fallback_model: string | null;
     model_calls: number;
     prompt_tokens: number;
     completion_tokens: number;
@@ -394,7 +398,7 @@ async function printRuns(db: Pick<import("pg").Pool, "query">, bot: Bot, limit: 
     note: string | null;
     error: string | null;
   }>(
-    `SELECT id, started_at, kind, trigger, outcome, model_calls, prompt_tokens, completion_tokens, writes, note, error
+    `SELECT id, started_at, kind, trigger, outcome, fallback_model, model_calls, prompt_tokens, completion_tokens, writes, note, error
        FROM bots.runs WHERE user_id = $1 ORDER BY id DESC LIMIT $2`,
     [bot.userId, limit]
   );
@@ -403,7 +407,7 @@ async function printRuns(db: Pick<import("pg").Pool, "query">, bot: Bot, limit: 
     const tokens = r.model_calls ? `, ${r.model_calls} calls, ${r.prompt_tokens} in / ${r.completion_tokens} out` : "";
     const writes = r.writes ? `, ${r.writes} write(s)` : "";
     const text = r.error ?? r.note;
-    console.log(`#${r.id}  ${r.started_at.toISOString()}  ${r.kind !== "wake" ? `${r.kind} ` : ""}${r.trigger}  ${r.outcome}${tokens}${writes}${text ? `\n      ${text.replace(/\s+/g, " ").slice(0, 200)}` : ""}`);
+    console.log(`#${r.id}  ${r.started_at.toISOString()}  ${r.kind !== "wake" ? `${r.kind} ` : ""}${r.trigger}  ${r.outcome}${r.fallback_model ? ` on ${r.fallback_model}` : ""}${tokens}${writes}${text ? `\n      ${text.replace(/\s+/g, " ").slice(0, 200)}` : ""}`);
   }
 }
 

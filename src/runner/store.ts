@@ -17,7 +17,8 @@ export function createRunnerPool(url: string): Pool {
 }
 
 export type Db = Pick<Pool, "query">;
-export type Trigger = "schedule" | "early" | "manual";
+/** "retry" is a visit tried again soon after one that failed (runner.wake_retries). */
+export type Trigger = "schedule" | "early" | "manual" | "retry";
 export type Outcome = "done" | "lurked" | "skipped" | "failed";
 export type RunKind = "wake" | "compaction" | "moderation";
 
@@ -26,6 +27,8 @@ export interface Bot {
   username: string;
   active: boolean;
   model: string;
+  /** Tried in order when the bot's own model keeps failing. */
+  fallbackModels: string[];
   reasoningEffort: ReasoningEffort;
   mode: "tools" | "single_shot";
   personaPrompt: string;
@@ -47,7 +50,7 @@ export interface Bot {
   // State
   nextWakeAt: Date | null;
   earlyWakeAt: Date | null;
-  earlyWakeTrigger: "early" | "manual" | null;
+  earlyWakeTrigger: "early" | "manual" | "retry" | null;
   inboxCursor: Date | null;
   pausedUntil: Date | null;
   compactRequestedAt: Date | null;
@@ -63,6 +66,7 @@ interface BotRow {
   username: string;
   active: boolean;
   model: string;
+  fallback_models: string[];
   reasoning_effort: ReasoningEffort;
   mode: "tools" | "single_shot";
   persona_prompt: string;
@@ -84,7 +88,7 @@ interface BotRow {
   mod_max_steps: number;
   next_wake_at: Date | null;
   early_wake_at: Date | null;
-  early_wake_trigger: "early" | "manual" | null;
+  early_wake_trigger: "early" | "manual" | "retry" | null;
   inbox_cursor: Date | null;
   paused_until: Date | null;
   compact_requested_at: Date | null;
@@ -108,6 +112,7 @@ function toBot(r: BotRow): Bot {
     username: r.username,
     active: r.active,
     model: r.model,
+    fallbackModels: r.fallback_models ?? [],
     reasoningEffort: r.reasoning_effort,
     mode: r.mode,
     personaPrompt: r.persona_prompt,
@@ -166,7 +171,7 @@ export async function botByUsername(db: Db, username: string): Promise<Bot | nul
 export interface StatePatch {
   nextWakeAt?: Date | null;
   earlyWakeAt?: Date | null;
-  earlyWakeTrigger?: "early" | "manual" | null;
+  earlyWakeTrigger?: "early" | "manual" | "retry" | null;
   inboxCursor?: Date | null;
   pausedUntil?: Date | null;
   compactRequestedAt?: Date | null;
@@ -237,6 +242,8 @@ export interface RunRecord {
   transcript?: unknown[] | null;
   /** Calls to the summary model this wake made for long threads. */
   summary?: SummaryUsage;
+  /** The fallback model the run ended on, when the bot's own kept failing. */
+  fallbackModel?: string | null;
 }
 
 export interface SummaryUsage {
@@ -250,7 +257,8 @@ export async function finishRun(db: Db, runId: number, r: RunRecord): Promise<vo
     `UPDATE bots.runs SET outcome = $2, finished_at = NOW(), inbox_since = $3, inbox_until = $4,
             model_calls = $5, prompt_tokens = $6, completion_tokens = $7, reasoning_tokens = $8,
             cached_tokens = $9, writes = $10, actions = $11, note = $12, error = $13, prefix_hash = $14,
-            transcript = $15, summary_calls = $16, summary_prompt_tokens = $17, summary_completion_tokens = $18
+            transcript = $15, summary_calls = $16, summary_prompt_tokens = $17, summary_completion_tokens = $18,
+            fallback_model = $19
       WHERE id = $1`,
     [
       runId,
@@ -271,6 +279,7 @@ export async function finishRun(db: Db, runId: number, r: RunRecord): Promise<vo
       r.summary?.calls ?? 0,
       r.summary?.promptTokens ?? 0,
       r.summary?.completionTokens ?? 0,
+      r.fallbackModel ?? null,
     ]
   );
 }
@@ -283,6 +292,16 @@ export async function writesLastDay(db: Db, userId: number): Promise<number> {
     [userId]
   );
   return rows[0]!.n;
+}
+
+/** How many of the bot's latest visits were retries that failed, one after another. */
+export async function failedRetriesInARow(db: Db, userId: number): Promise<number> {
+  const { rows } = await db.query<{ trigger: string; outcome: string }>(
+    `SELECT trigger, outcome FROM bots.runs WHERE user_id = $1 AND kind = 'wake' ORDER BY id DESC LIMIT $2`,
+    [userId, config.runner.wake_retries + 1]
+  );
+  const i = rows.findIndex((r) => r.trigger !== "retry" || r.outcome !== "failed");
+  return i === -1 ? rows.length : i;
 }
 
 /** Early wakes (or early moderation cycles) in the last 24 hours, for the daily cap. */

@@ -31,6 +31,8 @@ const ENV_NAME = /^[A-Z_][A-Z0-9_]*$/;
 /** Settings as text, the way the CLI's flags and the admin form both give them. */
 export interface SettingsInput {
   model?: string;
+  /** Fallback models, in order: "a,b", or "none". */
+  fallbacks?: string;
   mode?: string;
   effort?: string;
   persona?: string;
@@ -59,6 +61,7 @@ export interface SettingsInput {
 export const CONFIG_COLUMNS = [
   "active",
   "model",
+  "fallback_models",
   "mode",
   "reasoning_effort",
   "persona_prompt",
@@ -96,6 +99,16 @@ export function parseSettings(v: SettingsInput): Partial<Record<ConfigColumn, un
     const problem = modelIdProblem(v.model);
     if (problem) fail(problem);
     out.model = v.model.trim();
+  }
+  if (v.fallbacks !== undefined) {
+    const raw = v.fallbacks.trim();
+    const models = raw === "none" ? [] : raw.split(",").map((m) => m.trim()).filter(Boolean);
+    for (const m of models) {
+      const problem = modelIdProblem(m);
+      if (problem) fail(problem);
+    }
+    if (raw !== "" && raw !== "none" && models.length === 0) fail("The fallbacks are model ids (a,b), or none.");
+    out.fallback_models = [...new Set(models)];
   }
   if (v.mode !== undefined) {
     if (v.mode !== "tools" && v.mode !== "single_shot") fail("The mode is tools or single_shot.");
@@ -181,6 +194,7 @@ export function settingsText(c: Record<string, unknown>): Required<SettingsInput
   const end = hhmm(c["window_end"]);
   return {
     model: String(c["model"]),
+    fallbacks: Array.isArray(c["fallback_models"]) && c["fallback_models"].length ? (c["fallback_models"] as string[]).join(",") : "none",
     mode: String(c["mode"]),
     effort: String(c["reasoning_effort"]),
     persona: String(c["persona_prompt"] ?? ""),
