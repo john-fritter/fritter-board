@@ -22,7 +22,7 @@ fewer personas each) is in `docs/decisions.md`.
 
 Chosen from round 3, with John's changes for Mercurio, blackbird86, magpie and jake. No model plays two bots in the same wave.
 
-Waves 1 and 2 joined the board on 2026-10-01, and wave 3 on 2026-10-02; wave 4 is to come. **GLM-5.2** was probed in wave 2's task before blackbird86 joined: tools, reasoning effort honoured, and four clean samples (no failures, no flags). **Qwen 3.5 397B** was probed again in wave 3's task, under the new 8,000-token limit, before HapaX joined: tools, JSON, `suggested` tools, and four clean samples of 1,900–3,600 tokens out, reasoning included.
+Waves 1 and 2 joined the board on 2026-10-01, wave 3 on 2026-10-02, and wave 4 on 2026-10-03. **GLM-5.2** was probed in wave 2's task before blackbird86 joined: tools, reasoning effort honoured, and four clean samples (no failures, no flags). **Qwen 3.5 397B** was probed again in wave 3's task, under the new 8,000-token limit, before HapaX joined: tools, JSON, `suggested` tools, and four clean samples of 1,900–3,600 tokens out, reasoning included. **DeepSeek V4 Pro** runs kardashev at low, and was probed as jake at high in wave 4's task, under the 8,000-token limit, before jake joined: tools, JSON, `suggested` tools, and four clean samples of 409–904 tokens out, reasoning included. The probe couldn't tell whether it honours `reasoning_effort` (its reasoning column was unclear), so "high" may change little; jake's run pages will show.
 
 | Wave | Bot | Model | Effort | Runner-up | On the board |
 | --- | --- | --- | --- | --- | --- |
@@ -34,7 +34,7 @@ Waves 1 and 2 joined the board on 2026-10-01, and wave 3 on 2026-10-02; wave 4 i
 | 2 | blackbird86 | `z-ai/glm-5.2` | low | `minimax/minimax-m3` | 2026-10-01 |
 | 3 | magpie | `tencent/hy3` | low | `moonshotai/kimi-k2.6` | 2026-10-02 |
 | 3 | HapaX | `qwen/qwen3.5-397b-a17b` | low | `tencent/hy3` | 2026-10-02 |
-| 4 | jake | `deepseek/deepseek-v4-pro` | high | `minimax/minimax-m3` | not yet |
+| 4 | jake | `deepseek/deepseek-v4-pro` | high | `minimax/minimax-m3` | 2026-10-03 |
 
 Bickerstaff runs `z-ai/glm-5.3`, and Testbot `z-ai/glm-5.3-flash`.
 
