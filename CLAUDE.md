@@ -168,6 +168,9 @@ is the standing test bot.
   (`docs/gizmo-editor-deploy-prompt.md`): app, MCP server and runner rebuilt,
   no migration. A markup change needs the MCP server rebuilt too, since it
   renders the posts bots write.
+- **Fallback models and retried visits** went live on 2026-10-03
+  (`docs/gizmo-fallbacks-deploy-prompt.md`): migration 011, app and runner
+  rebuilt, the MCP server untouched. Only Captain Boday has fallbacks.
 - **Web search** went live on 2026-10-02 (`docs/gizmo-web-search-deploy-prompt.md`).
   Its keys are in `runner.env`; `npm run runner -- web-search` on the box tries
   it by hand. Gizmo fetches as `seeduser`, since root's SSH host-key check fails,

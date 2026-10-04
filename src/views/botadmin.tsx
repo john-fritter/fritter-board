@@ -70,6 +70,12 @@ function RunSummary(props: { run: RunRow }) {
   return (
     <>
       {r.kind === "wake" ? r.trigger : r.kind === "compaction" ? "compaction" : `moderation (${r.trigger})`} · <span class={`outcome-${r.outcome}`}>{r.outcome}</span>
+      {r.fallbackModel && (
+        <>
+          {" "}
+          on <code>{r.fallbackModel}</code>
+        </>
+      )}
       {r.modelCalls > 0 && ` · ${r.modelCalls} call(s), ${n(r.promptTokens)} in / ${n(r.completionTokens)} out`}
       {r.summaryCalls > 0 && ` · ${r.summaryCalls} summary call(s)`}
       {r.writes > 0 && ` · ${r.writes} write(s)`}
@@ -261,6 +267,7 @@ function SettingsForm(props: { ctx: PageCtx; bot: Bot; s: Required<SettingsInput
     <form method="post" action={ctx.url(`${base(bot)}/settings`)} class="compose">
       <div class="inline-fields">
         <Field label="Model" name="model" value={s.model} />
+        <Field label="Fallback models" hint="(in order: a,b; or none)" name="fallbacks" value={s.fallbacks} />
         <label>
           Mode
           <select name="mode">
@@ -558,6 +565,11 @@ export function RunPage(props: { ctx: PageCtx; bot: Bot; run: RunDetail }) {
             <dt>Model</dt>
             <dd>
               <code>{run.model}</code> ({run.mode}, reasoning {run.reasoningEffort})
+              {run.fallbackModel && (
+                <>
+                  ; it failed, and <code>{run.fallbackModel}</code>, a fallback, served the rest of the run
+                </>
+              )}
             </dd>
             <dt>Model calls</dt>
             <dd>

@@ -64,6 +64,8 @@ export interface WakeResult {
   cursor: Date | null;
   /** Set when the bot's NanoGPT key hit its daily cap. */
   pausedUntil: Date | null;
+  /** A failure that may pass (the model or the board unreachable for now), with nothing written: worth trying again soon. */
+  retryable: boolean;
   runId: number;
 }
 
@@ -165,10 +167,18 @@ export class DailyCapReached extends Error {
   }
 }
 
-/** A bot's own model, counting its calls and tokens: for wakes and compactions. */
+/**
+ * A bot's own model, counting its calls and tokens: for wakes and compactions.
+ * When it keeps failing, the bot's fallback models take over for the run.
+ */
 export class MeteredModel {
   modelCalls = 0;
   usage = { promptTokens: 0, completionTokens: 0, reasoningTokens: 0, cachedTokens: 0 };
+  /** The fallback serving this run since the bot's own model failed; null while it's the bot's own. */
+  fallbackModel: string | null = null;
+  /** The bot's model, then its fallbacks; calls go to models[current]. */
+  private readonly models: string[];
+  private current = 0;
 
   constructor(
     readonly deps: WakeDeps,
@@ -176,19 +186,30 @@ export class MeteredModel {
     readonly model: ChatModel,
     /** Moderation cycles run at their own effort. */
     readonly effort: ReasoningEffort = bot.reasoningEffort
-  ) {}
+  ) {
+    this.models = [bot.model, ...bot.fallbackModels.filter((m) => m !== bot.model)];
+  }
 
-  /** One model call, retried once if the failure looks passing. */
+  /**
+   * One model call. A failure that looks passing is retried once after
+   * retry_wait_seconds; if it fails again, each later fallback is tried once,
+   * at the same effort, and the first to answer serves the rest of the run.
+   */
   async complete(req: Omit<ChatRequest, "model" | "reasoningEffort">): Promise<ChatResponse> {
-    const full: ChatRequest = { ...req, model: this.bot.model, reasoningEffort: this.effort };
-    for (let attempt = 1; ; attempt++) {
+    const failures: string[] = [];
+    for (let i = this.current, retried = false; ; ) {
+      const model = this.models[i]!;
       try {
         this.modelCalls++;
-        const res = await this.model.complete(full);
+        const res = await this.model.complete({ ...req, model, reasoningEffort: this.effort });
         this.usage.promptTokens += res.usage.promptTokens;
         this.usage.completionTokens += res.usage.completionTokens;
         this.usage.reasoningTokens += res.usage.reasoningTokens;
         this.usage.cachedTokens += res.usage.cachedTokens;
+        if (i !== this.current) {
+          this.current = i;
+          this.fallbackModel = model;
+        }
         return res;
       } catch (err) {
         if (err instanceof ModelError && err.isDailyCap) {
@@ -197,11 +218,20 @@ export class MeteredModel {
             err.retryAfterSeconds ? new Date(now.getTime() + err.retryAfterSeconds * 1000) : nextUtcMidnight(now)
           );
         }
-        if (attempt === 1 && err instanceof ModelError && err.isTransient) {
+        if (!(err instanceof ModelError && err.isTransient)) throw err;
+        if (!retried) {
+          retried = true;
           await this.deps.sleep(config.runner.retry_wait_seconds * 1000);
           continue;
         }
-        throw err;
+        failures.push(`${model}: ${err.message}`);
+        if (i + 1 < this.models.length) {
+          i++;
+          continue;
+        }
+        // Still a passing failure, so the visit may be tried again later.
+        if (failures.length === 1) throw err;
+        throw new ModelError(failures.join(" Then "), err.status, err.code, err.retryAfterSeconds);
       }
     }
   }
@@ -814,6 +844,7 @@ export async function runWake(deps: WakeDeps, bot: Bot, trigger: Trigger, opts: 
     outcome,
     cursor: null,
     pausedUntil: null,
+    retryable: false,
     runId,
     ...extra,
   });
@@ -832,7 +863,7 @@ export async function runWake(deps: WakeDeps, bot: Bot, trigger: Trigger, opts: 
     board = await deps.connectBoard(token);
   } catch (err) {
     await finishRun(deps.db, runId, { ...empty, outcome: "failed", error: `Couldn't reach the board: ${String(err)}` });
-    return result("failed");
+    return result("failed", { retryable: true });
   }
 
   let session: WakeSession | null = null;
@@ -895,6 +926,7 @@ export async function runWake(deps: WakeDeps, bot: Bot, trigger: Trigger, opts: 
       prefixHash: out.prefixHash,
       transcript: out.transcript,
       summary: session.summaryUsage,
+      fallbackModel: session.fallbackModel,
     });
     return result("done", { cursor: new Date(inbox.now) });
   } catch (err) {
@@ -909,6 +941,7 @@ export async function runWake(deps: WakeDeps, bot: Bot, trigger: Trigger, opts: 
             actions: session.actions,
             transcript: session.messages.length ? session.messages.slice(1) : null,
             summary: session.summaryUsage,
+            fallbackModel: session.fallbackModel,
           }
         : {}),
       outcome: "failed",
@@ -916,7 +949,9 @@ export async function runWake(deps: WakeDeps, bot: Bot, trigger: Trigger, opts: 
       inboxUntil: inbox ? new Date(inbox.now) : null,
       error: capped ? `${err.message} Paused until ${err.until.toISOString()}.` : err instanceof Error ? err.message : String(err),
     });
-    return result("failed", { pausedUntil: capped ? err.until : null });
+    // Before the model, it's the board that failed; after, only a passing model failure is worth a retry.
+    const passing = err instanceof ModelError ? err.isTransient : session === null;
+    return result("failed", { pausedUntil: capped ? err.until : null, retryable: passing && (session?.writes ?? 0) === 0 });
   } finally {
     await board.close().catch(() => {});
   }

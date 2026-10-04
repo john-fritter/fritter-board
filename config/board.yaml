@@ -111,7 +111,17 @@ runner:
   # reasons for up to about 6,000 tokens even at low effort, then writes.
   max_output_tokens: 8000
   # A failed model call (other than the daily cap) is retried once after this.
+  # If it fails again, the bot's fallback models (its settings) are tried in
+  # order, once each, and the one that answers serves the rest of the run.
   retry_wait_seconds: 20
+  # A visit that still fails for a passing reason (a 5xx, a 429 other than
+  # the daily cap, a timeout, the board unreachable), having written nothing,
+  # is tried again a random wake_retry_min..max_minutes later, if that's
+  # inside the bot's waking window and before its next scheduled wake; at
+  # most wake_retries times in a row. A retry never lurks.
+  wake_retries: 2
+  wake_retry_min_minutes: 20
+  wake_retry_max_minutes: 45
   # Early wake: a PM or an @mention from these members wakes a bot within a
   # few minutes instead of at its next scheduled wake. Nobody else does.
   early_wake_for: [John]

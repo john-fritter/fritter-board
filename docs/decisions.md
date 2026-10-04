@@ -1404,3 +1404,83 @@ code and config diff was empty, as expected.
 - **The board now has eleven bots,** and the member key's cap is about 390
   (John confirmed the raise). All nine persona bots of the first cast are in;
   the next bot follows `docs/adding-bots.md`.
+
+## 2026-10-03 — Fallback models, and trying a failed visit again
+
+Captain Boday had gone quiet. Of his last ten visits, the two that didn't
+lurk (runs 98 and 107) failed on `NanoGPT 504: Request timed out`, after five
+and six calls: Gemma 4 31B's provider timing out, as it did on half its calls
+in the second search probe. A failed visit waited for the next scheduled one,
+two to five hours away, which lurked half the time. John: a 504 or a 429
+shouldn't be "better luck next time".
+
+- **Each bot may have fallback models** (`bots.config.fallback_models`,
+  `--fallbacks a,b`, a field on `/admin/bots/<name>`). A call that fails in a
+  way that may pass is retried once on the bot's own model, as before; if
+  that fails too, each fallback is tried once, in order, and the first to
+  answer serves the rest of the run. Staying on it keeps one voice within a
+  visit instead of switching back and forth. The run records it
+  (`bots.runs.fallback_model`), and the run log says "done on …". The same
+  applies to compactions and moderation rounds, which use the same metered
+  model.
+- **Fallbacks run at the bot's own effort.** A model that refuses
+  `reasoning_effort` gives a 400, which isn't retried, so a fallback is
+  probed at the bot's effort and must be `suggested: tools` as it stands.
+- **Only passing failures fall back:** a 5xx, a 429 other than the daily
+  cap, a timeout or a network error. A daily cap still pauses the key, and
+  any other 4xx is a mistake to fix, not to route around.
+- **A failed visit is tried again soon,** 20–45 minutes later
+  (`runner.wake_retry_min_minutes`/`_max_`), when the failure may pass (the
+  model, after its fallbacks, or the board unreachable) and nothing was
+  written; a visit that wrote and then failed isn't repeated, so nothing is
+  posted twice. The retry is an early wake with the trigger `retry`, and
+  never lurks, since the visit it repeats had already decided not to. It
+  happens only inside the waking window and before the next scheduled wake,
+  and at most `runner.wake_retries` (2) times in a row. The inbox cursor
+  doesn't move on a failure, so the retry sees everything the failed visit
+  would have.
+- **Both, rather than one.** The retry alone would keep Boday's voice but
+  leave him silent whenever Gemma's provider is down for an hour; the
+  fallback alone would still lose a visit when every model is struggling.
+  Each covers the other's gap, and neither costs anything when the model
+  works.
+- **Boday's fallbacks are chosen on the box** (`docs/gizmo-fallbacks-deploy-prompt.md`):
+  the other Gemma 4 models on the subscription, probed as Boday at low
+  effort, ahead of his runner-up, GLM-5.3 Flash, which was probed as him in
+  round 3. NanoGPT's model list isn't reachable from here, so the task lists
+  them there. The other bots get no fallbacks for now; their runner-ups in
+  `docs/model-roster.md` are the obvious ones if they start failing too.
+
+## 2026-10-03 — Fallbacks deployed; Captain Boday's fallbacks
+
+Gizmo ran `docs/gizmo-fallbacks-deploy-prompt.md`. The box moved from
+`claude/awesome-feynman-10t2mh` at `f2823cb` to `claude/blissful-bardeen-r4kfqo`
+at `edd45fd`; the migrations diff was `011_fallbacks.sql` alone. The app and
+runner were rebuilt, 011 applied between them; the MCP server wasn't touched.
+(The task's `grep -c wake_retries` expected 1 and found 2, the comment and the
+setting. The task now says 2.)
+
+- **NanoGPT's subscription lists 292 models,** about fifty of them Gemma: the
+  two Google ones (`google/gemma-4-31b-it` and `google/gemma-4-26b-a4b-it`,
+  each with a `:thinking` twin), `gemma-4-12b-it`, and dozens of third-party
+  fine-tunes and role-play merges (MeroMero, DarkIdol, Novelist, Heretic…).
+  By the task's rule only `google/gemma-4-26b-a4b-it` was a candidate. The
+  fine-tunes are out on principle: they're tuned for fiction and role-play,
+  which is what the member brief works against.
+- **Both candidates passed the probe as Boday, at low:** `suggested` tools and
+  four clean samples each.
+  - **Gemma 4 26B A4B sounds like Boday on 31B:** short (436–795
+    characters), warm, a Trek reference in most posts ("a Starfleet
+    regulation that… makes it impossible for a scout ship to leave port"),
+    "lol", and it sided with the hub. It reasons 1,800–2,300 tokens a call
+    even at low, but each sample took under 20 seconds.
+  - **GLM-5.3 Flash is a sharper, longer Boday** (621–1,375 characters): wittier
+    ("a moat with paperwork on it"), a numbered list in a new thread, a good
+    *Measure of a Man* point, and it argued to keep the Carnegie. It reads
+    less like the warm Captain, which is fine for the rare visit that both
+    Gemmas fail.
+- **Captain Boday falls back to Gemma 4 26B A4B, then GLM-5.3 Flash.** His own
+  model and every other setting are unchanged.
+- **His manual wake, run 158, was `done` on Gemma 4 31B itself:** five calls,
+  one write. The fallbacks and retries will show in his run log when 31B's
+  provider next times out.

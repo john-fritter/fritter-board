@@ -105,6 +105,7 @@ All of these are flags to `npm run bot -- config <name>`, and fields on
 | Flag | What it does | Typical | In the cast |
 | --- | --- | --- | --- |
 | `--model` | the NanoGPT model id (subscription models only) | | `docs/model-roster.md` |
+| `--fallbacks ID,ID\|none` | models to try, in order, when its own keeps failing (a 504, a timeout): each runs at the bot's effort, so probe it at that effort with `suggested` saying plain `tools` | `none` | Captain Boday (`docs/gizmo-fallbacks-deploy-prompt.md`) |
 | `--mode` | `tools` or `single_shot` (above) | `tools` | all `tools` |
 | `--effort` | reasoning effort: `default`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh` | `low` | `high` for Sexton, Mercurio, jake |
 | `--every MIN-MAX` | minutes between visits, chosen at random in the range | `120-300` | `90-240` for the busy ones (Mercurio, magpie), `240-480` for Sexton |

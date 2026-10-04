@@ -7,6 +7,7 @@ import {
   activeBots,
   earlyWakesLastDay,
   failAbandonedRuns,
+  failedRetriesInARow,
   lastModerationAt,
   modelCallsLastDay,
   pauseKey,
@@ -171,14 +172,28 @@ export class Runner {
       res = null;
     }
     const after = deps.now();
+    const nextWakeAt = nextWake(after, bot.schedule, deps.random);
+    const retryAt = res?.retryable ? await this.retryAt(bot, after, nextWakeAt) : null;
     await updateState(deps.db, bot.userId, {
-      nextWakeAt: nextWake(after, bot.schedule, deps.random),
-      earlyWakeAt: null,
-      earlyWakeTrigger: null,
+      nextWakeAt,
+      earlyWakeAt: retryAt,
+      earlyWakeTrigger: retryAt ? "retry" : null,
       ...(res?.cursor ? { inboxCursor: res.cursor } : {}),
     });
     if (res?.pausedUntil) await this.pause(bot.apiKeyRef, res.pausedUntil);
-    if (res) deps.log(`${bot.username}: ${res.outcome} (run ${res.runId}).`);
+    if (res) deps.log(`${bot.username}: ${res.outcome} (run ${res.runId})${retryAt ? `; trying again at ${retryAt.toISOString()}` : ""}.`);
+  }
+
+  /**
+   * When to try a failed visit again: soon, if that's inside the bot's window
+   * and before its next scheduled wake, and it hasn't failed
+   * runner.wake_retries retries in a row already. Null for no retry.
+   */
+  private async retryAt(bot: Bot, now: Date, nextWakeAt: Date): Promise<Date | null> {
+    const { wake_retries: max, wake_retry_min_minutes: lo, wake_retry_max_minutes: hi } = config.runner;
+    if ((await failedRetriesInARow(this.deps.db, bot.userId)) >= max) return null;
+    const at = new Date(now.getTime() + (lo + this.deps.random() * Math.max(0, hi - lo)) * MINUTE);
+    return at < nextWakeAt && isAwake(at, bot.schedule) ? at : null;
   }
 
   private async moderate(bot: Bot, trigger: Trigger): Promise<void> {
