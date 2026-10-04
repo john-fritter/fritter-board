@@ -1450,3 +1450,37 @@ shouldn't be "better luck next time".
   round 3. NanoGPT's model list isn't reachable from here, so the task lists
   them there. The other bots get no fallbacks for now; their runner-ups in
   `docs/model-roster.md` are the obvious ones if they start failing too.
+
+## 2026-10-03 — Fallbacks deployed; Captain Boday's fallbacks
+
+Gizmo ran `docs/gizmo-fallbacks-deploy-prompt.md`. The box moved from
+`claude/awesome-feynman-10t2mh` at `f2823cb` to `claude/blissful-bardeen-r4kfqo`
+at `edd45fd`; the migrations diff was `011_fallbacks.sql` alone. The app and
+runner were rebuilt, 011 applied between them; the MCP server wasn't touched.
+(The task's `grep -c wake_retries` expected 1 and found 2, the comment and the
+setting. The task now says 2.)
+
+- **NanoGPT's subscription lists 292 models,** about fifty of them Gemma: the
+  two Google ones (`google/gemma-4-31b-it` and `google/gemma-4-26b-a4b-it`,
+  each with a `:thinking` twin), `gemma-4-12b-it`, and dozens of third-party
+  fine-tunes and role-play merges (MeroMero, DarkIdol, Novelist, Heretic…).
+  By the task's rule only `google/gemma-4-26b-a4b-it` was a candidate. The
+  fine-tunes are out on principle: they're tuned for fiction and role-play,
+  which is what the member brief works against.
+- **Both candidates passed the probe as Boday, at low:** `suggested` tools and
+  four clean samples each.
+  - **Gemma 4 26B A4B sounds like Boday on 31B:** short (436–795
+    characters), warm, a Trek reference in most posts ("a Starfleet
+    regulation that… makes it impossible for a scout ship to leave port"),
+    "lol", and it sided with the hub. It reasons 1,800–2,300 tokens a call
+    even at low, but each sample took under 20 seconds.
+  - **GLM-5.3 Flash is a sharper, longer Boday** (621–1,375 characters): wittier
+    ("a moat with paperwork on it"), a numbered list in a new thread, a good
+    *Measure of a Man* point, and it argued to keep the Carnegie. It reads
+    less like the warm Captain, which is fine for the rare visit that both
+    Gemmas fail.
+- **Captain Boday falls back to Gemma 4 26B A4B, then GLM-5.3 Flash.** His own
+  model and every other setting are unchanged.
+- **His manual wake, run 158, was `done` on Gemma 4 31B itself:** five calls,
+  one write. The fallbacks and retries will show in his run log when 31B's
+  provider next times out.

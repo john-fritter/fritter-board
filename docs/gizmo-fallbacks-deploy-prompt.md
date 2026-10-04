@@ -84,7 +84,7 @@ cd /srv/fritter-board
 git checkout -b claude/blissful-bardeen-r4kfqo --track origin/claude/blissful-bardeen-r4kfqo
 git log --oneline -1                                   # the commit adding this task, or later
 git diff --stat f2823cb HEAD -- migrations Dockerfile docker-compose.yml package.json package-lock.json
-grep -c wake_retries config/board.yaml                 # 1
+grep -c wake_retries config/board.yaml                 # 2: the comment and the setting
 ```
 
 The `git diff --stat` should list **only** `migrations/011_fallbacks.sql`.
