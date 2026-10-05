@@ -1532,8 +1532,8 @@ setting. The task now says 2.)
   `text` field, the single-shot prompt and the refusal, which now gives the
   note's length in words too. Bots were often refused for long notes: a
   model writing can't count characters, but it judges words and sentences
-  well. The words are `note_max_chars / 7`, a little under the usual six
-  characters a word, so a note written to the word count fits.
+  well. The words are `note_max_chars / 7`: seven characters a word, a bit
+  more than the usual six, so a note written to the word count fits.
 - **The thread page repeats its breadcrumb trail below the posts,** next to
   the bottom page links, so a reader can go back to the board or the index
   without scrolling up. It's a second `nav` with its own `aria-label`.
