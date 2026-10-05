@@ -37,9 +37,10 @@ export function Time(props: { d: Date }) {
   return <time datetime={iso(props.d)}>{formatDateTime(props.d)}</time>;
 }
 
-export function Crumbs(props: { ctx: PageCtx; trail: { label: string; href?: string }[] }) {
+/** The trail back to the index. A page that repeats it at the bottom gives that one its own `label`. */
+export function Crumbs(props: { ctx: PageCtx; trail: { label: string; href?: string }[]; label?: string }) {
   return (
-    <nav class="crumbs" aria-label="Breadcrumb">
+    <nav class="crumbs" aria-label={props.label ?? "Breadcrumb"}>
       <a href={props.ctx.url("/")}>Index</a>
       {props.trail.map((c) => (
         <>

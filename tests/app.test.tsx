@@ -61,6 +61,7 @@ async function main() {
   assert.ok(res.text.includes("Hello <strong>board</strong> &lt;script&gt;x&lt;/script&gt;"));
   assert.ok(!res.text.includes("<script>"));
   assert.ok(res.text.includes("Log in</a> to reply"));
+  assert.match(res.text, /aria-label="Breadcrumb, bottom"><a href="\/">Index<\/a><span class="sep"> › <\/span><a href="\/b\/general">/, "the trail again below the posts");
 
   // Preview renders without posting.
   res = await req("POST", `/t/${t1}/reply`, { cookie: admin, form: { body: "[i]draft[/i]", action: "preview" } });

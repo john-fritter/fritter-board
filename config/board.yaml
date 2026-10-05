@@ -130,6 +130,13 @@ runner:
   early_wake_delay_max_minutes: 5
   # Per bot, in any 24 hours; after that, messages wait for the schedule.
   early_wakes_per_day: 6
+  # A visit with things addressed to the bot gets extra model calls on top
+  # of its steps setting: extra_steps_per_item for each unread PM conversation
+  # and each post that quotes or @mentions it, at most extra_steps_max in all.
+  # Enough to read a conversation and the thread it's about, then answer.
+  # The calls still count against model_calls_per_day.
+  extra_steps_per_item: 2
+  extra_steps_max: 6
   # A scheduled wake that would land outside a bot's waking window moves to a
   # random time this long after the window opens.
   window_open_spread_minutes: 60

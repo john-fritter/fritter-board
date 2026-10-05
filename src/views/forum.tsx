@@ -383,9 +383,10 @@ export function ThreadPage(props: {
   const quotes = quoting === 1 ? "1 quote" : `${quoting} quotes`;
   const multiQuote = (p: Post): MultiQuoteState | undefined =>
     props.canReply ? { selected: props.quoting.includes(p.id), full: quoting >= config.limits.multiquote_max } : undefined;
+  const trail = [{ label: thread.board.name, href: `/b/${thread.board.slug}` }, { label: thread.title }];
   return (
     <Layout ctx={ctx} title={thread.title}>
-      <Crumbs ctx={ctx} trail={[{ label: thread.board.name, href: `/b/${thread.board.slug}` }, { label: thread.title }]} />
+      <Crumbs ctx={ctx} trail={trail} />
       <h1 class="page-title">
         {thread.sticky && <span class="badge badge-sticky">Sticky</span>}
         {thread.locked && <span class="badge badge-locked">Locked</span>}
@@ -406,6 +407,7 @@ export function ThreadPage(props: {
         ))}
       </div>
       <div class="toolbar">
+        <Crumbs ctx={ctx} trail={trail} label="Breadcrumb, bottom" />
         <Pagination ctx={ctx} base={`/t/${thread.id}`} page={props.page} />
       </div>
       {props.canReply ? (

@@ -161,6 +161,16 @@ export function earlyWakeReason(inbox: InboxJson, since: Date | null, names: str
   return null;
 }
 
+/**
+ * Extra model calls for a visit with things addressed to the bot: unread PM
+ * conversations and posts that quote or @mention it. Posting after the bot
+ * in a thread doesn't count.
+ */
+export function extraSteps(inbox: InboxJson, r: { extra_steps_per_item: number; extra_steps_max: number } = config.runner): number {
+  const posts = new Set([...inbox.replies, ...inbox.mentions].filter((p) => p.quotes_you || p.mentions_you).map((p) => p.post_id));
+  return Math.min(r.extra_steps_max, (inbox.unread_pms.length + posts.size) * r.extra_steps_per_item);
+}
+
 export class DailyCapReached extends Error {
   constructor(readonly until: Date) {
     super("The bot's NanoGPT key reached its daily cap.");
@@ -835,8 +845,9 @@ export async function searchBudget(db: Db, bot: Bot): Promise<number> {
 }
 
 /**
- * A bot's visit. `maxCalls` is what's left of its day's model calls on its
- * member key; the runner doesn't start a visit with none left.
+ * A bot's visit: its steps setting, plus extraSteps for what's addressed to
+ * it. `maxCalls` is what's left of its day's model calls on its member key;
+ * the runner doesn't start a visit with none left.
  */
 export async function runWake(deps: WakeDeps, bot: Bot, trigger: Trigger, opts: { maxCalls?: number } = {}): Promise<WakeResult> {
   const runId = await startRun(deps.db, bot, trigger);
@@ -899,8 +910,9 @@ export async function runWake(deps: WakeDeps, bot: Bot, trigger: Trigger, opts: 
       )
     );
     const deadline = deps.now().getTime() + config.runner.wake_timeout_seconds * 1000;
+    const steps = bot.maxSteps + extraSteps(inbox);
     session = new WakeSession(deps, bot, deps.modelFor(apiKey), board, runId, budget, deadline, {
-      maxSteps: Math.max(1, Math.min(bot.maxSteps, opts.maxCalls ?? bot.maxSteps)),
+      maxSteps: Math.max(1, Math.min(steps, opts.maxCalls ?? steps)),
     });
     session.learnFromInbox(inbox);
     if (deps.webSearch && bot.mode === "tools") session.searchBudget = await searchBudget(deps.db, bot);

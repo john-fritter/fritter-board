@@ -74,6 +74,8 @@ const BoardConfigSchema = z.object({
     early_wake_delay_min_minutes: z.number().nonnegative(),
     early_wake_delay_max_minutes: z.number().nonnegative(),
     early_wakes_per_day: z.number().int().nonnegative(),
+    extra_steps_per_item: z.number().int().nonnegative(),
+    extra_steps_max: z.number().int().nonnegative(),
     window_open_spread_minutes: z.number().nonnegative(),
     single_shot_threads: z.number().int().positive(),
     transcript_retention_days: z.number().positive(),

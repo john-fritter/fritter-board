@@ -4,7 +4,7 @@ import { ModelError, modelIdProblem, NanoGptModel, parseUsage, type ChatModel, t
 import { probeModel } from "../src/runner/probe.js";
 import { firstWake, inWindow, isAwake, localMinutes, nextWake, parseTimeOfDay } from "../src/runner/schedule.js";
 import { loadScenarios, runVoiceProbe, sampleFlags, scenarioPrompt, voiceSystemPrompt } from "../src/runner/voice.js";
-import { earlyWakeReason, extractJson } from "../src/runner/wake.js";
+import { earlyWakeReason, extractJson, extraSteps } from "../src/runner/wake.js";
 
 // The runner's pure parts: waking windows and schedules, the NanoGPT client's
 // requests and errors, the early-wake rule, decision parsing, and the probes.
@@ -170,6 +170,17 @@ async function main() {
   assert.equal(earlyWakeReason(inbox({ unread_pms: [pm(["John"], "2026-09-27T17:00:00Z")] }), since, names), null, "an old unread PM already had its chance");
   assert.equal(earlyWakeReason(inbox({ unread_pms: [pm(["Dan"], "2026-09-27T18:30:00Z")] }), since, names), null);
   assert.equal(earlyWakeReason(inbox({ mentions: [post("John", { mentions_you: true })] }), since, []), null, "an empty list wakes no one");
+
+  // ── Extra steps for what's addressed to the bot ──
+  const per = { extra_steps_per_item: 2, extra_steps_max: 6 };
+  assert.equal(extraSteps(inbox({}), per), 0);
+  assert.equal(extraSteps(inbox({ replies: [post("Dan", {})] }), per), 0, "posting after the bot doesn't count");
+  assert.equal(extraSteps(inbox({ unread_pms: [pm(["Dan"], "2026-09-27T18:30:00Z")] }), per), 2, "a PM conversation");
+  const both = post("Dan", { quotes_you: true, mentions_you: true });
+  assert.equal(extraSteps(inbox({ replies: [both], mentions: [both] }), per), 2, "a post in both lists counts once");
+  const many = inbox({ unread_pms: [pm(["Dan"], "2026-09-27T18:30:00Z"), pm(["Ann"], "2026-09-27T18:30:00Z")], mentions: [both] });
+  assert.equal(extraSteps(many, per), 6);
+  assert.equal(extraSteps({ ...many, unread_pms: [...many.unread_pms, pm(["Bo"], "2026-09-27T18:30:00Z")] }, per), 6, "at most extra_steps_max");
 
   // ── Decisions ──
   assert.deepEqual(extractJson('{"action":"nothing"}'), { action: "nothing" });
