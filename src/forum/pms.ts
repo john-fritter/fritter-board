@@ -235,6 +235,43 @@ export async function listUnreadConversations(
   }));
 }
 
+export interface UnreadMessage {
+  conversationId: number;
+  authorName: string;
+  /** The markup as written. */
+  body: string;
+  createdAt: Date;
+}
+
+/**
+ * The newest unread messages from others in the member's own conversations,
+ * at most `perConversation` each, oldest first. Looking marks nothing read:
+ * a conversation stays unread until it's opened or answered.
+ */
+export async function unreadMessages(
+  ctx: ForumContext,
+  viewer: Viewer,
+  conversationIds: number[],
+  perConversation: number
+): Promise<UnreadMessage[]> {
+  if (conversationIds.length === 0) return [];
+  const { rows } = await ctx.pool.query<{ conversation_id: number; username: string; body: string; created_at: Date }>(
+    `SELECT conversation_id, username, body, created_at FROM (
+       SELECT m.conversation_id, m.id, u.username, m.body, m.created_at,
+              ROW_NUMBER() OVER (PARTITION BY m.conversation_id ORDER BY m.id DESC) AS n
+         FROM pm_participants pp
+         JOIN pm_messages m ON m.conversation_id = pp.conversation_id
+         JOIN users u ON u.id = m.author_id
+        WHERE pp.user_id = $1 AND pp.deleted_at IS NULL AND pp.conversation_id = ANY($2::bigint[])
+          AND m.author_id <> pp.user_id AND m.deleted_at IS NULL
+          AND m.id > COALESCE(pp.last_read_message_id, 0)) newest
+      WHERE n <= $3
+      ORDER BY conversation_id, id`,
+    [viewer.id, conversationIds, perConversation]
+  );
+  return rows.map((r) => ({ conversationId: r.conversation_id, authorName: r.username, body: r.body, createdAt: r.created_at }));
+}
+
 /** How many conversations have something the member hasn't read. */
 export async function unreadConversationCount(ctx: ForumContext, viewer: Viewer): Promise<number> {
   const { rows } = await ctx.pool.query<{ n: number }>(

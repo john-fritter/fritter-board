@@ -77,7 +77,7 @@ export const isModTool = (name: string) => name.startsWith("mod_");
 /** Mod tools that change something, as opposed to mod_reports and mod_history. */
 const MOD_ACTION_TOOLS = new Set(["mod_lock", "mod_unlock", "mod_sticky", "mod_unsticky", "mod_move", "mod_remove_post", "mod_warn", "mod_resolve_report"]);
 
-export const RUNNER_BRIEF = `How this works: you visit the board now and then, as the member described below. Each visit starts with your inbox (what happened since your last visit), which is given to you with the visit, so there's no get_inbox to call. Use the tools to read and, if you have something worth saying, to post or send a message. There is no audience to perform for and nothing rewards volume; reading without posting is fine and often right. Stay in character. You keep a private notebook: your standing notes and your recent notes come with each visit, your notes on the people in a thread come with it when you read it, remember writes a new note, and recall searches all of them. When you're done, stop calling tools and say in a sentence what you did; that note goes in a log and is never posted.`;
+export const RUNNER_BRIEF = `How this works: you visit the board now and then, as the member described below. Each visit starts with your inbox (what happened since your last visit), which is given to you with the visit, so there's no get_inbox to call. Use the tools to read and, if you have something worth saying, to post or send a message. You can read several things in one turn by calling several tools at once (two conversations, say, or a conversation and the thread it's about), but a post or message goes in a turn of its own. Your unread private messages come with the inbox, so you needn't open them; read_pms shows the rest of a conversation. There is no audience to perform for and nothing rewards volume; reading without posting is fine and often right. Stay in character. You keep a private notebook: your standing notes and your recent notes come with each visit, your notes on the people in a thread come with it when you read it, remember writes a new note, and recall searches all of them. When you're done, stop calling tools and say in a sentence what you did; that note goes in a log and is never posted.`;
 
 /** The runner's own tools, next to the board's: the bot's notebook. */
 export const MEMORY_TOOLS: ToolDefinition[] = [
@@ -161,14 +161,26 @@ export function earlyWakeReason(inbox: InboxJson, since: Date | null, names: str
   return null;
 }
 
+type AllowanceSettings = Pick<
+  typeof config.runner,
+  "extra_steps_per_pm" | "extra_steps_per_mention" | "extra_steps_max" | "extra_writes_per_item" | "writes_per_wake_max"
+>;
+
 /**
- * Extra model calls for a visit with things addressed to the bot: unread PM
- * conversations and posts that quote or @mention it. Posting after the bot
- * in a thread doesn't count.
+ * What a visit may do: the bot's own steps and writes, plus more for what's
+ * addressed to it, its unread PM conversations and the posts that quote or
+ * @mention it. Posting after the bot in a thread doesn't count.
  */
-export function extraSteps(inbox: InboxJson, r: { extra_steps_per_item: number; extra_steps_max: number } = config.runner): number {
-  const posts = new Set([...inbox.replies, ...inbox.mentions].filter((p) => p.quotes_you || p.mentions_you).map((p) => p.post_id));
-  return Math.min(r.extra_steps_max, (inbox.unread_pms.length + posts.size) * r.extra_steps_per_item);
+export function visitAllowance(
+  own: { steps: number; writes: number },
+  inbox: InboxJson,
+  r: AllowanceSettings = config.runner
+): { steps: number; writes: number } {
+  const pms = inbox.unread_pms.length;
+  const posts = new Set([...inbox.replies, ...inbox.mentions].filter((p) => p.quotes_you || p.mentions_you).map((p) => p.post_id)).size;
+  const steps = own.steps + Math.min(r.extra_steps_max, pms * r.extra_steps_per_pm + posts * r.extra_steps_per_mention);
+  const writes = Math.max(own.writes, Math.min(r.writes_per_wake_max, own.writes + (pms + posts) * r.extra_writes_per_item));
+  return { steps, writes };
 }
 
 export class DailyCapReached extends Error {
@@ -366,8 +378,12 @@ export class WakeSession extends MeteredModel {
     return null; // Messages and reports aren't posts in a board.
   }
 
-  /** Runs one tool call for the model, under the runner's rules. Returns what the model sees. */
-  async runTool(name: string, rawArgs: string, offered: Set<string>): Promise<string> {
+  /**
+   * Runs one tool call for the model, under the runner's rules. Returns what
+   * the model sees. `several`: the call came with others in one turn, where
+   * reads are fine but anything that writes or moderates is refused.
+   */
+  async runTool(name: string, rawArgs: string, offered: Set<string>, several = false): Promise<string> {
     let args: Record<string, unknown>;
     try {
       const parsed: unknown = JSON.parse(rawArgs || "{}");
@@ -379,11 +395,19 @@ export class WakeSession extends MeteredModel {
     if (!offered.has(name)) {
       return this.record(name, rawArgs, false, `There's no tool called ${name} available to you now.`);
     }
+    const modAction = MOD_ACTION_TOOLS.has(name);
+    if (several && (WRITE_TOOLS.has(name) || modAction)) {
+      return this.record(
+        name,
+        rawArgs,
+        false,
+        "Not done: posts, messages, reports and moderation actions go one to a turn, on their own, after you've read what they answer. Call it again by itself."
+      );
+    }
     if (WRITE_TOOLS.has(name)) {
       const refusal = this.writeRefusal(name, args);
       if (refusal) return this.record(name, rawArgs, false, refusal);
     }
-    const modAction = MOD_ACTION_TOOLS.has(name);
     if (modAction && this.modActions >= this.modActionLimit) {
       return this.record(
         name,
@@ -620,7 +644,7 @@ export async function toolLoop(s: WakeSession, system: string, first: string, bo
       break;
     }
     for (const call of res.toolCalls) {
-      const text = await s.runTool(call.function.name, call.function.arguments, offered);
+      const text = await s.runTool(call.function.name, call.function.arguments, offered, res.toolCalls.length > 1);
       messages.push({ role: "tool", tool_call_id: call.id, content: text });
     }
     if (step === s.maxSteps) note = `Stopped after ${s.maxSteps} model calls.`;
@@ -845,9 +869,9 @@ export async function searchBudget(db: Db, bot: Bot): Promise<number> {
 }
 
 /**
- * A bot's visit: its steps setting, plus extraSteps for what's addressed to
- * it. `maxCalls` is what's left of its day's model calls on its member key;
- * the runner doesn't start a visit with none left.
+ * A bot's visit, with its visitAllowance of steps and writes. `maxCalls` is
+ * what's left of its day's model calls on its member key; the runner doesn't
+ * start a visit with none left.
  */
 export async function runWake(deps: WakeDeps, bot: Bot, trigger: Trigger, opts: { maxCalls?: number } = {}): Promise<WakeResult> {
   const runId = await startRun(deps.db, bot, trigger);
@@ -899,20 +923,20 @@ export async function runWake(deps: WakeDeps, bot: Bot, trigger: Trigger, opts: 
       return result("lurked");
     }
 
+    const allowed = visitAllowance({ steps: bot.maxSteps, writes: bot.maxWritesPerWake }, inbox);
     const usedToday = await writesLastDay(deps.db, bot.userId);
     const budget = Math.max(
       0,
       Math.min(
-        bot.maxWritesPerWake,
+        allowed.writes,
         bot.postsPerDay - usedToday,
         inbox.you.writes_left.this_hour,
         inbox.you.writes_left.today
       )
     );
     const deadline = deps.now().getTime() + config.runner.wake_timeout_seconds * 1000;
-    const steps = bot.maxSteps + extraSteps(inbox);
     session = new WakeSession(deps, bot, deps.modelFor(apiKey), board, runId, budget, deadline, {
-      maxSteps: Math.max(1, Math.min(steps, opts.maxCalls ?? steps)),
+      maxSteps: Math.max(1, Math.min(allowed.steps, opts.maxCalls ?? allowed.steps)),
     });
     session.learnFromInbox(inbox);
     if (deps.webSearch && bot.mode === "tools") session.searchBudget = await searchBudget(deps.db, bot);

@@ -86,6 +86,10 @@ mcp:
   writes_per_day: 50
   # get_inbox returns at most this many items in each list.
   inbox_items: 15
+  # Each unread conversation in get_inbox carries its newest unread messages,
+  # at most this many, each cut to inbox_pm_chars; read_pms has the rest.
+  inbox_pm_messages: 5
+  inbox_pm_chars: 2000
   # read_thread returns at most this many posts per call.
   read_thread_posts: 20
   # Posts quoted in the inbox, search and profiles are cut to this length.
@@ -130,13 +134,18 @@ runner:
   early_wake_delay_max_minutes: 5
   # Per bot, in any 24 hours; after that, messages wait for the schedule.
   early_wakes_per_day: 6
-  # A visit with things addressed to the bot gets extra model calls on top
-  # of its steps setting: extra_steps_per_item for each unread PM conversation
-  # and each post that quotes or @mentions it, at most extra_steps_max in all.
-  # Enough to read a conversation and the thread it's about, then answer.
-  # The calls still count against model_calls_per_day.
-  extra_steps_per_item: 2
-  extra_steps_max: 6
+  # A visit with things addressed to the bot gets more than its own steps and
+  # writes settings: extra_steps_per_pm model calls for each unread PM
+  # conversation and extra_steps_per_mention for each post that quotes or
+  # @mentions it, at most extra_steps_max more in all; and extra_writes_per_item
+  # writes for each of them, but extra writes never take a visit past
+  # writes_per_wake_max. The calls still count against model_calls_per_day,
+  # and the writes against the bot's posts a day.
+  extra_steps_per_pm: 2
+  extra_steps_per_mention: 1
+  extra_steps_max: 10
+  extra_writes_per_item: 1
+  writes_per_wake_max: 3
   # A scheduled wake that would land outside a bot's waking window moves to a
   # random time this long after the window opens.
   window_open_spread_minutes: 60

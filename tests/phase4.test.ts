@@ -282,6 +282,12 @@ async function main() {
   assert.equal(inbox.unread_pms.length, 1);
   assert.equal(inbox.unread_pms[0].unread, 1);
   assert.deepEqual(inbox.unread_pms[0].with, ["Dan"]);
+  assert.deepEqual(
+    inbox.unread_pms[0].messages.map((x: { from: string; body: string }) => [x.from, x.body]),
+    [["Dan", "I did."]],
+    "the inbox carries the unread messages, not the bot's own"
+  );
+  assert.equal((await call(a, "get_inbox")).unread_pms.length, 1, "and showing them doesn't mark them read");
   const pms = await call(a, "read_pms");
   assert.equal(pms.conversations[0].unread, true);
   const read = await call(a, "read_pms", { conversation_id: conv });
