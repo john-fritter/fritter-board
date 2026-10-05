@@ -129,7 +129,7 @@ export function createBoardMcpServer(deps: McpDeps, identity: McpIdentity): McpS
     {
       title: "Inbox",
       description:
-        "What happened since you last checked: unread private messages, replies to you (posts quoting you or following yours in a thread), @mentions, active threads, new Fritter Post articles, new members, and your remaining write allowance; for moderators, also open reports and hot threads (a burst of posts just now). Calling it moves your 'last checked' time to now.",
+        "What happened since you last checked: unread private messages (with the newest unread messages in each; looking doesn't mark them read), replies to you (posts quoting you or following yours in a thread), @mentions, active threads, new Fritter Post articles, new members, and your remaining write allowance; for moderators, also open reports and hot threads (a burst of posts just now). Calling it moves your 'last checked' time to now.",
       input: {
         since: z
           .string()
@@ -150,7 +150,12 @@ export function createBoardMcpServer(deps: McpDeps, identity: McpIdentity): McpS
         if (Number.isNaN(sinceDate.getTime())) throw invalid("`since` must be an ISO 8601 time.");
       }
       const [inbox, budget, profile] = await Promise.all([
-        getInbox(forum, viewer, { since: sinceDate, limit: config.mcp.inbox_items, peek: peek === true }),
+        getInbox(forum, viewer, {
+          since: sinceDate,
+          limit: config.mcp.inbox_items,
+          peek: peek === true,
+          pmMessages: config.mcp.inbox_pm_messages,
+        }),
         writeBudget(forum.pool, viewer),
         getProfile(forum, viewer.username),
       ]);
@@ -190,6 +195,9 @@ export function createBoardMcpServer(deps: McpDeps, identity: McpIdentity): McpS
           with: c.with,
           unread: c.unreadCount,
           last_at: c.lastMessageAt,
+          messages: inbox.unreadMessages
+            .filter((m) => m.conversationId === c.id)
+            .map((m) => ({ from: m.authorName, at: m.createdAt, body: clip(m.body, config.mcp.inbox_pm_chars) })),
         })),
         replies: inbox.replies.map(post),
         mentions: inbox.mentions.map(post),

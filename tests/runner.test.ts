@@ -4,7 +4,7 @@ import { ModelError, modelIdProblem, NanoGptModel, parseUsage, type ChatModel, t
 import { probeModel } from "../src/runner/probe.js";
 import { firstWake, inWindow, isAwake, localMinutes, nextWake, parseTimeOfDay } from "../src/runner/schedule.js";
 import { loadScenarios, runVoiceProbe, sampleFlags, scenarioPrompt, voiceSystemPrompt } from "../src/runner/voice.js";
-import { earlyWakeReason, extractJson } from "../src/runner/wake.js";
+import { earlyWakeReason, extractJson, visitAllowance } from "../src/runner/wake.js";
 
 // The runner's pure parts: waking windows and schedules, the NanoGPT client's
 // requests and errors, the early-wake rule, decision parsing, and the probes.
@@ -83,7 +83,7 @@ async function main() {
   assert.equal(req.auth, "Bearer sk-test");
   assert.equal(req.body["reasoning_effort"], "low");
   assert.equal(req.body["include_usage"], true, "usage must be asked for");
-  assert.equal(req.body["parallel_tool_calls"], false);
+  assert.equal(req.body["parallel_tool_calls"], undefined, "several calls a turn are allowed; the wake refuses writes among them");
   assert.equal(req.body["tool_choice"], "auto");
   assert.deepEqual(req.body["reasoning"], { exclude: true });
   for (const k of ["provider", "billing_mode", "billingMode"]) assert.equal(req.body[k], undefined, `never ${k}`);
@@ -170,6 +170,21 @@ async function main() {
   assert.equal(earlyWakeReason(inbox({ unread_pms: [pm(["John"], "2026-09-27T17:00:00Z")] }), since, names), null, "an old unread PM already had its chance");
   assert.equal(earlyWakeReason(inbox({ unread_pms: [pm(["Dan"], "2026-09-27T18:30:00Z")] }), since, names), null);
   assert.equal(earlyWakeReason(inbox({ mentions: [post("John", { mentions_you: true })] }), since, []), null, "an empty list wakes no one");
+
+  // ── A visit's allowance: more for what's addressed to the bot ──
+  const per = { extra_steps_per_pm: 2, extra_steps_per_mention: 1, steps_per_wake_max: 10, extra_writes_per_item: 1, writes_per_wake_max: 3 };
+  const own = { steps: 5, writes: 1 };
+  const allow = (over: Partial<InboxJson>, o = own) => visitAllowance(o, inbox(over), per);
+  const conv = (w: string) => pm([w], "2026-09-27T18:30:00Z");
+  const both = post("Dan", { quotes_you: true, mentions_you: true });
+  assert.deepEqual(allow({}), own, "nothing waiting");
+  assert.deepEqual(allow({ replies: [post("Dan", {})] }), own, "posting after the bot doesn't count");
+  assert.deepEqual(allow({ unread_pms: [conv("Dan")] }), { steps: 7, writes: 2 }, "a PM conversation");
+  assert.deepEqual(allow({ replies: [both], mentions: [both] }), { steps: 6, writes: 2 }, "a post in both lists counts once");
+  assert.deepEqual(allow({ unread_pms: [conv("Dan"), conv("Ann")], mentions: [both] }), { steps: 10, writes: 3 });
+  const crowd = Array.from({ length: 7 }, (_, i) => ({ ...both, post_id: 10 + i }));
+  assert.deepEqual(allow({ unread_pms: [conv("Dan"), conv("Ann")], mentions: crowd }), { steps: 10, writes: 3 }, "steps_per_wake_max and writes_per_wake_max in all");
+  assert.deepEqual(allow({ unread_pms: [conv("Dan")] }, { steps: 12, writes: 4 }), { steps: 12, writes: 4 }, "a bot's own higher settings stand");
 
   // ── Decisions ──
   assert.deepEqual(extractJson('{"action":"nothing"}'), { action: "nothing" });

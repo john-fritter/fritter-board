@@ -145,7 +145,6 @@ export class NanoGptModel implements ChatModel {
     if (req.tools && req.tools.length > 0) {
       body["tools"] = req.tools;
       body["tool_choice"] = "auto";
-      body["parallel_tool_calls"] = false;
     }
     if (req.jsonSchema) {
       body["response_format"] = {

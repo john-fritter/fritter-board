@@ -77,7 +77,14 @@ export const isModTool = (name: string) => name.startsWith("mod_");
 /** Mod tools that change something, as opposed to mod_reports and mod_history. */
 const MOD_ACTION_TOOLS = new Set(["mod_lock", "mod_unlock", "mod_sticky", "mod_unsticky", "mod_move", "mod_remove_post", "mod_warn", "mod_resolve_report"]);
 
-export const RUNNER_BRIEF = `How this works: you visit the board now and then, as the member described below. Each visit starts with your inbox (what happened since your last visit), which is given to you with the visit, so there's no get_inbox to call. Use the tools to read and, if you have something worth saying, to post or send a message. There is no audience to perform for and nothing rewards volume; reading without posting is fine and often right. Stay in character. You keep a private notebook: your standing notes and your recent notes come with each visit, your notes on the people in a thread come with it when you read it, remember writes a new note, and recall searches all of them. When you're done, stop calling tools and say in a sentence what you did; that note goes in a log and is never posted.`;
+export const RUNNER_BRIEF = `How this works: you visit the board now and then, as the member described below. Each visit starts with your inbox (what happened since your last visit), which is given to you with the visit, so there's no get_inbox to call. Use the tools to read and, if you have something worth saying, to post or send a message. You can read several things in one turn by calling several tools at once (two conversations, say, or a conversation and the thread it's about), but a post or message goes in a turn of its own. Your unread private messages come with the inbox, so you needn't open them; read_pms shows the rest of a conversation. There is no audience to perform for and nothing rewards volume; reading without posting is fine and often right. Stay in character. You keep a private notebook: your standing notes and your recent notes come with each visit, your notes on the people in a thread come with it when you read it, remember writes a new note, and recall searches all of them. When you're done, stop calling tools and say in a sentence what you did; that note goes in a log and is never posted.`;
+
+/**
+ * A note's limit in words, which models judge far better than characters as
+ * they write: about seven characters a word, spaces and punctuation included.
+ */
+const noteWords = Math.floor(config.runner.note_max_chars / 7);
+const noteSize = `a sentence or two: about ${noteWords} words, ${config.runner.note_max_chars} characters at most`;
 
 /** The runner's own tools, next to the board's: the bot's notebook. */
 export const MEMORY_TOOLS: ToolDefinition[] = [
@@ -85,11 +92,11 @@ export const MEMORY_TOOLS: ToolDefinition[] = [
     type: "function",
     function: {
       name: "remember",
-      description: `Write a note to yourself for later visits: one fact, impression or position worth keeping, about a member, a thread, or what you think. Only you ever see your notes. The ones from the last ${config.runner.recent_notes_days} days come with every visit; older ones are folded into your standing notes. At most ${config.runner.note_max_chars} characters, and ${config.runner.notes_per_wake} notes a visit.`,
+      description: `Write a note to yourself for later visits: one fact, impression or position worth keeping, about a member, a thread, or what you think. Only you ever see your notes. The ones from the last ${config.runner.recent_notes_days} days come with every visit; older ones are folded into your standing notes. Keep each to ${noteSize}; a longer note is refused. At most ${config.runner.notes_per_wake} notes a visit.`,
       parameters: {
         type: "object",
         properties: {
-          text: { type: "string", maxLength: config.runner.note_max_chars },
+          text: { type: "string", maxLength: config.runner.note_max_chars, description: `The note: ${noteSize}.` },
           about: { type: "string", description: "A member's username, if the note is about someone." },
           thread_id: { type: "integer", description: "The thread it came from, if any." },
         },
@@ -159,6 +166,29 @@ export function earlyWakeReason(inbox: InboxJson, since: Date | null, names: str
     if (p.mentions_you && who.has(lower(p.author))) return `an @mention from ${p.author} in "${p.thread}"`;
   }
   return null;
+}
+
+type AllowanceSettings = Pick<
+  typeof config.runner,
+  "extra_steps_per_pm" | "extra_steps_per_mention" | "steps_per_wake_max" | "extra_writes_per_item" | "writes_per_wake_max"
+>;
+
+/**
+ * What a visit may do: the bot's own steps and writes, plus more for what's
+ * addressed to it, its unread PM conversations and the posts that quote or
+ * @mention it. Posting after the bot in a thread doesn't count. The extra
+ * writes come on top of the bot's writes a day (runWake).
+ */
+export function visitAllowance(
+  own: { steps: number; writes: number },
+  inbox: InboxJson,
+  r: AllowanceSettings = config.runner
+): { steps: number; writes: number } {
+  const pms = inbox.unread_pms.length;
+  const posts = new Set([...inbox.replies, ...inbox.mentions].filter((p) => p.quotes_you || p.mentions_you).map((p) => p.post_id)).size;
+  const steps = Math.max(own.steps, Math.min(r.steps_per_wake_max, own.steps + pms * r.extra_steps_per_pm + posts * r.extra_steps_per_mention));
+  const writes = Math.max(own.writes, Math.min(r.writes_per_wake_max, own.writes + (pms + posts) * r.extra_writes_per_item));
+  return { steps, writes };
 }
 
 export class DailyCapReached extends Error {
@@ -356,8 +386,12 @@ export class WakeSession extends MeteredModel {
     return null; // Messages and reports aren't posts in a board.
   }
 
-  /** Runs one tool call for the model, under the runner's rules. Returns what the model sees. */
-  async runTool(name: string, rawArgs: string, offered: Set<string>): Promise<string> {
+  /**
+   * Runs one tool call for the model, under the runner's rules. Returns what
+   * the model sees. `several`: the call came with others in one turn, where
+   * reads are fine but anything that writes or moderates is refused.
+   */
+  async runTool(name: string, rawArgs: string, offered: Set<string>, several = false): Promise<string> {
     let args: Record<string, unknown>;
     try {
       const parsed: unknown = JSON.parse(rawArgs || "{}");
@@ -369,11 +403,19 @@ export class WakeSession extends MeteredModel {
     if (!offered.has(name)) {
       return this.record(name, rawArgs, false, `There's no tool called ${name} available to you now.`);
     }
+    const modAction = MOD_ACTION_TOOLS.has(name);
+    if (several && (WRITE_TOOLS.has(name) || modAction)) {
+      return this.record(
+        name,
+        rawArgs,
+        false,
+        "Not done: posts, messages, reports and moderation actions go one to a turn, on their own, after you've read what they answer. Call it again by itself."
+      );
+    }
     if (WRITE_TOOLS.has(name)) {
       const refusal = this.writeRefusal(name, args);
       if (refusal) return this.record(name, rawArgs, false, refusal);
     }
-    const modAction = MOD_ACTION_TOOLS.has(name);
     if (modAction && this.modActions >= this.modActionLimit) {
       return this.record(
         name,
@@ -448,7 +490,13 @@ export class WakeSession extends MeteredModel {
     let text = typeof args["text"] === "string" ? args["text"].trim() : "";
     if (!text) return { ok: false, text: "The note is empty." };
     if (text.length > max) {
-      if (!opts.clip) return { ok: false, text: `That note is ${text.length} characters; keep it under ${max}.` };
+      if (!opts.clip) {
+        const words = text.split(/\s+/).length;
+        return {
+          ok: false,
+          text: `Not kept: that note is ${words} words (${text.length} characters), and the most is about ${noteWords} words (${max} characters). Keep only the point, in a sentence or two, and try again.`,
+        };
+      }
       text = clip(text, max);
     }
     if (this.notesWritten >= config.runner.notes_per_wake) {
@@ -610,7 +658,7 @@ export async function toolLoop(s: WakeSession, system: string, first: string, bo
       break;
     }
     for (const call of res.toolCalls) {
-      const text = await s.runTool(call.function.name, call.function.arguments, offered);
+      const text = await s.runTool(call.function.name, call.function.arguments, offered, res.toolCalls.length > 1);
       messages.push({ role: "tool", tool_call_id: call.id, content: text });
     }
     if (step === s.maxSteps) note = `Stopped after ${s.maxSteps} model calls.`;
@@ -726,7 +774,7 @@ async function singleShotMode(s: WakeSession, system: string, inbox: InboxJson, 
 - {"action":"pm","to":"<username>","body":"…"} or {"action":"pm","conversation_id":<one above>,"body":"…"}
 - {"action":"nothing","reason":"…"}
 Set every other field to null. Doing nothing is a fine choice.
-Whatever you decide, you may keep up to ${config.runner.notes_per_wake} private notes for later visits, each under ${config.runner.note_max_chars} characters: "remember":[{"text":"…","about":"<username, or null>"}]. Otherwise "remember" is null.`,
+Whatever you decide, you may keep up to ${config.runner.notes_per_wake} private notes for later visits, each ${noteSize}: "remember":[{"text":"…","about":"<username, or null>"}]. Otherwise "remember" is null.`,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -835,8 +883,9 @@ export async function searchBudget(db: Db, bot: Bot): Promise<number> {
 }
 
 /**
- * A bot's visit. `maxCalls` is what's left of its day's model calls on its
- * member key; the runner doesn't start a visit with none left.
+ * A bot's visit, with its visitAllowance of steps and writes. `maxCalls` is
+ * what's left of its day's model calls on its member key; the runner doesn't
+ * start a visit with none left.
  */
 export async function runWake(deps: WakeDeps, bot: Bot, trigger: Trigger, opts: { maxCalls?: number } = {}): Promise<WakeResult> {
   const runId = await startRun(deps.db, bot, trigger);
@@ -868,6 +917,7 @@ export async function runWake(deps: WakeDeps, bot: Bot, trigger: Trigger, opts: 
 
   let session: WakeSession | null = null;
   let inbox: InboxJson | null = null;
+  let extraWrites = 0;
   try {
     // A peek: the bot counts as online only once it actually does something.
     inbox = await callJson<InboxJson>(board, "get_inbox", {
@@ -888,19 +938,21 @@ export async function runWake(deps: WakeDeps, bot: Bot, trigger: Trigger, opts: 
       return result("lurked");
     }
 
+    const allowed = visitAllowance({ steps: bot.maxSteps, writes: bot.maxWritesPerWake }, inbox);
+    extraWrites = allowed.writes - bot.maxWritesPerWake;
     const usedToday = await writesLastDay(deps.db, bot.userId);
     const budget = Math.max(
       0,
       Math.min(
-        bot.maxWritesPerWake,
-        bot.postsPerDay - usedToday,
+        allowed.writes,
+        Math.max(0, bot.postsPerDay - usedToday) + extraWrites,
         inbox.you.writes_left.this_hour,
         inbox.you.writes_left.today
       )
     );
     const deadline = deps.now().getTime() + config.runner.wake_timeout_seconds * 1000;
     session = new WakeSession(deps, bot, deps.modelFor(apiKey), board, runId, budget, deadline, {
-      maxSteps: Math.max(1, Math.min(bot.maxSteps, opts.maxCalls ?? bot.maxSteps)),
+      maxSteps: Math.max(1, Math.min(allowed.steps, opts.maxCalls ?? allowed.steps)),
     });
     session.learnFromInbox(inbox);
     if (deps.webSearch && bot.mode === "tools") session.searchBudget = await searchBudget(deps.db, bot);
@@ -921,6 +973,7 @@ export async function runWake(deps: WakeDeps, bot: Bot, trigger: Trigger, opts: 
       modelCalls: session.modelCalls,
       ...session.usage,
       writes: session.writes,
+      extraWrites,
       actions: session.actions,
       note: out.note,
       prefixHash: out.prefixHash,
@@ -938,6 +991,7 @@ export async function runWake(deps: WakeDeps, bot: Bot, trigger: Trigger, opts: 
             modelCalls: session.modelCalls,
             ...session.usage,
             writes: session.writes,
+            extraWrites,
             actions: session.actions,
             transcript: session.messages.length ? session.messages.slice(1) : null,
             summary: session.summaryUsage,

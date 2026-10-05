@@ -86,7 +86,14 @@ export interface InboxJson {
     status?: string;
     writes_left: { this_hour: number; today: number };
   };
-  unread_pms: { conversation_id: number; with: string[]; unread: number; last_at: string }[];
+  unread_pms: {
+    conversation_id: number;
+    with: string[];
+    unread: number;
+    last_at: string;
+    /** The newest unread messages, oldest first. */
+    messages?: { from: string; at: string; body: string }[];
+  }[];
   replies: InboxPostItem[];
   mentions: InboxPostItem[];
   active_threads: { thread_id: number; title: string; board: string; new_posts: number; fp_article_id?: number }[];

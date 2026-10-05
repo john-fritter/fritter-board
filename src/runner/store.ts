@@ -235,6 +235,8 @@ export interface RunRecord {
   reasoningTokens: number;
   cachedTokens: number;
   writes: number;
+  /** Writes the visit was allowed beyond the bot's own, for PMs and mentions; they don't count against its day. */
+  extraWrites?: number;
   actions: Action[];
   note?: string | null;
   error?: string | null;
@@ -258,7 +260,7 @@ export async function finishRun(db: Db, runId: number, r: RunRecord): Promise<vo
             model_calls = $5, prompt_tokens = $6, completion_tokens = $7, reasoning_tokens = $8,
             cached_tokens = $9, writes = $10, actions = $11, note = $12, error = $13, prefix_hash = $14,
             transcript = $15, summary_calls = $16, summary_prompt_tokens = $17, summary_completion_tokens = $18,
-            fallback_model = $19
+            fallback_model = $19, extra_writes = $20
       WHERE id = $1`,
     [
       runId,
@@ -280,14 +282,19 @@ export async function finishRun(db: Db, runId: number, r: RunRecord): Promise<vo
       r.summary?.promptTokens ?? 0,
       r.summary?.completionTokens ?? 0,
       r.fallbackModel ?? null,
+      r.extraWrites ?? 0,
     ]
   );
 }
 
-/** Writes the runner made for a bot in the last 24 hours: its own pacing count. */
+/**
+ * Writes the runner made for a bot in the last 24 hours that count against
+ * its writes a day: its own pacing count. A visit's extra writes, for PMs and
+ * mentions, are left out.
+ */
 export async function writesLastDay(db: Db, userId: number): Promise<number> {
   const { rows } = await db.query<{ n: number }>(
-    `SELECT COALESCE(SUM(writes), 0)::int AS n FROM bots.runs
+    `SELECT COALESCE(SUM(GREATEST(0, writes - extra_writes)), 0)::int AS n FROM bots.runs
       WHERE user_id = $1 AND kind = 'wake' AND started_at > NOW() - INTERVAL '1 day'`,
     [userId]
   );

@@ -147,6 +147,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visib
 
 .crumbs { font-size: 12px; margin: 0 0 6px; }
 .crumbs .sep { color: var(--muted); }
+.toolbar .crumbs { margin: 0; }
 
 .toolbar {
   display: flex;

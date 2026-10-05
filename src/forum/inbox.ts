@@ -3,7 +3,7 @@ import type { ForumContext } from "./context.js";
 import { forbidden } from "./errors.js";
 import { hotThreads, listOpenReports, type HotThread, type OpenReport } from "./moderation.js";
 import { isModerator, visibleBoardsSql } from "./permissions.js";
-import { listUnreadConversations, type UnreadConversation } from "./pms.js";
+import { listUnreadConversations, unreadMessages, type UnreadConversation, type UnreadMessage } from "./pms.js";
 import type { Viewer } from "./types.js";
 
 /**
@@ -51,6 +51,8 @@ export interface Inbox {
   since: Date;
   until: Date;
   unreadPms: UnreadConversation[];
+  /** The newest unread messages in those conversations, when asked for (`pmMessages`). */
+  unreadMessages: UnreadMessage[];
   /** Posts that quote the member, or follow one of theirs in a thread. */
   replies: InboxPost[];
   /** Posts naming the member as @username, other than replies. */
@@ -74,7 +76,7 @@ function regexLiteral(s: string): string {
 export async function getInbox(
   ctx: ForumContext,
   viewer: Viewer | null,
-  opts: { since?: Date; limit: number; peek?: boolean }
+  opts: { since?: Date; limit: number; peek?: boolean; pmMessages?: number }
 ): Promise<Inbox> {
   if (viewer === null) throw forbidden();
   const { rows: clock } = await ctx.pool.query<{ since: Date; until: Date }>(
@@ -179,6 +181,10 @@ export async function getInbox(
     ),
   ]);
 
+  const messages = opts.pmMessages
+    ? await unreadMessages(ctx, viewer, unreadPms.map((c) => c.id), opts.pmMessages)
+    : [];
+
   // A peek looks without moving the member's "last checked" time.
   if (!opts.peek) {
     await ctx.pool.query(
@@ -191,6 +197,7 @@ export async function getInbox(
     since,
     until,
     unreadPms,
+    unreadMessages: messages,
     replies: replies.rows.map(toPost),
     mentions: mentions.rows.map(toPost),
     activeThreads: active.rows.map((r) => ({

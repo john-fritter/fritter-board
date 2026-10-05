@@ -240,10 +240,11 @@ From NanoGPT's chat completion and rate limit docs as of 2026-09-27:
     pay-as-you-go.
   - `npm run bot -- config` refuses model ids with routing or paid-extra
     suffixes (`:online`, `:memory`, `:fast`, `:cheap`, `:caching`).
-- **Tools.** OpenAI-compatible `tools`, `tool_choice: "auto"`, and
-  `parallel_tool_calls: false`, so steps are countable and writes happen one at
-  a time. Tool results go back as `role: "tool"` messages carrying the call's
-  id.
+- **Tools.** OpenAI-compatible `tools` and `tool_choice: "auto"`. A model may
+  call several tools in one turn (one step); they run in order, and a write
+  or moderation action among several is refused, so writes still happen one
+  at a time (decisions, 2026-10-05). Tool results go back as `role: "tool"`
+  messages carrying the call's id.
 - **Reasoning.**
   - `reasoning_effort` is sent at the top level. Any value other than `none`
     turns reasoning on.

@@ -53,6 +53,13 @@ const use = (name: string, args: Record<string, unknown>): ChatResponse => ({
   finishReason: "tool_calls",
   usage,
 });
+/** Several tool calls in one turn. */
+const useAll = (...calls: [string, Record<string, unknown>][]): ChatResponse => ({
+  content: null,
+  toolCalls: calls.map(([name, args]) => ({ id: `call_${++callN}`, type: "function", function: { name, arguments: JSON.stringify(args) } })),
+  finishReason: "tool_calls",
+  usage,
+});
 const toolNames = (req: ChatRequest) => (req.tools ?? []).map((t) => t.function.name);
 const lastMessage = (req: ChatRequest) => req.messages[req.messages.length - 1]!;
 const lastText = (req: ChatRequest) => {
@@ -303,12 +310,57 @@ async function main() {
   assert.equal(r.outcome, "done", "a manual wake doesn't lurk either");
   await setConfig(testbotId, "lurk_bias = 0");
 
+  // ── A PM waiting: its text in the inbox, more steps and writes, reads together, writes alone ──
+  const johnsConv = (await one("SELECT conversation_id FROM pm_messages WHERE body = 'Are you there?'")).conversation_id as number;
+  model.script(
+    (req) => {
+      assert.match(lastText(req), /Are you there\?/, "the unread PM's text comes with the inbox");
+      assert.match(lastText(req), /up to 2 times this visit/, "a write more for the PM");
+      return useAll(["read_thread", { thread_id: backRoom }], ["send_pm", { conversation_id: johnsConv, body: "Here." }]);
+    },
+    (req) => {
+      assert.match(lastText(req), /one to a turn/, "a write among reads isn't sent");
+      return use("send_pm", { conversation_id: johnsConv, body: "Here now." });
+    },
+    () => use("reply", { thread_id: backRoom, body: "And here." }),
+    (req) => {
+      assert.ok(!toolNames(req).includes("send_pm"), "both writes used");
+      return use("read_thread", { thread_id: backRoom });
+    },
+    () => use("read_thread", { thread_id: backRoom }),
+    () => say("Answered John.")
+  );
+  await makeDue(testbotId);
+  await runner.tick();
+  r = await lastRun(testbotId);
+  assert.equal(r.outcome, "done", r.error);
+  assert.equal(r.model_calls, 6, "two steps more for the PM");
+  assert.equal(r.writes, 2);
+  assert.equal(r.extra_writes, 1, "recorded, so the day's count leaves it out");
+  assert.deepEqual(
+    r.actions.map((a: { tool: string; ok: boolean }) => [a.tool, a.ok]),
+    [["read_thread", true], ["send_pm", false], ["send_pm", true], ["reply", true], ["read_thread", true], ["read_thread", true]]
+  );
+  assert.equal(
+    (await one("SELECT COUNT(*)::int AS n FROM pm_messages WHERE conversation_id = $1 AND body = 'Here.'", [johnsConv])).n,
+    0,
+    "the refused message wasn't sent"
+  );
+
   // ── Pacing: posts per day, and the MCP server's cap ──
   await setConfig(testbotId, "posts_per_day = 1");
   model.script((req) => {
     assert.ok(!toolNames(req).includes("reply"), "no writes left today");
     assert.match(lastText(req), /can't post or send messages this visit/);
     return say("Just reading.");
+  });
+  await makeDue(testbotId);
+  await runner.tick();
+  assert.equal((await lastRun(testbotId)).outcome, "done");
+  await sendNewMessage(forum, dan, "Testbot", "", "Got a minute?");
+  model.script((req) => {
+    assert.match(lastText(req), /You can post or send a message once this visit/, "a PM's extra write comes on top of the day's");
+    return say("Later.");
   });
   await makeDue(testbotId);
   await runner.tick();
@@ -431,7 +483,7 @@ async function main() {
   assert.equal(r.outcome, "done", r.error);
   assert.equal(r.fallback_model, null);
   assert.equal((await state(testbotId)).early_wake_at, null);
-  await setConfig(testbotId, "lurk_bias = 0, model_calls_per_day = NULL");
+  await setConfig(testbotId, "lurk_bias = 0");
   assert.equal(cli(["config", "Testbot", "--fallbacks", "none"]).code, 0);
 
   model.script(() => {
@@ -453,6 +505,7 @@ async function main() {
   assert.equal(r.outcome, "failed");
   assert.match(r.error, /T_TEST isn't set/);
   secrets["T_TEST"] = token;
+  await setConfig(testbotId, "model_calls_per_day = NULL");
   await pool.query("UPDATE bots.config SET active = FALSE WHERE user_id = $1", [testbotId]);
 
   // ── Single-shot mode ──
