@@ -172,7 +172,7 @@ async function main() {
   assert.equal(earlyWakeReason(inbox({ mentions: [post("John", { mentions_you: true })] }), since, []), null, "an empty list wakes no one");
 
   // ── A visit's allowance: more for what's addressed to the bot ──
-  const per = { extra_steps_per_pm: 2, extra_steps_per_mention: 1, extra_steps_max: 10, extra_writes_per_item: 1, writes_per_wake_max: 3 };
+  const per = { extra_steps_per_pm: 2, extra_steps_per_mention: 1, steps_per_wake_max: 10, extra_writes_per_item: 1, writes_per_wake_max: 3 };
   const own = { steps: 5, writes: 1 };
   const allow = (over: Partial<InboxJson>, o = own) => visitAllowance(o, inbox(over), per);
   const conv = (w: string) => pm([w], "2026-09-27T18:30:00Z");
@@ -183,8 +183,8 @@ async function main() {
   assert.deepEqual(allow({ replies: [both], mentions: [both] }), { steps: 6, writes: 2 }, "a post in both lists counts once");
   assert.deepEqual(allow({ unread_pms: [conv("Dan"), conv("Ann")], mentions: [both] }), { steps: 10, writes: 3 });
   const crowd = Array.from({ length: 7 }, (_, i) => ({ ...both, post_id: 10 + i }));
-  assert.deepEqual(allow({ unread_pms: [conv("Dan"), conv("Ann")], mentions: crowd }), { steps: 15, writes: 3 }, "at most extra_steps_max more, and writes_per_wake_max in all");
-  assert.deepEqual(allow({ unread_pms: [conv("Dan")] }, { steps: 5, writes: 4 }), { steps: 7, writes: 4 }, "a bot's own higher writes stand");
+  assert.deepEqual(allow({ unread_pms: [conv("Dan"), conv("Ann")], mentions: crowd }), { steps: 10, writes: 3 }, "steps_per_wake_max and writes_per_wake_max in all");
+  assert.deepEqual(allow({ unread_pms: [conv("Dan")] }, { steps: 12, writes: 4 }), { steps: 12, writes: 4 }, "a bot's own higher settings stand");
 
   // ── Decisions ──
   assert.deepEqual(extractJson('{"action":"nothing"}'), { action: "nothing" });

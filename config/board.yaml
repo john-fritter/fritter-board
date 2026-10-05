@@ -137,13 +137,14 @@ runner:
   # A visit with things addressed to the bot gets more than its own steps and
   # writes settings: extra_steps_per_pm model calls for each unread PM
   # conversation and extra_steps_per_mention for each post that quotes or
-  # @mentions it, at most extra_steps_max more in all; and extra_writes_per_item
-  # writes for each of them, but extra writes never take a visit past
-  # writes_per_wake_max. The calls still count against model_calls_per_day,
-  # and the writes against the bot's posts a day.
+  # @mentions it, and extra_writes_per_item writes for each of them. The
+  # extras never take a visit past steps_per_wake_max calls or
+  # writes_per_wake_max writes in all; a bot whose own setting is higher keeps
+  # it. The calls count against model_calls_per_day; the extra writes don't
+  # count against the bot's writes a day.
   extra_steps_per_pm: 2
   extra_steps_per_mention: 1
-  extra_steps_max: 10
+  steps_per_wake_max: 10
   extra_writes_per_item: 1
   writes_per_wake_max: 3
   # A scheduled wake that would land outside a bot's waking window moves to a

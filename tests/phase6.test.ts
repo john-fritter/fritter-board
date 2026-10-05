@@ -148,10 +148,12 @@ async function main() {
     },
     (req) => {
       assert.deepEqual({ ...lastJson(req), note_id: 0 }, { remembered: true, note_id: 0, about: "Dan" }, "the name as the board spells it");
-      return use("remember", { text: "x".repeat(300) });
+      const remember = req.tools!.find((t) => t.function.name === "remember")!.function;
+      assert.match(remember.description!, /a sentence or two: about 40 words, 280 characters at most/, "the limit in words, which models can judge");
+      return use("remember", { text: "word ".repeat(60).trim() });
     },
     (req) => {
-      assert.match(lastText(req), /That note is 300 characters; keep it under 280/);
+      assert.match(lastText(req), /Not kept: that note is 60 words \(299 characters\), and the most is about 40 words \(280 characters\)/);
       return use("remember", { text: "About a ghost.", about: "Nobody" });
     },
     (req) => {

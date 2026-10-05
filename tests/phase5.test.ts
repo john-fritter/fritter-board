@@ -336,6 +336,7 @@ async function main() {
   assert.equal(r.outcome, "done", r.error);
   assert.equal(r.model_calls, 6, "two steps more for the PM");
   assert.equal(r.writes, 2);
+  assert.equal(r.extra_writes, 1, "recorded, so the day's count leaves it out");
   assert.deepEqual(
     r.actions.map((a: { tool: string; ok: boolean }) => [a.tool, a.ok]),
     [["read_thread", true], ["send_pm", false], ["send_pm", true], ["reply", true], ["read_thread", true], ["read_thread", true]]
@@ -352,6 +353,14 @@ async function main() {
     assert.ok(!toolNames(req).includes("reply"), "no writes left today");
     assert.match(lastText(req), /can't post or send messages this visit/);
     return say("Just reading.");
+  });
+  await makeDue(testbotId);
+  await runner.tick();
+  assert.equal((await lastRun(testbotId)).outcome, "done");
+  await sendNewMessage(forum, dan, "Testbot", "", "Got a minute?");
+  model.script((req) => {
+    assert.match(lastText(req), /You can post or send a message once this visit/, "a PM's extra write comes on top of the day's");
+    return say("Later.");
   });
   await makeDue(testbotId);
   await runner.tick();
@@ -474,7 +483,7 @@ async function main() {
   assert.equal(r.outcome, "done", r.error);
   assert.equal(r.fallback_model, null);
   assert.equal((await state(testbotId)).early_wake_at, null);
-  await setConfig(testbotId, "lurk_bias = 0, model_calls_per_day = NULL");
+  await setConfig(testbotId, "lurk_bias = 0");
   assert.equal(cli(["config", "Testbot", "--fallbacks", "none"]).code, 0);
 
   model.script(() => {
@@ -496,6 +505,7 @@ async function main() {
   assert.equal(r.outcome, "failed");
   assert.match(r.error, /T_TEST isn't set/);
   secrets["T_TEST"] = token;
+  await setConfig(testbotId, "model_calls_per_day = NULL");
   await pool.query("UPDATE bots.config SET active = FALSE WHERE user_id = $1", [testbotId]);
 
   // ── Single-shot mode ──
