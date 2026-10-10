@@ -237,6 +237,58 @@ async function main() {
   assert.equal(r.outcome, "done", r.error);
   assert.equal(model.steps.length, 0);
 
+  // ── The diary, and recall over it and the board ──
+  const diary = () => all("SELECT * FROM bots.diary WHERE user_id = $1 ORDER BY id", [testbotId]);
+  let entries = await diary();
+  assert.equal(entries.length, 2, "one entry a visit");
+  assert.equal(entries[0].body, "Wrote 3 notes, about Dan. Posted nothing.");
+  assert.equal(entries[1].body, `Read “Back Room chatter” (thread ${backRoom}), #1–2. Posted nothing.`);
+  assert.equal(entries[1].run_id, r.id);
+  model.script(
+    (req) => {
+      assert.match(lastText(req), /Your diary, your latest visits, oldest first:\n- \w{3}, \w{3} \d+, \d+:\d{2} [AP]M: Wrote 3 notes, about Dan\. Posted nothing\.\n- .*Read “Back Room chatter”/);
+      return use("read_thread", { thread_id: backRoom });
+    },
+    () =>
+      use("reply", {
+        thread_id: backRoom,
+        body: '[quote="Dan" post=1]Tunnels or bridges?[/quote]\n[b]Bridges[/b], for the view. Tunnels are for people in a hurry, and nobody here is in a hurry.',
+      }),
+    () => use("recall", { query: "bridges", about: "Dan" }),
+    (req) => {
+      const res = lastJson(req);
+      assert.deepEqual(res.notes, [], "no note about Dan mentions bridges");
+      assert.deepEqual(res.diary, [], "the diary names Dan only in the entry being written");
+      assert.deepEqual(res.board_posts.map((p: { author: string; number: number }) => [p.author, p.number]), [["Dan", 1]], "the board's search, as the bot");
+      return use("recall", { query: "hurry" });
+    },
+    (req) => {
+      const res = lastJson(req);
+      assert.equal(res.board_posts[0].author, "Testbot", "its own words too");
+      return use("recall", {});
+    },
+    (req) => {
+      const res = lastJson(req);
+      assert.equal(res.diary.length, 2, "with no query, the latest diary entries");
+      assert.equal(res.board_posts, undefined, "and no board search");
+      return say("Answered Dan.");
+    }
+  );
+  await makeDue(testbotId);
+  await runner.tick();
+  assert.equal(model.steps.length, 0);
+  r = await lastRun(testbotId);
+  assert.equal(r.outcome, "done", r.error);
+  entries = await diary();
+  assert.equal(entries.length, 3);
+  assert.equal(
+    entries[2].body,
+    `Read “Back Room chatter” (thread ${backRoom}), #1–2. Replied in “Back Room chatter” (thread ${backRoom}), quoting Dan: “Bridges, for the view. Tunnels are for people in a hurry, and nobody here is in a hurry.”`
+  );
+  c = cli(["diary", "Testbot", "--limit", "1"]);
+  assert.equal(c.code, 0, c.err);
+  assert.match(c.out, /^#\d+  \w{3}, \w{3} \d+, .*Replied in “Back Room chatter”/);
+
   // ── Single-shot mode ──
   await reply(forum, dan, backRoom, "What about you, @Ash?");
   model.script((req) => {
@@ -269,14 +321,16 @@ async function main() {
     (req) => {
       assert.equal(req.tools, undefined);
       assert.match(text(req, 0), /You are Testbot/);
-      assert.match(text(req, 0), /fold the notes below into your standing notes/);
+      assert.match(text(req, 0), /Now and then you look back and rewrite them/);
+      assert.match(text(req, 0), /## People\n.*\n\n## Threads\n.*\n\n## Positions\n.*\n\n## To do\n/);
       assert.match(lastText(req), /Your standing notes now:\nDan likes bridges/);
+      assert.match(lastText(req), /Your diary so far, oldest first:\n- .*Wrote 3 notes, about Dan\.[^\n]*\n- .*\n- .*Replied in “Back Room chatter”/, "the diary since the last reflection (never, here)");
       assert.match(lastText(req), /about John: John asked about tolls\./);
       assert.doesNotMatch(lastText(req), /tunnels/, "recent notes stay out");
       return say("z".repeat(7000));
     },
     (req) => {
-      assert.match(lastText(req), /That's 7000 characters; the limit is 6000/);
+      assert.match(lastText(req), /That's 7000 characters; the limit is 6000. Shorten it, keep the four headings \(## People, ## Threads, ## Positions, ## To do\)/);
       return say("```\nDan likes bridges. John is waiting on tolls.\n```");
     }
   );
@@ -286,7 +340,7 @@ async function main() {
   assert.equal(r.kind, "compaction");
   assert.equal(r.trigger, "schedule");
   assert.equal(r.outcome, "done", r.error);
-  assert.match(r.note, /Folded 1 note/);
+  assert.match(r.note, /^Reflected on 3 diary entries and folded 1 note\(s\) into the standing notes \(\d+ characters\), without the sections People, Threads, Positions, To do\.$/, "the last try is kept, sections or not");
   assert.equal(r.model_calls, 2);
   let st = await standing(testbotId);
   assert.ok(st.id > before);
@@ -301,17 +355,26 @@ async function main() {
 
   c = cli(["compact", "Testbot"]);
   assert.equal(c.code, 0, c.err);
-  model.script((req) => {
-    assert.match(lastText(req), /Dan thinks tunnels are overrated/, "compact now folds every note");
-    return say("Everything, folded.");
-  });
+  const sectioned = "## People\nDan likes bridges.\n\n## Threads\nBack Room chatter.\n\n## Positions\nBridges.\n\n**To do**\nAnswer John about tolls.";
+  model.script(
+    (req) => {
+      assert.match(lastText(req), /Dan thinks tunnels are overrated/, "compact now folds every note");
+      assert.match(lastText(req), /No diary entries since your last look back\./);
+      return say("Everything, folded.");
+    },
+    (req) => {
+      assert.equal(lastText(req), "Put it under the four headings, ## People, ## Threads, ## Positions, ## To do, each on a line of its own, and answer with only the notes.");
+      return say(sectioned);
+    }
+  );
   await runner.tick();
   r = await lastRun(testbotId);
   assert.equal(r.trigger, "manual");
   assert.equal(r.outcome, "done", r.error);
+  assert.match(r.note, /^Reflected on 0 diary entries and folded 3 note\(s\) into the standing notes \(\d+ characters\)\.$/);
   assert.equal((await one("SELECT COUNT(*)::int AS n FROM bots.notes WHERE user_id = $1 AND archived_at IS NULL", [testbotId])).n, 0);
   assert.equal((await one("SELECT compact_requested_at FROM bots.state WHERE user_id = $1", [testbotId])).compact_requested_at, null);
-  assert.equal((await standing(testbotId)).body, "Everything, folded.");
+  assert.equal((await standing(testbotId)).body, sectioned);
 
   await pool.query("INSERT INTO bots.notes (user_id, body) VALUES ($1, 'A new thought.')", [testbotId]);
   cli(["compact", "Testbot"]);
@@ -323,14 +386,14 @@ async function main() {
   r = await lastRun(testbotId);
   assert.equal(r.outcome, "failed");
   assert.match(r.error, /wrote no standing notes/);
-  assert.equal((await standing(testbotId)).body, "Everything, folded.", "nothing saved");
+  assert.equal((await standing(testbotId)).body, sectioned, "nothing saved");
   assert.equal((await one("SELECT archived_at FROM bots.notes WHERE body = 'A new thought.'")).archived_at, null, "nothing archived");
   assert.equal((await one("SELECT compact_requested_at FROM bots.state WHERE user_id = $1", [testbotId])).compact_requested_at, null);
 
   cli(["compact", "Testbot"]);
   model.script(async () => {
     await writeStanding(pool, testbotId, "John edited this meanwhile.", "admin", "John");
-    return say("Racing the admin.");
+    return say(sectioned.replace("Bridges.", "Racing the admin."));
   });
   await runner.tick();
   r = await lastRun(testbotId);
@@ -356,6 +419,18 @@ async function main() {
   assert.equal(await compactionDue({ db: pool }, bot, now), null, "a failed attempt waits compaction_retry_hours");
   assert.equal(await compactionDue({ db: pool }, { ...bot, compactRequestedAt: now }, now), "manual", "unless asked for");
   await pool.query("DELETE FROM bots.notes WHERE body = 'A new thought.'");
+
+  // The diary alone makes a bot due, once its oldest unreflected entry is a week old.
+  await pool.query("DELETE FROM bots.runs WHERE kind = 'compaction'");
+  await pool.query("UPDATE bots.notes SET archived_at = NOW() WHERE user_id = $1", [testbotId]);
+  assert.equal(await compactionDue({ db: pool }, bot, now), null, "a diary from today can wait");
+  await pool.query("UPDATE bots.diary SET created_at = NOW() - INTERVAL '8 days' WHERE id = (SELECT MIN(id) FROM bots.diary WHERE user_id = $1)", [testbotId]);
+  assert.equal(await compactionDue({ db: pool }, bot, now), "schedule", "a week of diary is worth a look back");
+  await pool.query(
+    "INSERT INTO bots.runs (user_id, kind, trigger, outcome, mode, model, reasoning_effort, started_at) VALUES ($1, 'compaction', 'schedule', 'done', 'tools', 'x', 'low', NOW() - INTERVAL '1 day')",
+    [testbotId]
+  );
+  assert.equal(await compactionDue({ db: pool }, bot, now), null, "the last reflection saw it");
 
   // ── Summaries of long threads ──
   const { threadId: long } = await createThread(forum, dan, await boardId("back-room"), "A long talk", "Post one.");

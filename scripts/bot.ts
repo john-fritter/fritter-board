@@ -19,6 +19,7 @@
  * Its memory (phase 6):
  *   npm run bot -- standing <username> [--file PATH|-]   show, or replace, its standing notes
  *   npm run bot -- notes <username> [--about NAME] [--limit N]
+ *   npm run bot -- diary <username> [--limit N]   the runner's diary of its visits, newest first
  *   npm run bot -- compact <username>             fold every note into its standing notes at the next tick
  *
  * Moderation and the role briefs (phase 7):
@@ -39,6 +40,7 @@ import { issueBotToken, revokeBotTokens } from "../src/auth/bot-tokens.js";
 import { config } from "../src/config.js";
 import { getPool, withTransaction } from "../src/db/index.js";
 import { insertUser } from "../src/forum/accounts.js";
+import { diaryLine, searchDiary } from "../src/runner/diary.js";
 import { currentStanding, noteLine, recallNotes } from "../src/runner/memory.js";
 import { BRIEF_NAMES, briefVersions, defaultBriefs, isBriefName } from "../src/runner/briefs.js";
 import {
@@ -75,6 +77,7 @@ The runner:
 Memory:
   npm run bot -- standing <username> [--file PATH|-]
   npm run bot -- notes <username> [--about NAME] [--limit N]
+  npm run bot -- diary <username> [--limit N]
   npm run bot -- compact <username>
 
 Moderation and the role briefs:
@@ -314,6 +317,13 @@ async function main() {
         const notes = await recallNotes(pool, bot.userId, "", values.about ?? "", count(values.limit, "limit") ?? 50);
         if (notes.length === 0) console.log(`${bot.username} has no notes${values.about ? ` about ${values.about}` : ""}.`);
         for (const n of notes) console.log(`#${n.id}${n.archivedAt ? " (folded)" : ""}  ${noteLine(n)}`);
+        break;
+      }
+      case "diary": {
+        const bot = await runnerBot(pool, (await findBot(username!)).id);
+        const entries = await searchDiary(pool, bot.userId, "", "", count(values.limit, "limit") ?? 20);
+        if (entries.length === 0) console.log(`${bot.username} has no diary entries yet.`);
+        for (const e of entries) console.log(`#${e.id}  ${diaryLine(e)}`);
         break;
       }
       case "compact": {
