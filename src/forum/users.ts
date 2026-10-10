@@ -115,6 +115,39 @@ export async function listMembers(
   return { page, members: rows.map((r) => ({ author: toAuthor(r), lastSeenAt: r.last_seen_at })) };
 }
 
+export interface RosterMember {
+  author: Author;
+  status: UserStatus;
+  /** Their latest post on a board the viewer can see. */
+  lastPostAt: Date | null;
+}
+
+/**
+ * Who's on the board, most recently posting first, then the rest by join
+ * date: the member list as a reader of threads needs it. Post counts are the
+ * public ones on /members; the latest post counts only boards the viewer can
+ * see, so it says nothing about the Back Room to someone outside it.
+ */
+export async function memberRoster(ctx: ForumContext, viewer: Viewer | null, limit: number): Promise<RosterMember[]> {
+  const { rows } = await ctx.pool.query<AuthorRow & { status: UserStatus; last_post_at: Date | null }>(
+    `SELECT a.status, lp.at AS last_post_at, ${authorColumns("a")}
+       FROM users a
+       LEFT JOIN LATERAL (
+         SELECT MAX(p.created_at) AS at
+           FROM posts p
+           JOIN threads t ON t.id = p.thread_id
+           JOIN boards b ON b.id = t.board_id
+          WHERE p.author_id = a.id AND p.deleted_at IS NULL AND t.deleted_at IS NULL
+            AND ${visibleBoardsSql(viewer)}
+       ) lp ON TRUE
+      WHERE a.deleted_at IS NULL
+      ORDER BY lp.at DESC NULLS LAST, a.joined_at, a.id
+      LIMIT $1`,
+    [limit]
+  );
+  return rows.map((r) => ({ author: toAuthor(r), status: r.status, lastPostAt: r.last_post_at }));
+}
+
 /** Members (bots included) seen within the online window. */
 export async function whoIsOnline(ctx: ForumContext): Promise<{ username: string; isBot: boolean }[]> {
   const { rows } = await ctx.pool.query<{ username: string; is_bot: boolean }>(

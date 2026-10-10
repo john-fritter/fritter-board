@@ -535,6 +535,10 @@ export interface ModHistoryEntry {
   threadId: number | null;
   threadTitle: string | null;
   postId: number | null;
+  /** On a removal: the later restore that undid it. */
+  reversedBy: { at: Date; moderatorName: string; reason: string } | null;
+  /** On a warning: the post whose removal it came with, when that removal was reversed. */
+  reversedWithPost: number | null;
 }
 
 /**
@@ -542,7 +546,10 @@ export interface ModHistoryEntry {
  * posts and on reports about their posts, newest first. (Locks and moves are
  * about threads, not whoever started them, so they're left out.) For moderators, who see every board, so nothing is redacted; the
  * site rules ask for a warning before anything firmer, and this is how a
- * moderator knows whether one was given.
+ * moderator knows whether one was given. A removal that was later restored is
+ * marked reversed, and so is the warning the same moderator gave just after
+ * it (within moderation.warning_with_removal_minutes), so an overturned strike
+ * doesn't read as one that stands.
  */
 export async function memberModHistory(
   ctx: ForumContext,
@@ -579,17 +586,37 @@ export async function memberModHistory(
       LIMIT $2`,
     [member.id, limit]
   );
-  return {
-    username: member.username,
-    status: member.status,
-    entries: rows.map((r) => ({
-      at: r.created_at,
-      moderatorName: r.moderator,
-      action: r.action,
-      reason: r.reason,
-      threadId: r.thread_id,
-      threadTitle: r.thread_title,
-      postId: r.post_id,
-    })),
-  };
+  const entries: ModHistoryEntry[] = rows.map((r) => ({
+    at: r.created_at,
+    moderatorName: r.moderator,
+    action: r.action,
+    reason: r.reason,
+    threadId: r.thread_id,
+    threadTitle: r.thread_title,
+    postId: r.post_id,
+    reversedBy: null,
+    reversedWithPost: null,
+  }));
+  // Oldest first: a restore undoes the latest removal of that post before it.
+  // A restore is newer than its removal, so both are within the limit together.
+  const removals = new Map<number, ModHistoryEntry>();
+  for (const e of [...entries].reverse()) {
+    if (e.postId === null) continue;
+    if (e.action === "remove_post") removals.set(e.postId, e);
+    else if (e.action === "restore_post") {
+      const removal = removals.get(e.postId);
+      if (!removal) continue;
+      removal.reversedBy = { at: e.at, moderatorName: e.moderatorName, reason: e.reason };
+      removals.delete(e.postId);
+    }
+  }
+  // A warning goes with the same moderator's last removal of this member's
+  // posts before it, if that was within the window (remove, then warn).
+  const windowMs = config.moderation.warning_with_removal_minutes * 60_000;
+  entries.forEach((w, i) => {
+    if (w.action !== "warn") return;
+    const removal = entries.slice(i + 1).find((e) => e.action === "remove_post" && e.moderatorName === w.moderatorName);
+    if (removal?.reversedBy && w.at.getTime() - removal.at.getTime() <= windowMs) w.reversedWithPost = removal.postId;
+  });
+  return { username: member.username, status: member.status, entries };
 }

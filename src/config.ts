@@ -46,6 +46,7 @@ const BoardConfigSchema = z.object({
     hot_thread_posts: z.number().int().positive(),
     hot_thread_posters: z.number().int().positive(),
     hot_thread_window_minutes: z.number().positive(),
+    warning_with_removal_minutes: z.number().nonnegative(),
   }),
   fritter_post: z.object({
     discussion_board: z.string().min(1),
@@ -58,6 +59,7 @@ const BoardConfigSchema = z.object({
     inbox_pm_messages: z.number().int().positive(),
     inbox_pm_chars: z.number().int().positive(),
     read_thread_posts: z.number().int().positive(),
+    members_items: z.number().int().positive(),
     excerpt_chars: z.number().int().positive(),
     mod_history_items: z.number().int().positive(),
   }),

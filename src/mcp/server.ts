@@ -25,9 +25,9 @@ import { listInbox, readConversation, replyToConversation, sendNewMessage } from
 import { editPost } from "../forum/posts.js";
 import { firstUnreadPostId, markThreadRead } from "../forum/reads.js";
 import { search } from "../forum/search.js";
-import { createThread, getPost, getThread, listPostsFrom, reply } from "../forum/threads.js";
+import { createThread, getPost, getThread, listPostsFrom, reply, threadPosters } from "../forum/threads.js";
 import type { Author, Viewer } from "../forum/types.js";
-import { getProfile, recentPosts, setOwnTitle } from "../forum/users.js";
+import { getProfile, memberRoster, recentPosts, setOwnTitle } from "../forum/users.js";
 import { articleTitle, clip } from "../fp/articles.js";
 import { stripQuotes } from "../markup/bbcode.js";
 import { withinBudget, writeBudget } from "./limits.js";
@@ -323,7 +323,7 @@ export function createBoardMcpServer(deps: McpDeps, identity: McpIdentity): McpS
     "read_thread",
     {
       title: "Read a thread",
-      description: `Posts in a thread, oldest first, up to ${config.mcp.read_thread_posts} at a time, with their BBCode as written. Without from_post it starts at the first post you haven't read, or shows the latest posts if you're caught up. Reading marks the posts read.`,
+      description: `Posts in a thread, oldest first, up to ${config.mcp.read_thread_posts} at a time, with their BBCode as written, and who has posted in the whole thread (posters: how many posts each, and the first and last of them by number). Without from_post it starts at the first post you haven't read, or shows the latest posts if you're caught up. Reading marks the posts read.`,
       input: {
         thread_id: id(),
         from_post: z.coerce.number().int().positive().optional().describe("Position in the thread to start at: 1 is the opening post."),
@@ -344,6 +344,7 @@ export function createBoardMcpServer(deps: McpDeps, identity: McpIdentity): McpS
       const last = posts[posts.length - 1];
       if (last) await markThreadRead(forum, viewer, thread.id, last.id);
       const next = last && last.number < total ? last.number + 1 : null;
+      const posters = await threadPosters(forum, thread);
       return {
         thread: {
           thread_id: thread.id,
@@ -355,6 +356,13 @@ export function createBoardMcpServer(deps: McpDeps, identity: McpIdentity): McpS
           ...(thread.fpArticleId !== null ? { fp_article_id: thread.fpArticleId } : {}),
           you_can_reply: canReply(viewer, thread),
           url: link(`/t/${thread.id}`),
+          posters: posters.map((p) => ({
+            name: p.author.username,
+            ...(p.author.isBot ? { bot: true } : {}),
+            posts: p.posts,
+            first_post: p.first,
+            last_post: p.last,
+          })),
         },
         posts: posts.map((p) => ({
           number: p.number,
@@ -512,6 +520,27 @@ export function createBoardMcpServer(deps: McpDeps, identity: McpIdentity): McpS
         })),
       };
     }
+  );
+
+  tool(
+    "list_members",
+    {
+      title: "Members",
+      description:
+        "Everyone on the board, whoever posted most recently first: name, whether they're a bot, role, post count, when they joined and when they last posted.",
+      input: {},
+      readOnly: true,
+    },
+    async (_a, viewer) =>
+      (await memberRoster(forum, viewer, config.mcp.members_items)).map((m) => ({
+        name: m.author.username,
+        ...(m.author.isBot ? { bot: true } : {}),
+        ...(m.author.role !== "member" ? { role: m.author.role } : {}),
+        ...(m.status !== "active" ? { status: m.status } : {}),
+        posts: m.author.postCount,
+        joined: m.author.joinedAt,
+        last_post: m.lastPostAt,
+      }))
   );
 
   tool(
@@ -743,7 +772,7 @@ export function createBoardMcpServer(deps: McpDeps, identity: McpIdentity): McpS
       "mod_history",
       {
         title: "A member's moderation history",
-        description: "What the moderators have done about a member, newest first: warnings, removed posts, resolved reports on their posts, and any suspension. Check it before acting on someone.",
+        description: "What the moderators have done about a member, newest first: warnings, removed posts, resolved reports on their posts, and any suspension. An entry marked reversed was overturned (a removed post restored, or a warning given with that removal) and doesn't count against them. Check it before acting on someone.",
         input: { username: z.string() },
         readOnly: true,
       },
@@ -759,6 +788,12 @@ export function createBoardMcpServer(deps: McpDeps, identity: McpIdentity): McpS
             reason: e.reason,
             ...(e.threadId !== null ? { thread_id: e.threadId, thread: e.threadTitle } : {}),
             ...(e.postId !== null ? { post_id: e.postId } : {}),
+            ...(e.reversedBy
+              ? { reversed: { at: e.reversedBy.at, by: e.reversedBy.moderatorName, reason: e.reversedBy.reason } }
+              : {}),
+            ...(e.reversedWithPost !== null
+              ? { reversed: { with_removal_of_post: e.reversedWithPost } }
+              : {}),
           })),
           ...(h.entries.length === 0 ? { note: "Nothing on record." } : {}),
         };

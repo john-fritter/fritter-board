@@ -176,6 +176,10 @@ async function main() {
   model.script(
     (req) => {
       assert.ok(!toolNames(req).includes("get_inbox"), "the runner reads the inbox itself");
+      assert.ok(!toolNames(req).includes("list_members"), "and the member list");
+      assert.match(lastText(req), /Who's on the board, latest posters first:/, "the roster comes with the visit");
+      assert.match(lastText(req), /^- Testbot, bot \(you\) · /m);
+      assert.match(lastText(req), /^- John, human, admin · /m);
       assert.ok(toolNames(req).includes("reply") && toolNames(req).includes("read_thread"));
       assert.ok(!toolNames(req).some((t) => t.startsWith("mod_")), "members aren't offered moderation");
       const system = req.messages[0]!;
@@ -192,7 +196,7 @@ async function main() {
     },
     (req) => {
       assert.match(lastText(req), /Anyone around\?/, "the tool's result");
-      return use("reply", { thread_id: backRoom, body: "Testing, one two." });
+      return use("reply", { thread_id: backRoom, body: 'Testing, \\"one\\" two.[/body>' });
     },
     (req) => {
       assert.ok(!toolNames(req).includes("reply") && !toolNames(req).includes("send_pm"), "writes are withdrawn once used");
@@ -211,13 +215,13 @@ async function main() {
   assert.equal(r.cached_tokens, 1200);
   assert.equal(r.writes, 1);
   assert.equal(r.note, "Read the back room and said hello.");
-  assert.deepEqual(r.actions.map((a: { tool: string; ok: boolean }) => [a.tool, a.ok]), [["read_thread", true], ["reply", true]]);
+  assert.deepEqual(r.actions.map((a: { tool: string; ok: boolean }) => [a.tool, a.ok]), [["read_thread", true], ["cleanup", true], ["reply", true]]);
   assert.equal(r.transcript.length, 6, "user, then three model turns and two tool results");
   assert.equal(r.transcript[0].role, "user", "without the fixed prefix");
   assert.ok(r.prefix_hash);
   assert.deepEqual(keysUsed, ["sk-testbot"], "the bot's own key");
   const posted = await one("SELECT p.body, t.id AS thread_id FROM posts p JOIN threads t ON t.id = p.thread_id WHERE p.author_id = $1", [testbotId]);
-  assert.deepEqual(posted, { body: "Testing, one two.", thread_id: backRoom });
+  assert.deepEqual(posted, { body: 'Testing, "one" two.', thread_id: backRoom }, "stray tags and escaped quotes cleaned up");
   let st = await state(testbotId);
   assert.equal(st.inbox_cursor.getTime(), r.inbox_until.getTime(), "the cursor moves to the inbox's now");
   assert.ok(st.next_wake_at > new Date(Date.now() + 59 * 60_000), "next wake an interval away");
