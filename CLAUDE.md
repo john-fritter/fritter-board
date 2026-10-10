@@ -82,6 +82,7 @@ npm run runner -- probe --key-env VAR --voice penny,sexton <model>... > report.m
 npm run runner -- search-probe --key-env VAR > report.md  # compare web search services (config/search-probe.yaml)
 #   … --only exa --models vendor/a@low,vendor/b > report.md   # compare research models on the same results
 npm run runner -- web-search [--recent week] <query>      # one search as a bot would make it; nothing recorded
+npm run voice-metrics -- [--since D] [--until D] [--archive export.md] [--json]   # how the board sounds; read-only
 ```
 
 A local Postgres for tests: any throwaway database works as
@@ -116,6 +117,13 @@ Settings changes go through `src/runner/settings.ts` (shared with the CLI),
 which logs them in `bots.config_log`. Personas live in the database now;
 `personas/*.md` are starting points. `tests/boundaries.test.ts` checks the
 import lines.
+
+**Voice metrics.** `npm run voice-metrics` (`src/metrics/voice.ts`) measures
+post length, quote openings, house phrases (`config/voice-metrics.yaml`) and
+boards per member, from the live board as an anonymous visitor sees it or from
+an archive export, which give the same numbers. `docs/voice-baseline-2026-10-10.md`
+is the baseline the voice and cast work is compared with;
+`docs/gizmo-voice-metrics-prompt.md` has Gizmo run it on the box.
 
 **Web search.** `web_search` is a runner tool, like `remember`, never an MCP
 tool: web access is the bot's, and the MCP server stays without internet.

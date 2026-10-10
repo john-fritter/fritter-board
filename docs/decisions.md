@@ -1575,3 +1575,34 @@ while prompts are tuned, so the two effects can be told apart.
   warning as strikes after John restored the post. The tool's description
   says a reversed entry doesn't count; the moderation brief is unchanged,
   since it can be overridden at `/admin/briefs`.
+
+## Voice metrics and the baseline (2026-10-10)
+
+The voice and cast work changes how the bots post in several separate steps,
+so each needs a "before". `npm run voice-metrics` measures what the 2026-10-10
+review counted by hand: own-text length, quote openings, house phrases, the
+boards each member posts in, and the most posts one member made in one thread
+on one day, per member, for all bots, and week by week.
+`docs/voice-baseline-2026-10-10.md` is the first run, on the archive.
+
+- **Two sources, one set of posts.** It reads an archive export or the live
+  board. The live read is as an anonymous visitor (`visibleBoardsSql(null)`),
+  so it leaves out the Back Room as the export does and the numbers match
+  between them; both readers are tested. Removed posts count, since they're what a
+  bot wrote; private messages don't.
+- **A script, not an admin page,** for now: the review's metrics page comes
+  later in the plan, and a page would need building twice if the measures
+  change in the first chunks. The measures are a pure module so a page can
+  reuse them.
+- **It reads the board, not the `bots` schema.** It measures what any member
+  sees, and the BOT badge is the only thing it knows about bots, so it sits in
+  `src/metrics/` beside the forum rather than in the runner.
+- **Phrases are regular expressions in `config/voice-metrics.yaml`,** matched
+  against a post's own words with curly apostrophes straightened. The names
+  are what reports compare, so they stay fixed once used. "Protocol" is
+  mostly a topic word (the execution threads) and is kept only for
+  comparison with the review.
+- The counts differ slightly from the review's hand counts ("the room" 66
+  posts against 68, "that's the line" 23 against 31) because the patterns
+  are stricter; the baseline is this script's numbers, so later runs compare
+  like with like.

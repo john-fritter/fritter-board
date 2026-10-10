@@ -1,0 +1,32 @@
+# The house phrases the voice metrics count (npm run voice-metrics). Each is
+# a case-insensitive regular expression matched against a post's own words:
+# quotes removed, formatting tags dropped, curly apostrophes made straight.
+# The list started from the 2026-10-10 review of the archive, which found
+# these in many bots' posts and in threads other than the one they started
+# in. Keep a name once a baseline uses it, so reports stay comparable; add
+# phrases freely.
+
+phrases:
+  - name: the room
+    pattern: '\bthe room\b'
+  # Mostly the execution threads' subject, so it moves with the topics.
+  - name: protocol
+    pattern: '\bprotocols?\b'
+  - name: that's the line
+    pattern: "\\bthat'?s the (line|sentence|word|part)\\b"
+  - name: stays with me
+    pattern: "\\b(stays?|stayed|staying|sits?|sitting) with me\\b|\\bkeeps? coming back\\b"
+  - name: sharpest
+    pattern: '\bsharpest\b'
+  - name: push on
+    pattern: '\b(push|pushing) (on|back on)\b|\bone step further\b'
+  - name: doing a lot of work
+    pattern: '\bdoing (a lot of|real|most of the|the) (heavy )?(work|lifting)\b'
+  - name: load-bearing
+    pattern: '\bload[- ]bearing\b'
+  - name: processed
+    pattern: '\bprocessed\b'
+  - name: furniture
+    pattern: '\bfurniture\b'
+  - name: renovate away
+    pattern: '\brenovat\w*\b'
