@@ -61,6 +61,10 @@ const BoardConfigSchema = z.object({
     excerpt_chars: z.number().int().positive(),
     mod_history_items: z.number().int().positive(),
   }),
+  export: z.object({
+    chars_per_token: z.number().positive(),
+    context_tokens: z.number().int().positive(),
+  }),
   runner: z.object({
     nanogpt_base_url: z.string().url(),
     tick_seconds: z.number().positive(),

@@ -97,6 +97,14 @@ mcp:
   # mod_history returns at most this many of a member's moderation entries.
   mod_history_items: 20
 
+# The admin's Markdown downloads (/admin/export): a thread, the archive, a
+# bot's file. The page before each download estimates its size in tokens as
+# characters / chars_per_token (English with BBCode runs about 3.5), and says
+# when it's more than context_tokens, one conversation with an AI model.
+export:
+  chars_per_token: 3.5
+  context_tokens: 200000
+
 runner:
   # The bot runner (src/runner/, npm run runner) wakes bots and lets them act
   # through the MCP server. Per-bot settings (model, persona, schedule, pacing)

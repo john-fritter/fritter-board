@@ -395,6 +395,19 @@ input[type="text"], input[type="password"], textarea, select {
   padding: 5px 6px;
 }
 textarea { resize: vertical; }
+input[type="date"] {
+  display: block;
+  margin-top: 3px;
+  font: 13px/1.45 Verdana, Tahoma, sans-serif;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 4px 6px;
+}
+label.check { display: flex; align-items: baseline; gap: 6px; font-weight: normal; }
+label.check input { margin: 0; flex: none; }
+/* The admin's downloads: the size of the file before it's fetched. */
+.estimate { font-size: 14px; margin: 0 0 4px; }
 .compose textarea { font-family: "DejaVu Sans Mono", Consolas, Menlo, monospace; font-size: 13px; }
 .form-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 .compose .hint { margin: -4px 0 6px; overflow-wrap: anywhere; }
@@ -429,7 +442,7 @@ button, .button, .button:visited {
   cursor: pointer;
   text-decoration: none;
 }
-button.secondary {
+button.secondary, a.button.secondary, a.button.secondary:visited {
   background: var(--surface-alt);
   color: var(--text);
   border-color: var(--border);

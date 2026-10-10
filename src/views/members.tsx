@@ -382,6 +382,19 @@ export function AdminPage(props: {
           </table>
         </div>
       </section>
+      <section class="panel">
+        <h2 class="panel-head">Downloads</h2>
+        <div class="panel-body">
+          <p>
+            <a class="button" href={ctx.url("/admin/export/archive")}>
+              Download the archive
+            </a>
+          </p>
+          <p class="hint">
+            The whole board as one Markdown file, to read or hand to an AI model. A thread's page and each bot's page have a download of their own.
+          </p>
+        </div>
+      </section>
     </Layout>
   );
 }

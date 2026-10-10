@@ -422,6 +422,9 @@ export function BotPage(props: BotPageProps) {
             {control("wake", "Wake now", !bot.active)}
             {control("compact", "Compact notes now", !bot.active)}
             {bot.moderates && control("moderate", "Moderate now", !bot.active || !bot.modApiKeyRef)}
+            <a class="button secondary" href={ctx.url(`/admin/export/bot/${encodeURIComponent(bot.username)}`)}>
+              Download bot file
+            </a>
           </div>
           <p class="hint">Wake, compact and moderate happen at the runner's next tick, within {config.runner.tick_seconds} seconds.</p>
         </div>
