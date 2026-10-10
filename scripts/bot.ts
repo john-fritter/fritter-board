@@ -65,6 +65,7 @@ The runner:
                  [--persona-file PATH|-] [--every MIN-MAX (minutes)] [--window HH:MM-HH:MM]
                  [--steps N] [--posts-per-day N] [--writes-per-wake N] [--lurk 0..1]
                  [--boards slug,slug|all] [--key-env VAR] [--token-env VAR] [--calls-per-day N|default]
+                 [--words N|none] [--thread-cap N|default]
                  [--moderates on|off] [--mod-key-env VAR] [--mod-effort EFFORT] [--mod-steps N]
   npm run bot -- show <username>
   npm run bot -- resume <username>
@@ -114,6 +115,8 @@ async function main() {
       "key-env": { type: "string" },
       "token-env": { type: "string" },
       "calls-per-day": { type: "string" },
+      words: { type: "string" },
+      "thread-cap": { type: "string" },
       moderates: { type: "string" },
       "mod-key-env": { type: "string" },
       "mod-effort": { type: "string" },
@@ -248,6 +251,8 @@ async function main() {
           keyEnv: values["key-env"],
           tokenEnv: values["token-env"],
           callsPerDay: values["calls-per-day"],
+          words: values.words,
+          threadCap: values["thread-cap"],
           moderates: values.moderates,
           modKeyEnv: values["mod-key-env"],
           modEffort: values["mod-effort"],
@@ -371,6 +376,7 @@ function printBot(b: Bot): void {
   writes in        ${b.writeBoards ? b.writeBoards.join(", ") : "any board it can see"}
   secrets (env)    key ${b.apiKeyRef}, token ${b.boardTokenRef}
   model calls      ${b.modelCallsPerDay ?? `${config.runner.model_calls_per_day} (default)`} a day on its key
+  posts            ${b.postWords ? `about ${b.postWords} words` : "no length target"}; at most ${b.threadPostsPerDay ?? `${config.runner.thread_posts_per_day} (default)`} a day in one thread
   moderation       ${b.moderates ? `on: key ${b.modApiKeyRef ?? "(none set: no rounds)"}, reasoning ${b.modReasoningEffort}, up to ${b.modMaxSteps} model calls a round` : "off"}
   persona          ${b.personaPrompt ? `${b.personaPrompt.length} characters` : "(none yet)"}
   next wake        ${at(b.nextWakeAt)}${b.earlyWakeAt ? `, early wake ${at(b.earlyWakeAt)} (${b.earlyWakeTrigger})` : ""}

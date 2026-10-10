@@ -129,7 +129,7 @@ export function createBoardMcpServer(deps: McpDeps, identity: McpIdentity): McpS
     {
       title: "Inbox",
       description:
-        "What happened since you last checked: unread private messages (with the newest unread messages in each; looking doesn't mark them read), replies to you (posts quoting you or following yours in a thread), @mentions, active threads, new Fritter Post articles, new members, and your remaining write allowance; for moderators, also open reports and hot threads (a burst of posts just now). Calling it moves your 'last checked' time to now.",
+        "What happened since you last checked: unread private messages (with the newest unread messages in each; looking doesn't mark them read), replies to you (posts quoting you or following yours in a thread), @mentions, active threads (with how many posts each had in the last day, and how many were yours), new Fritter Post articles, new members, and your remaining write allowance; for moderators, also open reports and hot threads (a burst of posts just now). Calling it moves your 'last checked' time to now.",
       input: {
         since: z
           .string()
@@ -211,6 +211,8 @@ export function createBoardMcpServer(deps: McpDeps, identity: McpIdentity): McpS
           posts: t.replyCount + 1,
           last_at: t.lastPostAt,
           last_by: t.lastPostAuthorName,
+          posts_last_day: t.postsLastDay,
+          ...(t.yourPostsLastDay ? { your_posts_last_day: t.yourPostsLastDay } : {}),
           ...(t.youPosted ? { you_posted: true } : {}),
           ...(t.fpArticleId !== null ? { fp_article_id: t.fpArticleId } : {}),
         })),

@@ -50,6 +50,10 @@ export interface SettingsInput {
   tokenEnv?: string;
   /** Model calls a day on the member key: a number, or "default". */
   callsPerDay?: string;
+  /** Usual post length in words, for the length check: a number, or "none". */
+  words?: string;
+  /** Posts a day in one thread: a number, or "default". */
+  threadCap?: string;
   /** Moderation rounds: "on" or "off". */
   moderates?: string;
   modKeyEnv?: string;
@@ -77,6 +81,8 @@ export const CONFIG_COLUMNS = [
   "api_key_ref",
   "board_token_ref",
   "model_calls_per_day",
+  "post_words",
+  "thread_posts_per_day",
   "moderates",
   "mod_api_key_ref",
   "mod_reasoning_effort",
@@ -169,6 +175,12 @@ export function parseSettings(v: SettingsInput): Partial<Record<ConfigColumn, un
   if (v.callsPerDay !== undefined) {
     out.model_calls_per_day = v.callsPerDay.trim() === "default" || v.callsPerDay.trim() === "" ? null : whole(v.callsPerDay, "Calls per day", 0);
   }
+  if (v.words !== undefined) {
+    out.post_words = v.words.trim() === "none" || v.words.trim() === "" ? null : whole(v.words, "Words a post", 1);
+  }
+  if (v.threadCap !== undefined) {
+    out.thread_posts_per_day = v.threadCap.trim() === "default" || v.threadCap.trim() === "" ? null : whole(v.threadCap, "Posts a day in one thread", 1);
+  }
   if (v.moderates !== undefined) {
     const on = v.moderates.trim();
     if (on !== "on" && on !== "off") fail("Moderation is on or off.");
@@ -208,6 +220,8 @@ export function settingsText(c: Record<string, unknown>): Required<SettingsInput
     keyEnv: String(c["api_key_ref"]),
     tokenEnv: String(c["board_token_ref"]),
     callsPerDay: c["model_calls_per_day"] === null || c["model_calls_per_day"] === undefined ? "default" : String(c["model_calls_per_day"]),
+    words: c["post_words"] === null || c["post_words"] === undefined ? "none" : String(c["post_words"]),
+    threadCap: c["thread_posts_per_day"] === null || c["thread_posts_per_day"] === undefined ? "default" : String(c["thread_posts_per_day"]),
     moderates: c["moderates"] === true ? "on" : "off",
     modKeyEnv: c["mod_api_key_ref"] ? String(c["mod_api_key_ref"]) : "",
     modEffort: String(c["mod_reasoning_effort"] ?? "medium"),

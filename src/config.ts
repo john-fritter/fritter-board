@@ -3,6 +3,19 @@ import path from "path";
 import YAML from "yaml";
 import { z } from "zod";
 
+/** A phrase the runner's posting checks look for: a case-insensitive regular expression, and what the bot is told it did. */
+const StylePattern = z.object({
+  pattern: z.string().min(1).refine((p) => {
+    try {
+      new RegExp(p, "i");
+      return true;
+    } catch {
+      return false;
+    }
+  }, "not a valid regular expression"),
+  say: z.string().min(1),
+});
+
 const BoardConfigSchema = z.object({
   site: z.object({ name: z.string(), tagline: z.string(), timezone: z.string() }),
   pagination: z.object({
@@ -132,6 +145,18 @@ const BoardConfigSchema = z.object({
     web_searches_per_bot_per_day: z.number().int().nonnegative(),
     web_searches_per_day: z.number().int().nonnegative(),
     search_probe_parallel_calls: z.number().int().positive(),
+    style_refusals_per_visit: z.number().int().nonnegative(),
+    house_tics: z.array(StylePattern),
+    worn_phrases: z.array(StylePattern),
+    worn_phrase_thread_posts: z.number().int().positive(),
+    own_posts_checked: z.number().int().nonnegative(),
+    own_phrase_words: z.number().int().min(3),
+    quote_open_window: z.number().int().nonnegative(),
+    quote_open_max: z.number().int().positive(),
+    length_tolerance: z.number().min(1),
+    long_post_factor: z.number().min(1),
+    thread_posts_per_day: z.number().int().positive(),
+    busy_thread_posts: z.number().int().positive(),
   }),
 });
 

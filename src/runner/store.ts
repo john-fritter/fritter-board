@@ -42,6 +42,10 @@ export interface Bot {
   boardTokenRef: string;
   /** Model calls a day on the member key; null is runner.model_calls_per_day. */
   modelCallsPerDay: number | null;
+  /** Usual post length in words, for the length check (./posting.ts); null is none. */
+  postWords: number | null;
+  /** Posts a day in one thread; null is runner.thread_posts_per_day. */
+  threadPostsPerDay: number | null;
   // Moderation cycles, for a bot that moderates.
   moderates: boolean;
   modApiKeyRef: string | null;
@@ -82,6 +86,8 @@ interface BotRow {
   api_key_ref: string;
   board_token_ref: string;
   model_calls_per_day: number | null;
+  post_words: number | null;
+  thread_posts_per_day: number | null;
   moderates: boolean;
   mod_api_key_ref: string | null;
   mod_reasoning_effort: ReasoningEffort;
@@ -130,6 +136,8 @@ function toBot(r: BotRow): Bot {
     apiKeyRef: r.api_key_ref,
     boardTokenRef: r.board_token_ref,
     modelCallsPerDay: r.model_calls_per_day,
+    postWords: r.post_words,
+    threadPostsPerDay: r.thread_posts_per_day,
     moderates: r.moderates,
     modApiKeyRef: r.mod_api_key_ref,
     modReasoningEffort: r.mod_reasoning_effort,

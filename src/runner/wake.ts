@@ -15,6 +15,7 @@ import {
   type ToolCall,
   type ToolDefinition,
 } from "./model.js";
+import { PostingChecks, postingRules } from "./posting.js";
 import {
   finishRun,
   insertSearch,
@@ -288,6 +289,8 @@ export class WakeSession extends MeteredModel {
   /** Web searches made this wake, and how many it may make. */
   searches = 0;
   searchBudget = 0;
+  /** The posting checks (./posting.ts), on an ordinary visit; null in moderation rounds. */
+  posting: PostingChecks | null = null;
 
   constructor(
     deps: WakeDeps,
@@ -427,6 +430,8 @@ export class WakeSession extends MeteredModel {
           this.record("cleanup", JSON.stringify({ tool: name, field }), true, "Removed stray markup or escaped quotes before posting.");
         }
       }
+      const sentBack = this.postingRefusal(name, args);
+      if (sentBack) return this.record(name, rawArgs, false, sentBack);
     }
     if (modAction && this.modActions >= this.modActionLimit) {
       return this.record(
@@ -447,9 +452,47 @@ export class WakeSession extends MeteredModel {
         this.learn(name, args, res.text);
         if (WRITE_TOOLS.has(name)) this.writes++;
         if (modAction) this.modActions++;
+        await this.keepPost(name, args, res.text);
       }
     }
     return this.record(name, JSON.stringify(args), res.ok, res.text);
+  }
+
+  /**
+   * The posting checks' answer to a post (./posting.ts): the thread's daily
+   * cap for a reply, then its wording and length. A post let through with
+   * problems, once the visit can't send any more back, is noted in the log.
+   */
+  private postingRefusal(tool: string, args: Record<string, unknown>): string | null {
+    if (!this.posting || !(tool === "reply" || tool === "new_thread" || tool === "edit_post")) return null;
+    const threadId = tool === "reply" ? Number(args["thread_id"]) : null;
+    if (threadId !== null) {
+      const capped = this.posting.capRefusal(threadId);
+      if (capped) return capped;
+    }
+    const body = typeof args["body"] === "string" ? args["body"] : "";
+    if (!body.trim()) return null;
+    const { refusal, passed } = this.posting.styleCheck(tool === "edit_post" ? "edit" : tool, body, threadId);
+    if (passed) this.record("style", JSON.stringify({ tool }), true, `Let through, with no more send-backs this visit: ${passed}`);
+    return refusal;
+  }
+
+  /** A post that went up, kept for the posting checks. Never fails the visit: the post is already on the board. */
+  private async keepPost(tool: string, args: Record<string, unknown>, text: string): Promise<void> {
+    if (!this.posting || !(tool === "reply" || tool === "new_thread" || tool === "edit_post")) return;
+    const body = typeof args["body"] === "string" ? args["body"] : "";
+    try {
+      if (tool === "edit_post") {
+        if (body) await this.posting.recordEdit(this.deps.db, this.bot.userId, Number(args["post_id"]), body);
+        return;
+      }
+      const json = JSON.parse(text) as { thread_id?: number; post_id?: number };
+      const threadId = tool === "reply" ? Number(args["thread_id"]) : json.thread_id;
+      if (!threadId || !json.post_id) return;
+      await this.posting.record(this.deps.db, this.bot.userId, this.runId, { threadId, postId: json.post_id, body });
+    } catch (err) {
+      this.record("posting", JSON.stringify({ tool }), false, `Couldn't keep the post for the posting checks: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   /**
@@ -461,6 +504,7 @@ export class WakeSession extends MeteredModel {
     const res = await this.board.call("read_thread", args);
     if (!res.ok) return res;
     let json = JSON.parse(res.text) as ThreadJson;
+    this.posting?.noteThread(json);
     if (args["from_post"] === undefined && this.deps.summarizer) {
       try {
         const summarized = await summarizedRead(
@@ -809,7 +853,7 @@ async function singleShotMode(s: WakeSession, system: string, inbox: InboxJson, 
   // Threads worth showing: where the bot was quoted or mentioned, then the busiest.
   const picks: number[] = [];
   const add = (id: number, slug: string) => {
-    if (picks.length < limit && !picks.includes(id) && allowed(slug)) picks.push(id);
+    if (picks.length < limit && !picks.includes(id) && allowed(slug) && !s.posting?.capped(id)) picks.push(id);
   };
   for (const p of [...inbox.replies, ...inbox.mentions]) add(p.thread_id, p.board);
   for (const t of [...inbox.active_threads].sort((a, b) => b.new_posts - a.new_posts)) add(t.thread_id, t.board);
@@ -870,6 +914,11 @@ Whatever you decide, you may keep up to ${config.runner.notes_per_wake} private 
       if (!parsed.success) throw new Error("That JSON isn't one of the decisions described.");
       decision = parsed.data;
       problem = decisionProblem(decision, offeredThreads, offeredConversations, article?.fp_article_id ?? null) ?? "";
+      // The posting checks get one go, on the first answer: a second is posted as written.
+      if (!problem && attempt === 1 && s.posting && (decision.action === "reply" || decision.action === "new_thread")) {
+        const { refusal } = s.posting.styleCheck(decision.action, decision.body ?? "", decision.action === "reply" ? (decision.thread_id ?? null) : null);
+        problem = refusal ?? "";
+      }
       if (problem) decision = null;
     } catch (err) {
       problem = err instanceof Error ? err.message : String(err);
@@ -878,6 +927,7 @@ Whatever you decide, you may keep up to ${config.runner.notes_per_wake} private 
   if (decision === null) {
     throw new Error(`The model didn't give a usable decision: ${problem}`);
   }
+  if (s.posting) s.posting.refusalsLeft = 0;
 
   let note: string;
   const body = decision.body ?? "";
@@ -1030,13 +1080,24 @@ export async function runWake(deps: WakeDeps, bot: Bot, trigger: Trigger, opts: 
     });
     session.learnFromInbox(inbox);
     if (deps.webSearch && bot.mode === "tools") session.searchBudget = await searchBudget(deps.db, bot);
-    const header = wakeHeader(bot, deps.now(), budget) + (waiting ? ` (You're up early: ${waiting}.)` : "");
+    const posting = await PostingChecks.load(
+      deps.db,
+      bot.userId,
+      postingRules(bot),
+      deps.now(),
+      bot.mode === "tools" ? config.runner.style_refusals_per_visit : Math.min(1, config.runner.style_refusals_per_visit)
+    );
+    posting.learnInbox(inbox);
+    session.posting = posting;
+    const header =
+      wakeHeader(bot, deps.now(), budget) + (waiting ? ` (You're up early: ${waiting}.)` : "") + (budget > 0 ? ` ${posting.header()}` : "");
     const roster = await loadRoster(board, bot.username);
     const memory = [roster, await loadMemory(deps.db, bot, deps.now(), session.shownNotes)].filter(Boolean).join("\n\n");
     const runnerBrief = session.searchBudget > 0 ? `${RUNNER_BRIEF} ${WEB_SEARCH_BRIEF}` : RUNNER_BRIEF;
     const system = systemPrompt(board, bot, await currentBriefs(deps.db), runnerBrief);
     // Reports and hot threads are for moderation rounds; a visit is a member's.
-    const { open_reports: _reports, hot_threads: _hot, ...shown } = inbox;
+    const { open_reports: _reports, hot_threads: _hot, ...rest } = inbox;
+    const shown = posting.annotate(rest);
 
     const out =
       bot.mode === "tools"

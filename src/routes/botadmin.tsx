@@ -61,6 +61,8 @@ const SETTINGS_FIELDS: (keyof SettingsInput)[] = [
   "keyEnv",
   "tokenEnv",
   "callsPerDay",
+  "words",
+  "threadCap",
   "moderates",
   "modKeyEnv",
   "modEffort",

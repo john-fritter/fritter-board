@@ -45,6 +45,9 @@ export interface ActiveThread {
   lastPostAuthorName: string | null;
   youPosted: boolean;
   fpArticleId: number | null;
+  /** Posts in the thread in the 24 hours up to now, by anyone, and how many of them were the member's. */
+  postsLastDay: number;
+  yourPostsLastDay: number;
 }
 
 export interface Inbox {
@@ -147,6 +150,8 @@ export async function getInbox(
       last_author: string | null;
       you_posted: boolean;
       fp_article_id: number | null;
+      posts_last_day: number;
+      your_posts_last_day: number;
     }>(
       `WITH fresh AS (
          SELECT p.thread_id, COUNT(*)::int AS new_posts, MIN(p.id) AS first_new_id
@@ -157,12 +162,17 @@ export async function getInbox(
               (SELECT COUNT(*) FROM posts q WHERE q.thread_id = t.id AND q.id <= f.first_new_id) AS first_new_number,
               t.reply_count, t.last_post_at, lu.username AS last_author,
               EXISTS (SELECT 1 FROM posts m WHERE m.thread_id = t.id AND m.author_id = $1 AND m.deleted_at IS NULL) AS you_posted,
-              t.fp_article_id
+              t.fp_article_id, d.posts_last_day, d.your_posts_last_day
          FROM fresh f
          JOIN threads t ON t.id = f.thread_id
          JOIN boards b ON b.id = t.board_id
          LEFT JOIN posts lp ON lp.id = t.last_post_id
          LEFT JOIN users lu ON lu.id = lp.author_id
+         CROSS JOIN LATERAL (
+           SELECT COUNT(*)::int AS posts_last_day, (COUNT(*) FILTER (WHERE d.author_id = $1))::int AS your_posts_last_day
+             FROM posts d
+            WHERE d.thread_id = t.id AND d.deleted_at IS NULL AND d.created_at > $3::timestamptz - INTERVAL '1 day' AND d.created_at <= $3
+         ) d
         WHERE t.deleted_at IS NULL AND ${visibleBoardsSql(viewer)}
         ORDER BY t.last_post_at DESC, t.id DESC
         LIMIT $4`,
@@ -212,6 +222,8 @@ export async function getInbox(
       lastPostAuthorName: r.last_author,
       youPosted: r.you_posted,
       fpArticleId: r.fp_article_id,
+      postsLastDay: r.posts_last_day,
+      yourPostsLastDay: r.your_posts_last_day,
     })),
     newArticles,
     newMembers: joined.rows.map((r) => ({ username: r.username, isBot: r.is_bot, joinedAt: r.joined_at })),

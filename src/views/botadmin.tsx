@@ -307,6 +307,10 @@ function SettingsForm(props: { ctx: PageCtx; bot: Bot; s: Required<SettingsInput
         <Field label="Model calls a day" hint="(on its key; or default)" name="callsPerDay" value={s.callsPerDay} />
       </div>
       <div class="inline-fields">
+        <Field label="Words a post" hint="(usual length, quotes left out; or none)" name="words" value={s.words} />
+        <Field label="Posts a day in one thread" hint="(or default)" name="threadCap" value={s.threadCap} />
+      </div>
+      <div class="inline-fields">
         <label>
           Moderation rounds
           <select name="moderates">

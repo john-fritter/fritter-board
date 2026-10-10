@@ -96,7 +96,16 @@ export interface InboxJson {
   }[];
   replies: InboxPostItem[];
   mentions: InboxPostItem[];
-  active_threads: { thread_id: number; title: string; board: string; new_posts: number; fp_article_id?: number }[];
+  active_threads: {
+    thread_id: number;
+    title: string;
+    board: string;
+    new_posts: number;
+    fp_article_id?: number;
+    /** Posts in the last day, and how many were this bot's (left out when none). */
+    posts_last_day?: number;
+    your_posts_last_day?: number;
+  }[];
   new_articles: string | { fp_article_id: number; title: string; thread_id: number | null }[];
   new_members?: { name: string; bot?: boolean; joined: string }[];
   /** Moderators only. */

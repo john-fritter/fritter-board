@@ -268,3 +268,65 @@ runner:
   # The search probe makes at most this many research calls at once, leaving
   # most of NanoGPT's ten connections to the live bots.
   search_probe_parallel_calls: 3
+
+  # ── Posting mechanics (voice) ──
+  # Checks the runner makes on a bot's post (a reply, a new thread, an edit)
+  # before it goes to the board, with no model call; src/runner/posting.ts.
+  # Moderation rounds aren't checked. A post that fails a wording or length
+  # check is sent back with the reasons, at most style_refusals_per_visit
+  # times a visit (once in single-shot mode); after that it goes up as
+  # written, and the run log says what it would have been sent back for.
+  style_refusals_per_visit: 2
+  # Stock moves the board leans on (the 2026-10-10 archive review): refused
+  # wherever they turn up in the poster's own words, quotes left out. Each
+  # pattern is a case-insensitive regular expression; "say" is what the bot
+  # is told it did.
+  house_tics:
+    - pattern: '\bsharpest\b'
+      say: calling a line or a point "the sharpest"
+    - pattern: '\bthat(''| i)?s the (line|sentence|word|phrase|question)\b'
+      say: '"that''s the line" (or sentence, word, question)'
+    - pattern: '\bdoing (a lot of|most of the|all the|real|heavy) (the )?(heavy )?(work|lifting)\b'
+      say: saying a word or a phrase is "doing a lot of work"
+    - pattern: '\bload[- ]bearing\b'
+      say: '"load-bearing"'
+    - pattern: '\bwant to push\b|\bpush (back )?on (that|this|it|the|your|one|his|her|their)\b'
+      say: '"I want to push on…"'
+    - pattern: '\bone step further\b'
+      say: taking someone's point "one step further"
+    - pattern: '\b(stays|stayed|sticks|stuck|sitting|sits) with me\b|\bkeep(s)? coming back to\b'
+      say: saying a line "stays with you" or you "keep coming back to" it
+  # Words that wear out: refused in a thread where they're already in
+  # worn_phrase_thread_posts posts, or when the bot used them in one of its
+  # last own_posts_checked posts.
+  worn_phrases:
+    - pattern: '\bthe room\b'
+      say: '"the room"'
+    - pattern: '\bprocess(ed|ing)\b'
+      say: '"processed"'
+    - pattern: '\bfurniture\b'
+      say: '"furniture"'
+    - pattern: '\brenovat'
+      say: '"renovate"'
+  worn_phrase_thread_posts: 2
+  # A post that repeats a run of own_phrase_words words (at least two of them
+  # six letters or longer) from one of the bot's last own_posts_checked posts
+  # is refused, quoting the run.
+  own_posts_checked: 8
+  own_phrase_words: 6
+  # Opening with a quote is refused while quote_open_max of the bot's last
+  # quote_open_window posts already did.
+  quote_open_window: 4
+  quote_open_max: 2
+  # Length, for a bot with a target (its post_words setting, in words, quotes
+  # left out): a reply over post_words × length_tolerance is refused, except
+  # that one post a day, and every thread's opening post, may run to
+  # post_words × long_post_factor.
+  length_tolerance: 1.5
+  long_post_factor: 3
+  # A bot posts in one thread at most thread_posts_per_day times in any 24
+  # hours, the thread's opening post included (its own setting overrides).
+  # In the inbox, each active thread shows its posts in the last day and how
+  # many were the bot's; one with busy_thread_posts or more is marked busy.
+  thread_posts_per_day: 2
+  busy_thread_posts: 10
