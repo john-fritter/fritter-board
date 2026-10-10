@@ -116,7 +116,7 @@ async function main() {
   // ── Tools on offer ──
   const ashTools = (await a.listTools()).tools.map((t) => t.name);
   const margTools = (await m.listTools()).tools.map((t) => t.name);
-  for (const t of ["get_inbox", "list_boards", "list_threads", "read_thread", "read_article", "search", "get_user", "reply", "new_thread", "edit_post", "send_pm", "read_pms", "set_title"]) {
+  for (const t of ["get_inbox", "list_boards", "list_threads", "read_thread", "read_article", "search", "get_user", "reply", "new_thread", "edit_post", "send_pm", "read_pms", "set_title", "list_members"]) {
     assert.ok(ashTools.includes(t), `members have ${t}`);
   }
   assert.ok(!ashTools.some((t) => t.startsWith("mod_")), "members aren't offered moderation");
@@ -200,6 +200,23 @@ async function main() {
   assert.equal(thread.posts[0].author.name, "Ash");
   assert.equal(thread.posts[0].author.bot, true);
   assert.equal(thread.posts[1].author.bot, undefined);
+  assert.deepEqual(
+    thread.thread.posters,
+    [
+      { name: "Ash", bot: true, posts: 1, first_post: 1, last_post: 1 },
+      { name: "Dan", posts: 1, first_post: 2, last_post: 2 },
+    ],
+    "who has posted, numbered as the thread is"
+  );
+
+  // ── Who's on the board ──
+  const members = await call(a, "list_members");
+  assert.deepEqual(members.slice(0, 2).map((x: { name: string }) => x.name), ["Dan", "Ash"], "latest posters first");
+  const danRow = members.find((x: { name: string }) => x.name === "Dan");
+  assert.equal(danRow.bot, undefined);
+  assert.equal(danRow.posts, 4);
+  assert.equal(members.find((x: { name: string }) => x.name === "John").role, "admin");
+  assert.equal(members.find((x: { name: string }) => x.name === "John").last_post, null, "hasn't posted");
 
   // ── Writing ──
   r = await call(a, "reply", { thread_id: t1, body: `[quote="Dan" post=${danReply}]Hello yourself.[/quote]\nQuite.` });
@@ -380,6 +397,13 @@ async function main() {
   assert.match(await refused(a, "reply", { thread_id: t2, body: "hi" }), /Only members/, "suspended bots can't post");
   assert.match(await refused(a, "send_pm", { to: "Dan", body: "hi" }), /Only members/);
   assert.equal((await call(a, "read_thread", { thread_id: t2 })).thread.thread_id, t2, "but can still read");
+  const { postId: lastWord } = await reply(forum, dan, secret, "One more thing about the ferry.");
+  const lastWordAt = (await pool.query("SELECT created_at FROM posts WHERE id = $1", [lastWord])).rows[0].created_at as Date;
+  const lastPost = async (c: Client) =>
+    (await call(c, "list_members")).find((x: { name: string }) => x.name === "Dan").last_post as string;
+  assert.equal(await lastPost(m), lastWordAt.toISOString(), "members see a Back Room post as Dan's latest");
+  assert.ok(new Date(await lastPost(a)) < lastWordAt, "nor in the member list's latest posts");
+  assert.equal((await call(a, "list_members")).find((x: { name: string }) => x.name === "Ash").status, "suspended");
   await pool.query("UPDATE users SET status = 'active' WHERE id = $1", [ash.id]);
 
   // ── Bans, revocation, rotation ──

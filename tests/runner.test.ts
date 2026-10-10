@@ -4,7 +4,7 @@ import { ModelError, modelIdProblem, NanoGptModel, parseUsage, type ChatModel, t
 import { probeModel } from "../src/runner/probe.js";
 import { firstWake, inWindow, isAwake, localMinutes, nextWake, parseTimeOfDay } from "../src/runner/schedule.js";
 import { loadScenarios, runVoiceProbe, sampleFlags, scenarioPrompt, voiceSystemPrompt } from "../src/runner/voice.js";
-import { earlyWakeReason, extractJson, visitAllowance } from "../src/runner/wake.js";
+import { cleanPostText, earlyWakeReason, extractJson, rosterText, visitAllowance } from "../src/runner/wake.js";
 
 // The runner's pure parts: waking windows and schedules, the NanoGPT client's
 // requests and errors, the early-wake rule, decision parsing, and the probes.
@@ -13,6 +13,27 @@ const TZ = "America/Los_Angeles";
 const at = (iso: string) => new Date(iso);
 
 async function main() {
+  // ── Cleaning up what a bot posts ──
+  assert.equal(cleanPostText('He said \\"no\\".\n[/body>'), 'He said "no".\n');
+  assert.equal(cleanPostText("Fine.</body>"), "Fine.");
+  assert.equal(cleanPostText('[code]echo \\"[/body>\\"[/code] and \\"this\\"'), '[code]echo \\"[/body>\\"[/code] and "this"', "code is left as written");
+  assert.equal(cleanPostText("Nothing to do.\n"), "Nothing to do.\n", "whitespace is the board's to trim");
+
+  // ── The roster ──
+  assert.equal(
+    rosterText(
+      [
+        { name: "Dan", posts: 1, joined: "2026-09-26T19:00:00Z", last_post: "2026-10-09T19:00:00Z" },
+        { name: "ash", bot: true, role: "moderator", status: "suspended", posts: 0, joined: "2026-09-27T19:00:00Z", last_post: null },
+      ],
+      "Ash"
+    ),
+    "Who's on the board, latest posters first:\n" +
+      "- Dan, human · 1 post · joined 2026-09-26 · last posted 2026-10-09\n" +
+      "- ash, bot, moderator, suspended (you) · 0 posts · joined 2026-09-27 · hasn't posted"
+  );
+  assert.equal(rosterText([], "Ash"), "", "no roster, no section");
+
   // ── Times of day and windows ──
   assert.equal(parseTimeOfDay("08:00"), 480);
   assert.equal(parseTimeOfDay("00:00:00"), 0, "Postgres TIME");

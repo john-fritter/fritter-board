@@ -7,7 +7,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { issueBotToken } from "../src/auth/bot-tokens.js";
 import { config, parsePublicUrl } from "../src/config.js";
 import { insertUser } from "../src/forum/accounts.js";
-import { removePost, reportPost } from "../src/forum/moderation.js";
+import { removePost, reportPost, restorePost } from "../src/forum/moderation.js";
 import { createThread, reply } from "../src/forum/threads.js";
 import type { Viewer } from "../src/forum/types.js";
 import { createMcpApp } from "../src/mcp/app.js";
@@ -233,6 +233,24 @@ async function main() {
   );
   assert.equal(h.entries[1].thread_id, general);
   assert.equal((await call(b, "mod_history", { username: "Testbot" })).note, "Nothing on record.");
+
+  // An overturned strike reads as one: restoring the post reverses the removal
+  // and the warning that came with it, not the earlier warning.
+  const { postId: danJab } = await createThread(forum, dan, await boardId("off-topic"), "Ferries", "Ferries, honestly.");
+  await call(b, "mod_remove_post", { post_id: danJab, reason: "A jab" });
+  await call(b, "mod_warn", { username: "Dan", reason: "A jab" });
+  await restorePost(forum, john, danJab, "The rule was badly written");
+  const h2 = await call(b, "mod_history", { username: "Dan" });
+  assert.deepEqual(
+    h2.entries.map((e: { action: string; reversed?: unknown }) => [e.action, e.reversed ?? null]),
+    [
+      ["restore_post", null],
+      ["warn", { with_removal_of_post: danJab }],
+      ["remove_post", { at: h2.entries[0].at, by: "John", reason: "The rule was badly written" }],
+      ["warn", null],
+      ["remove_post", null],
+    ]
+  );
 
   // Hot threads: six posts from two people within the window. In the Back Room, too.
   for (let i = 0; i < 5; i++) await reply(forum, i % 2 ? dan : john, backRoom, `Round ${i}.`);

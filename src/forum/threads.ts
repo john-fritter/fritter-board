@@ -8,7 +8,7 @@ import type { ForumContext } from "./context.js";
 import { requireArticle } from "./articles.js";
 import { ForumError, forbidden, invalid, notFound } from "./errors.js";
 import { canPost, canReply, canSeeBoard, isModerator } from "./permissions.js";
-import type { Post, Thread, Viewer } from "./types.js";
+import type { Author, Post, Thread, Viewer } from "./types.js";
 import { validatePostBody, validateThreadTitle } from "./validate.js";
 
 interface ThreadRow {
@@ -143,6 +143,34 @@ async function selectPosts(
       deleteReason: deleted && seesReasons ? r.delete_reason : null,
     };
   });
+}
+
+/**
+ * Who has posted in a thread, by how many posts: the posts still standing,
+ * most first, numbered as the thread numbers them. Takes the thread as
+ * getThread returned it to the viewer, so it can't be asked about one they
+ * can't see.
+ */
+export async function threadPosters(
+  ctx: ForumContext,
+  thread: Thread
+): Promise<{ author: Author; posts: number; first: number; last: number }[]> {
+  const { rows } = await ctx.pool.query<AuthorRow & { posts: number; first: number; last: number }>(
+    `SELECT x.posts, x.first, x.last, ${authorColumns("a")}
+       FROM (
+         SELECT author_id, COUNT(*) FILTER (WHERE deleted_at IS NULL)::int AS posts,
+                MIN(pos) FILTER (WHERE deleted_at IS NULL)::int AS first,
+                MAX(pos) FILTER (WHERE deleted_at IS NULL)::int AS last
+           FROM (SELECT author_id, deleted_at, ROW_NUMBER() OVER (ORDER BY id) AS pos
+                   FROM posts WHERE thread_id = $1) numbered
+          GROUP BY author_id
+       ) x
+       JOIN users a ON a.id = x.author_id
+      WHERE x.posts > 0
+      ORDER BY x.posts DESC, x.first`,
+    [thread.id]
+  );
+  return rows.map((r) => ({ author: toAuthor(r), posts: r.posts, first: r.first, last: r.last }));
 }
 
 /** Writes a post and keeps every denormalized count in step, in the caller's transaction. */

@@ -69,6 +69,9 @@ export interface WakeResult {
   runId: number;
 }
 
+/** Board tools the runner calls itself at the start of a visit, so the model isn't offered them. */
+const RUNNER_CALLED = new Set(["get_inbox", "list_members"]);
+
 /** Tools that write to the board: the ones the MCP write cap counts. */
 export const WRITE_TOOLS = new Set(["reply", "new_thread", "edit_post", "send_pm", "report_post"]);
 
@@ -415,6 +418,15 @@ export class WakeSession extends MeteredModel {
     if (WRITE_TOOLS.has(name)) {
       const refusal = this.writeRefusal(name, args);
       if (refusal) return this.record(name, rawArgs, false, refusal);
+      for (const field of ["body", "title"]) {
+        const value = args[field];
+        if (typeof value !== "string") continue;
+        const cleaned = cleanPostText(value);
+        if (cleaned !== value) {
+          args[field] = cleaned;
+          this.record("cleanup", JSON.stringify({ tool: name, field }), true, "Removed stray markup or escaped quotes before posting.");
+        }
+      }
     }
     if (modAction && this.modActions >= this.modActionLimit) {
       return this.record(
@@ -606,6 +618,67 @@ export function wakeHeader(bot: Bot, now: Date, budget: number): string {
 }
 
 /**
+ * Slips some models make in the text they post: an HTML-ish closing tag
+ * (`[/body>`, `</body>`) and quotes escaped as if inside a JSON string. BBCode
+ * never uses either, so they're taken out before the post reaches the board.
+ * Text inside [code] is left as written.
+ */
+export function cleanPostText(text: string): string {
+  return text
+    .split(/(\[code\][\s\S]*?\[\/code\])/i)
+    .map((part, i) =>
+      i % 2 === 1
+        ? part
+        : part
+            .replace(/\[\/?body>|<\/?body>/gi, "")
+            .replace(/\\"/g, '"')
+    )
+    .join("");
+}
+
+export interface RosterJson {
+  name: string;
+  bot?: boolean;
+  role?: string;
+  status?: string;
+  posts: number;
+  joined: string;
+  last_post: string | null;
+}
+
+const rosterDay = new Intl.DateTimeFormat("en-CA", { timeZone: config.site.timezone, year: "numeric", month: "2-digit", day: "2-digit" });
+
+/**
+ * Who's on the board, one line each, for the start of a visit: facts the
+ * board already has, so the bot needn't guess who's new or who has posted.
+ */
+export function rosterText(members: RosterJson[], self: string): string {
+  if (members.length === 0) return "";
+  const line = (m: RosterJson) => {
+    const who = [m.name, m.bot ? "bot" : "human", m.role, m.status].filter(Boolean).join(", ");
+    const parts = [
+      `${who}${m.name.toLowerCase() === self.toLowerCase() ? " (you)" : ""}`,
+      `${m.posts} post${m.posts === 1 ? "" : "s"}`,
+      `joined ${rosterDay.format(new Date(m.joined))}`,
+      m.last_post ? `last posted ${rosterDay.format(new Date(m.last_post))}` : "hasn't posted",
+    ];
+    return `- ${parts.join(" · ")}`;
+  };
+  return `Who's on the board, latest posters first:\n${members.map(line).join("\n")}`;
+}
+
+/** The roster as the bot sees it, or nothing if the board can't give one. */
+async function loadRoster(board: BoardSession, self: string): Promise<string> {
+  const res = await board.call("list_members", {});
+  if (!res.ok) return "";
+  try {
+    return rosterText(JSON.parse(res.text) as RosterJson[], self);
+  } catch {
+    return "";
+  }
+}
+
+/**
  * A visit's fixed prefix: the board's instructions, how visits work, the
  * member brief (plus the moderator's note on ordinary visits, for a bot that
  * moderates), and the persona. Identical from wake to wake, so it caches.
@@ -623,7 +696,8 @@ const hash = (s: string) => createHash("sha256").update(s).digest("hex").slice(0
 // ── Tools mode ─────────────────────────────────────────────────────────────
 
 async function toolsMode(s: WakeSession, system: string, inbox: InboxJson, header: string, memory: string) {
-  const boardTools = s.board.tools.filter((t) => t.name !== "get_inbox" && !isModTool(t.name));
+  // The runner has already called these two; their results open the visit.
+  const boardTools = s.board.tools.filter((t) => !RUNNER_CALLED.has(t.name) && !isModTool(t.name));
   const extra = s.searchBudget > 0 ? [webSearchTool(s.searchBudget)] : [];
   return toolLoop(s, system, `${header}\n\n${memory}\n\nYour inbox since your last visit:\n${JSON.stringify(inbox)}`, boardTools, extra);
 }
@@ -957,7 +1031,8 @@ export async function runWake(deps: WakeDeps, bot: Bot, trigger: Trigger, opts: 
     session.learnFromInbox(inbox);
     if (deps.webSearch && bot.mode === "tools") session.searchBudget = await searchBudget(deps.db, bot);
     const header = wakeHeader(bot, deps.now(), budget) + (waiting ? ` (You're up early: ${waiting}.)` : "");
-    const memory = await loadMemory(deps.db, bot, deps.now(), session.shownNotes);
+    const roster = await loadRoster(board, bot.username);
+    const memory = [roster, await loadMemory(deps.db, bot, deps.now(), session.shownNotes)].filter(Boolean).join("\n\n");
     const runnerBrief = session.searchBudget > 0 ? `${RUNNER_BRIEF} ${WEB_SEARCH_BRIEF}` : RUNNER_BRIEF;
     const system = systemPrompt(board, bot, await currentBriefs(deps.db), runnerBrief);
     // Reports and hot threads are for moderation rounds; a visit is a member's.
