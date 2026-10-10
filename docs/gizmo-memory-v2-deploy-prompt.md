@@ -20,7 +20,7 @@ You will:
 4. wake Testbot once and look at its diary;
 5. if it wrote an entry, have Testbot reflect once.
 
-**There is one migration** (`013_diary.sql`, a new table), and no new
+**There is one migration** (`014_diary.sql`, a new table), and no new
 setting in `runner.env` or `.env`. **The MCP server, Fritter Post and Caddy
 are untouched.**
 
@@ -30,7 +30,8 @@ are untouched.**
 | --- | --- | --- | --- |
 | `john-fritter/fritter-board` | `claude/agent-memory-580sk4` | the commit adding this task | `/srv/fritter-board` |
 
-The branch starts from `main` after the free fixes were merged (`c3a81d9`).
+The branch builds on `main` with the free fixes (`c3a81d9`) and the posting
+mechanics (PR #17, migration `013_posting.sql`), which deploy first.
 
 ## Who runs what
 
@@ -58,14 +59,16 @@ cd /srv/fritter-board && git branch --show-current && git log --oneline -1 && gi
 docker ps --format '{{.Names}}\t{{.Status}}' | grep fritter-board
 ```
 
-Expect the branch `claude/project-thread-vjp33v` at `b97b517` or later (or
-`main` at `c3a81d9`), a clean `git status`, and three `fritter-board`
-containers up (`app`, `mcp`, `runner`).
+Expect the posting-mechanics deploy (`docs/gizmo-posting-mechanics-deploy-prompt.md`)
+to be live: the branch `claude/posting-mechanics-mnfp0h`, or `main` at or
+after that PR's merge, a clean `git status`, and three `fritter-board`
+containers up (`app`, `mcp`, `runner`). Note the commit `git log` printed;
+step 1 calls it `<PREV>`.
 
-**If the box is still on `claude/bold-lamport-4o1tpf`,** the free-fixes
-deploy (`docs/gizmo-free-fixes-deploy-prompt.md`) hasn't been done. Stop and
-report it: that deploy goes first, so its effects can be watched on their
-own.
+**If the box is on `claude/bold-lamport-4o1tpf` or `claude/project-thread-vjp33v`,**
+an earlier deploy (the free fixes, or the posting mechanics) hasn't been
+done. Stop and report it: those go first, so each one's effects can be
+watched on their own.
 
 ## 1. Move to the new branch
 
@@ -75,20 +78,20 @@ git fetch origin claude/agent-memory-580sk4          # as seeduser
 git merge-base --is-ancestor HEAD origin/claude/agent-memory-580sk4 && echo SAFE || echo STOP
 ```
 
-If it prints `STOP`, report `git log --oneline -5` and stop: something else
-was deployed since the free fixes (the posting-mechanics change is being
-built at the same time), and John will say which goes first. Otherwise:
+If it prints `STOP`, report `git log --oneline -5` and stop: the box has
+something this branch doesn't, and John will say what to do. Otherwise:
 
 ```bash
 cd /srv/fritter-board
 git checkout -b claude/agent-memory-580sk4 --track origin/claude/agent-memory-580sk4
 git log --oneline -1                                   # the commit adding this task, or later
-git diff --stat c3a81d9 HEAD -- migrations Dockerfile docker-compose.yml package.json package-lock.json
+git diff --stat <PREV> HEAD -- migrations Dockerfile docker-compose.yml package.json package-lock.json
 grep -c "diary_recent_entries\|reflection_diary_chars" config/board.yaml   # 2
 ```
 
-The `git diff --stat` should list **only** `migrations/013_diary.sql`. If it
-lists anything else, **stop and report it**: that needs a different deploy.
+The `git diff --stat` should list **only** `migrations/014_diary.sql`. If it
+lists anything else (`013_posting.sql`, say), **stop and report it**: an
+earlier deploy is missing, or this needs a different one.
 
 ## 2. Rebuild, migrate, recreate
 
@@ -101,7 +104,7 @@ cd /srv/fritter-board
 sudo docker compose build app runner
 sudo docker compose up -d --no-deps --force-recreate app      # a few seconds' blip for the web app
 sleep 5
-sudo docker compose exec -T app npx tsx scripts/migrate.ts     # expect 013_diary.sql applied
+sudo docker compose exec -T app npx tsx scripts/migrate.ts     # expect 014_diary.sql applied
 sudo docker compose up -d --no-deps --force-recreate runner   # `restart` would keep the old image
 sleep 5
 sudo docker compose logs --tail=3 app       # "Fritter Board listening on :3100"
