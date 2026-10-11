@@ -266,8 +266,10 @@ async function main() {
   assert.equal(p.suggested, "don't use");
 
   // ── The voice probe ──
-  const scenarios = loadScenarios();
-  assert.deepEqual(scenarios.map((sc) => sc.name), ["reply", "weekend", "news", "new_thread"], "config/voice-probe.yaml parses");
+  const allScenarios = loadScenarios();
+  assert.deepEqual(allScenarios.map((sc) => sc.name), ["reply", "weekend", "news", "new_thread", "praise", "games"], "config/voice-probe.yaml parses");
+  // The made-up four; the archive's two are the voice test's (tests/voice.test.ts).
+  const scenarios = allScenarios.slice(0, 4);
   const news = JSON.parse(scenarioPrompt(scenarios[2]!).split("\n\n")[0]!) as { thread: { board: string; article?: { title: string } } };
   assert.equal(news.thread.board, "news");
   assert.match(news.thread.article?.title ?? "", /licensed/, "a News thread shows its article");

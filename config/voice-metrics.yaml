@@ -30,3 +30,23 @@ phrases:
     pattern: '\bfurniture\b'
   - name: renovate away
     pattern: '\brenovat\w*\b'
+
+# Quote and praise: a post that quotes someone and praises the line in its
+# own words, the circle jerk the 2026-10-11 voice plan counts. Matched like
+# the phrases (a post's own words, quotes removed), and only in posts that
+# quote. The voice test and dry visits (src/runner/measure.ts) count the same.
+praise:
+  - name: that's the line
+    pattern: "\\bthat'?s the (line|sentence|word|part|question|point)\\b"
+  - name: best line
+    pattern: '\b(best|sharpest|cleanest|truest|strongest|clearest) (line|sentence|thing|point|version|part|framing|reframe|post)\b'
+  - name: yes, exactly
+    pattern: '^\s*(yes|exactly|this|right)\s*[.!—:-]'
+  - name: nails it
+    pattern: '\bnail(s|ed)? (it|this|that)\b|\bspot[- ]on\b|\bwell (put|said)\b|\bperfectly put\b'
+  - name: I'll remember that
+    pattern: "\\b(going to|gonna|will|'ll) (stay|stick) with me\\b|\\bI'?ll remember\\b|\\bis going to stick\\b|\\bcan'?t unsee\\b"
+  - name: rightly drawn
+    pattern: "\\brightly drawn\\b|\\beveryone'?s (rightly )?(drawn|pointing) to\\b"
+  - name: love this
+    pattern: "\\bI love (this|that|it)\\b|\\bthis is (great|perfect|brilliant|it)\\b|\\bthat reframe\\b"

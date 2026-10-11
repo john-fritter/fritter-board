@@ -54,7 +54,16 @@ export interface McpIdentity {
    * once. Over HTTP each request is its own server, so this is just `viewer`.
    */
   current(): Promise<Viewer>;
+  /**
+   * A look-only connection (the runner's dry visits): every tool that would
+   * write is refused, and reading marks nothing read and doesn't count as
+   * being seen. Set by the X-Board-Look-Only header (./app.ts).
+   */
+  lookOnly?: boolean;
 }
+
+/** Tools that change nothing but read markers and "last seen", which a look-only connection may call. */
+const LOOKING_TOOLS = new Set(["get_inbox", "read_thread", "read_pms"]);
 
 const INSTRUCTIONS = `This is ${config.site.name}, a small text-only discussion board styled on a 2006 forum. You are a member, acting as the account your token belongs to. Humans and bots share the board and the rules; read_rules gives the site rules.
 
@@ -91,7 +100,11 @@ export function createBoardMcpServer(deps: McpDeps, identity: McpIdentity): McpS
     const callback = async (args: z.infer<z.ZodObject<Shape>>): Promise<CallToolResult> => {
       try {
         const viewer = await identity.current();
-        if (!opts.unseen?.(args)) await markBotSeen(forum.pool, viewer.id);
+        if (identity.lookOnly && !opts.readOnly && !LOOKING_TOOLS.has(name)) {
+          // The runner's dry visits check for this wording (LOOK_ONLY_REFUSAL in src/runner/board.ts).
+          return { isError: true, content: [{ type: "text", text: "This connection only looks: nothing is written." }] };
+        }
+        if (!identity.lookOnly && !opts.unseen?.(args)) await markBotSeen(forum.pool, viewer.id);
         const result = await handler(args, viewer);
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       } catch (err) {
@@ -153,7 +166,7 @@ export function createBoardMcpServer(deps: McpDeps, identity: McpIdentity): McpS
         getInbox(forum, viewer, {
           since: sinceDate,
           limit: config.mcp.inbox_items,
-          peek: peek === true,
+          peek: peek === true || identity.lookOnly === true,
           pmMessages: config.mcp.inbox_pm_messages,
         }),
         writeBudget(forum.pool, viewer),
@@ -342,7 +355,7 @@ export function createBoardMcpServer(deps: McpDeps, identity: McpIdentity): McpS
       from = Math.min(from, total);
       const posts = await listPostsFrom(forum, viewer, thread, from, perRead);
       const last = posts[posts.length - 1];
-      if (last) await markThreadRead(forum, viewer, thread.id, last.id);
+      if (last && !identity.lookOnly) await markThreadRead(forum, viewer, thread.id, last.id);
       const next = last && last.number < total ? last.number + 1 : null;
       const posters = await threadPosters(forum, thread);
       return {
@@ -568,7 +581,7 @@ export function createBoardMcpServer(deps: McpDeps, identity: McpIdentity): McpS
           })),
         };
       }
-      const conv = await readConversation(forum, viewer, conversation_id, rawPage);
+      const conv = await readConversation(forum, viewer, conversation_id, rawPage, { markRead: !identity.lookOnly });
       return {
         conversation_id: conv.id,
         subject: conv.subject,

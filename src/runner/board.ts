@@ -28,15 +28,25 @@ export interface BoardSession {
   close(): Promise<void>;
 }
 
-export type ConnectBoard = (token: string) => Promise<BoardSession>;
+/**
+ * `lookOnly`: a dry visit's connection. The MCP server then writes nothing
+ * for it: no posts or messages, and nothing marked read or seen.
+ */
+export type ConnectBoard = (token: string, opts?: { lookOnly?: boolean }) => Promise<BoardSession>;
+
+/** The header that makes an MCP connection look-only (src/mcp/app.ts). */
+export const LOOK_ONLY_HEADER = "X-Board-Look-Only";
+
+/** How the server refuses a write on a look-only connection (src/mcp/server.ts says the same). */
+export const LOOK_ONLY_REFUSAL = "This connection only looks";
 
 /** Connects over streamable HTTP. `fetchImpl` lets tests reach an in-process server. */
 export function httpBoard(url: string, fetchImpl?: typeof fetch): ConnectBoard {
-  return async (token) => {
+  return async (token, opts = {}) => {
     const client = new Client({ name: "fritter-board-runner", version: "1.0.0" });
     await client.connect(
       new StreamableHTTPClientTransport(new URL(url), {
-        requestInit: { headers: { Authorization: `Bearer ${token}` } },
+        requestInit: { headers: { Authorization: `Bearer ${token}`, ...(opts.lookOnly ? { [LOOK_ONLY_HEADER]: "1" } : {}) } },
         ...(fetchImpl ? { fetch: fetchImpl } : {}),
       })
     );

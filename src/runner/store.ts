@@ -20,7 +20,8 @@ export type Db = Pick<Pool, "query">;
 /** "retry" is a visit tried again soon after one that failed (runner.wake_retries). */
 export type Trigger = "schedule" | "early" | "manual" | "retry";
 export type Outcome = "done" | "lurked" | "skipped" | "failed";
-export type RunKind = "wake" | "compaction" | "moderation";
+/** "dry": a dry visit (dryvisit.ts), which counts against nothing. */
+export type RunKind = "wake" | "compaction" | "moderation" | "dry";
 
 export interface Bot {
   userId: number;
@@ -59,6 +60,9 @@ export interface Bot {
   modEarlyTrigger: "early" | "manual" | null;
   modCursor: Date | null;
   modPausedUntil: Date | null;
+  /** The persona's side the bot is on, and until when (persona.ts). */
+  side: string | null;
+  sideUntil: Date | null;
 }
 
 interface BotRow {
@@ -97,12 +101,14 @@ interface BotRow {
   mod_early_trigger: "early" | "manual" | null;
   mod_cursor: Date | null;
   mod_paused_until: Date | null;
+  side: string | null;
+  side_until: Date | null;
 }
 
 const BOT_SQL = `
   SELECT c.*, s.next_wake_at, s.early_wake_at, s.early_wake_trigger, s.inbox_cursor, s.paused_until,
          s.compact_requested_at, s.mod_next_at, s.mod_early_at, s.mod_early_trigger, s.mod_cursor,
-         s.mod_paused_until
+         s.mod_paused_until, s.side, s.side_until
     FROM bots.config c
     LEFT JOIN bots.state s ON s.user_id = c.user_id`;
 
@@ -145,6 +151,8 @@ function toBot(r: BotRow): Bot {
     modEarlyTrigger: r.mod_early_trigger,
     modCursor: r.mod_cursor,
     modPausedUntil: r.mod_paused_until,
+    side: r.side,
+    sideUntil: r.side_until,
   };
 }
 
@@ -180,6 +188,8 @@ export interface StatePatch {
   modEarlyTrigger?: "early" | "manual" | null;
   modCursor?: Date | null;
   modPausedUntil?: Date | null;
+  side?: string | null;
+  sideUntil?: Date | null;
 }
 
 const STATE_COLUMNS: Record<keyof StatePatch, string> = {
@@ -194,6 +204,8 @@ const STATE_COLUMNS: Record<keyof StatePatch, string> = {
   modEarlyTrigger: "mod_early_trigger",
   modCursor: "mod_cursor",
   modPausedUntil: "mod_paused_until",
+  side: "side",
+  sideUntil: "side_until",
 };
 
 /** Updates a bot's schedule state; fields left out are unchanged. */
@@ -246,6 +258,9 @@ export interface RunRecord {
   summary?: SummaryUsage;
   /** The fallback model the run ended on, when the bot's own kept failing. */
   fallbackModel?: string | null;
+  /** The persona's side the visit was on, and the length in words it was asked for. */
+  side?: string | null;
+  postWords?: number | null;
 }
 
 export interface SummaryUsage {
@@ -260,7 +275,7 @@ export async function finishRun(db: Db, runId: number, r: RunRecord): Promise<vo
             model_calls = $5, prompt_tokens = $6, completion_tokens = $7, reasoning_tokens = $8,
             cached_tokens = $9, writes = $10, actions = $11, note = $12, error = $13, prefix_hash = $14,
             transcript = $15, summary_calls = $16, summary_prompt_tokens = $17, summary_completion_tokens = $18,
-            fallback_model = $19, extra_writes = $20
+            fallback_model = $19, extra_writes = $20, side = $21, post_words = $22
       WHERE id = $1`,
     [
       runId,
@@ -283,6 +298,8 @@ export async function finishRun(db: Db, runId: number, r: RunRecord): Promise<vo
       r.summary?.completionTokens ?? 0,
       r.fallbackModel ?? null,
       r.extraWrites ?? 0,
+      r.side ?? null,
+      r.postWords ?? null,
     ]
   );
 }
@@ -323,12 +340,13 @@ export async function earlyWakesLastDay(db: Db, userId: number, kind: "wake" | "
 
 /**
  * The bot's model calls in the last 24 hours on one of its keys: its member
- * key (visits and compaction) or its moderation key (moderation cycles).
+ * key (visits and compaction) or its moderation key (moderation cycles). Dry
+ * visits run on a test key and count for neither.
  */
 export async function modelCallsLastDay(db: Db, userId: number, key: "member" | "moderation"): Promise<number> {
   const { rows } = await db.query<{ n: number }>(
     `SELECT COALESCE(SUM(model_calls), 0)::int AS n FROM bots.runs
-      WHERE user_id = $1 AND started_at > NOW() - INTERVAL '1 day'
+      WHERE user_id = $1 AND started_at > NOW() - INTERVAL '1 day' AND kind <> 'dry'
         AND (kind = 'moderation') = $2`,
     [userId, key === "moderation"]
   );

@@ -307,7 +307,8 @@ export async function readConversation(
   ctx: ForumContext,
   viewer: Viewer | null,
   conversationId: number,
-  rawPage: string | undefined
+  rawPage: string | undefined,
+  opts: { markRead?: boolean } = {}
 ): Promise<Conversation> {
   const { rows: convRows } = await ctx.pool.query<{ subject: string }>(
     "SELECT subject FROM pm_conversations WHERE id = $1",
@@ -341,7 +342,7 @@ export async function readConversation(
   );
 
   const lastShown = rows[rows.length - 1]?.id;
-  if (isParticipant && lastShown !== undefined) {
+  if (isParticipant && lastShown !== undefined && opts.markRead !== false) {
     await ctx.pool.query(
       `UPDATE pm_participants
           SET last_read_message_id = GREATEST(COALESCE(last_read_message_id, 0), $3)
