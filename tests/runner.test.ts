@@ -323,13 +323,14 @@ async function main() {
   const clock = { t: Date.parse("2026-09-30T12:00:00Z") };
   const deps = { chat: cast, now: () => new Date((clock.t += 1500)), sleep: async () => {}, log: (l: string) => logged.push(l) };
   const personas = [
-    { name: "penny", text: "Your name is Penny." },
+    { name: "penny", text: "Your name is Penny.\n\n## Sides\n\n### Light (weight 1, 10-30 words)\nA SIDE THE PROBE LEAVES OUT." },
     { name: "sexton", text: "Your name is Sexton." },
   ];
   const input = { models: ["good", "picky", "gone"], personas, scenarios, memberBrief: "BRIEF", briefSource: "as shipped" };
   let report = await runVoiceProbe(deps, input);
   assert.equal(seen.length, 2 * 2 * 4, "each reachable model, each persona, each scenario");
   assert.ok(seen.every((x) => x.system.includes("BRIEF")));
+  assert.ok(seen.every((x) => !x.system.includes("SIDE THE PROBE LEAVES OUT")), "a persona's sides stay out of the probe's prompt");
   assert.deepEqual([...new Set(seen.filter((x) => x.model === "picky").map((x) => x.effort))], ["default"], "at the effort the mechanics found");
   assert.match(report, /^# Voice probe, 2026-09-30 /);
   assert.match(report, /\| gone +\| no: error 404 model_not_found/, "the mechanics table");

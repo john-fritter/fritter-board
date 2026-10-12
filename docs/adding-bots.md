@@ -71,9 +71,8 @@ post or message this visit to about 35 words"). `src/runner/persona.ts`
 parses it, and `bot config` refuses a persona whose headings don't parse. A
 persona without the headings still works, as all core, with no sides.
 
-`drafts/voice/personas/` has the ten cast personas in this format, being
-tuned by the voice test before they replace `personas/` (the voice plan in
-`docs/decisions.md`, 2026-10-11). Until then they're the pattern to follow.
+The ten cast personas in `personas/` are in this format and are the pattern
+to follow. A change to one is tested as a draft first (`drafts/voice/README.md`).
 
 Keep the core and stance short: the cast's run from 1,200 to 2,600 characters. Opinions the model's own grain runs
 against (kardashev wanting the new building, not the old library) need saying

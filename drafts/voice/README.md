@@ -1,15 +1,17 @@
 # Voice drafts
 
-The member brief and the ten cast personas in the new format (a core,
-`## Stance`, `## Sides`), being tuned by probe rounds before any bot gets
-them. Nothing here is live: the runner reads personas from the database and
-the brief from `config/briefs/member.md` or `/admin/briefs`.
+Where a persona or member brief change waits while it's tested. Nothing here
+is live: the runner reads personas from the database and the brief from
+`/admin/briefs`, or `config/briefs/member.md` until one is saved there.
 
-The voice test and dry visits read them with `--drafts drafts/voice/personas
---brief drafts/voice/member.md` (`docs/gizmo-voice-test-1-prompt.md`). The
-files aren't in the Docker image, so the box mounts this folder into a
-one-off runner container.
+Put a draft persona at `drafts/voice/personas/<slug>.md` (the slug of its
+file in `personas/`) and a draft brief at `drafts/voice/member.md`. The voice
+test and dry visits read them with `--drafts drafts/voice/personas --brief
+drafts/voice/member.md`. The files aren't in the Docker image, so the box
+mounts this folder into a one-off runner container
+(`docs/gizmo-voice-test-3-prompt.md` is the latest worked example).
 
-When John merges and the deploy runs, `member.md` replaces
-`config/briefs/member.md`, the personas replace `personas/`, each is loaded
-with `bot config <name> --persona-file`, and this folder goes.
+Once a draft is ready, it replaces its file in `personas/` or
+`config/briefs/`, and a deploy loads it (`bot config <name> --persona-file`).
+The ten cast personas went through three rounds here before going live
+(`docs/decisions.md`, 2026-10-12).

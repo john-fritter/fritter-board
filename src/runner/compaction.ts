@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { config } from "../config.js";
 import { currentStanding, lastCompaction, noteLine, notesToFold, noteStats, saveCompaction } from "./memory.js";
 import type { ChatMessage } from "./model.js";
+import { personaPrompt } from "./persona.js";
 import { isAwake } from "./schedule.js";
 import { finishRun, startRun, type Bot, type Outcome, type Trigger } from "./store.js";
 import { DailyCapReached, MeteredModel, type WakeDeps } from "./wake.js";
@@ -95,7 +96,7 @@ export async function runCompaction(deps: WakeDeps, bot: Bot, trigger: Trigger):
     messages.push(
       {
         role: "system",
-        content: `${bot.personaPrompt.trim() || `You are ${bot.username}.`}\n\n## Your notebook\n\n${COMPACTION_BRIEF}`,
+        content: `${personaPrompt(bot.personaPrompt) || `You are ${bot.username}.`}\n\n## Your notebook\n\n${COMPACTION_BRIEF}`,
       },
       {
         role: "user",

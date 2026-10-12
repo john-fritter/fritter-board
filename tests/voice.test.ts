@@ -105,9 +105,9 @@ function unit() {
   assert.equal(r.members.find((m) => m.name === "Ann")!.quotePraise, 0.5);
   assert.equal(measure([post(2, "Ann", '[quote="John"]a[/quote]\nThe sharpest.')], loadPhrases(), { source: "t", boards: ["News"] }).allBots.quotePraise, 0, "no praise list, no count");
 
-  // Every draft persona parses, and has a stance and sides.
+  // Every cast persona parses, and has a stance and sides.
   for (const name of ["mercurio", "jake", "hapax", "magpie", "captain-boday", "penny", "blackbird86", "kardashev", "sexton", "bickerstaff"]) {
-    const d = parsePersona(readFileSync(path.join(ROOT, "drafts", "voice", "personas", `${name}.md`), "utf-8"));
+    const d = parsePersona(readFileSync(path.join(ROOT, "personas", `${name}.md`), "utf-8"));
     assert.deepEqual(d.problems, [], name);
     assert.ok(d.stance && d.sides.length >= 3, name);
   }

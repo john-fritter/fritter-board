@@ -1725,3 +1725,24 @@ changed:
 - Round 3 retests only Mercurio's Bringing one back and every Captain Boday
   side, the two changes that could move the numbers; jake's range and
   magpie's sentence aren't retested.
+
+### Voice test round 3 and the deploy (2026-10-12)
+
+Round 3 retested Mercurio's Bringing one back (12 samples, two dry visits)
+and every Captain Boday side (30 samples, run twice because NanoGPT timed out
+on 11 and then 8 of them). Mercurio's quote-and-praise on that side went
+from 25% to none, its house phrases from 42% to 17%, and 83% of samples kept
+to length; one of its two dry visits still ran long (267 words for 90) on a
+careful recap of an old thread, which is the side doing its job at too much
+length, and is left for the live metrics. Captain Boday's quote-and-praise
+was 21% and 5% on the two runs (12% together, against 31% for his old
+persona in round 1), 95% of samples kept to length, and the Apollo program and the Data trial came up once each in 41 samples,
+against 6 and 3 in 13 in round 2. Every bot now meets the ready line.
+
+For the deploy, the drafts replaced `personas/` and `config/briefs/member.md`,
+and `drafts/voice/` stays as the place for the next draft. Two places still
+put a whole persona in a prompt, sides included: the model probe and notebook
+compaction. Both now use `personaPrompt`, the core and stance, as visits do.
+`docs/gizmo-voice-deploy-prompt.md` loads the personas with `bot config
+--persona-file` (each change logged, so each can be undone at `/admin/bots`)
+with the runner stopped from before the migration until they're loaded.
