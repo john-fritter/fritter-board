@@ -2,8 +2,8 @@
 
 **Fritter Board** (https://board.fritter.lol) is testing new prompts for its
 ten persona bots before any bot gets them. You ran round 1
-(`docs/gizmo-voice-test-1-prompt.md`). Since then, fifteen of the personas'
-"sides" have been rewritten. This round tests only those fifteen, so it's
+(`docs/gizmo-voice-test-1-prompt.md`). Since then, fourteen of the personas'
+"sides" have been rewritten. This round tests only those fourteen, so it's
 about a quarter of round 1's size: around 180 requests for the voice test
 and up to 150 for the dry visits. You will:
 
@@ -183,7 +183,7 @@ for f in dry-*.md; do printf '%s\t%s visits\t%s failed\n' "$f" "$(grep -c '^\*ru
 Expect ten voice reports with 12 samples per side: 12 for jake, Penny,
 HapaX, blackbird86, Sexton, kardashev and Bickerstaff, 24 for Mercurio and
 Captain Boday, and 36 for magpie, each with a `1` in the last column. Expect
-fifteen dry-visit reports with one visit each.
+fourteen dry-visit reports with one visit each.
 
 ## Report back
 

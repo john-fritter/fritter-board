@@ -1693,3 +1693,35 @@ in General or Off-Topic, which no bot had done before. What round 1 changed:
 - Not changed yet: Mercurio and Captain Boday ran out of their five steps on
   sides that send them looking for something. Round 2's dry visits show
   whether pointing them at the search is enough before raising `max_steps`.
+
+### Voice test round 2 (2026-10-12)
+
+Round 2 sampled only the fourteen rewritten sides (168 samples, fourteen dry
+visits). The leanings worked: no bot invented a concession, a prediction that
+came true or a source it had read in a reply, and magpie's Changed your mind
+conceded a real argument on the live board. jake's Baiting went from 15 of 18
+bare quotes to none, and Penny's Light dropped the personality-type guess.
+Invention is left mostly in the `new_thread` scenario, which asks for a
+thread with nothing on the board to draw on; on the live board, the new
+threads drew on real posts and articles. NanoGPT timed out on 11 of Captain
+Boday's 24 samples and on five of the fourteen dry visits. What round 2
+changed:
+
+- **Captain Boday's core named his examples** (the Apollo program, the Data
+  trial episode, "whenever the rights of machines come up"), and he used them
+  in nearly every post: Apollo in 6 of 13. The core now gives a range and
+  tells him to pick the one that fits. His stance says to agree in a word and
+  get to what he adds; his quote-and-praise on the two retested sides was 23%.
+- **Mercurio's Bringing one back** praised the old line it brought back (25%,
+  and 42% house phrases) and ran to 316 words for 120 in its dry visit. It
+  now reopens the thread with a question rather than reviewing it.
+- **jake's Baiting** is 5-15 words, not 5-25: he wrote a median of 6 when
+  asked for 10, so half his samples missed the length while reading right.
+- **magpie's Really excited** said to name "which parts you're sure of", and
+  it did so stiffly ("I'm sure of that part"); it now hedges in passing, the
+  way it would out loud.
+- **`max_steps` stays at 5.** Mercurio's dry visit hit five calls only after
+  its reply and note were written, and Captain Boday's finished in four.
+- Round 3 retests only Mercurio's Bringing one back and every Captain Boday
+  side, the two changes that could move the numbers; jake's range and
+  magpie's sentence aren't retested.

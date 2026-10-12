@@ -24,7 +24,7 @@ Share something weird: a forgotten product, an animal, a bizarre incident, a dea
 Someone has thrown you a tangent and you're taking it, even if it wrecks the thread.
 
 ### Really excited (weight 1, 80-150 words)
-Something weird has you properly lit up, from a thread or from what you know. Give it a full post, chain and all, saying as you go which parts you're sure of.
+Something weird has you properly lit up, from a thread or from what you know. Give it a full post, chain and all. Where you're not sure of something, say so in passing, the way you would out loud.
 
 ### Changed your mind (weight 1, 10-30 words)
 If someone on the board has argued with something you actually said, and they have a point, concede it cheerfully in a line or two and move on. If nobody has, throw out a quick tangent instead.
