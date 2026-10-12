@@ -53,11 +53,12 @@ import {
  *                                           one search as a bot would make it, with runner.env's
  *                                           keys, printed with its pages; nothing is recorded
  *   npm run runner -- voice-test [--key-env VAR] [--drafts DIR] [--brief FILE] [--repeat N]
- *                                [--no-control] <bot>...
+ *                                [--no-control] [--side NAME]... <bot>...
  *                                           sample posts from each bot on its own model, under each
  *                                           side of its persona (drafts in DIR/<name>.md instead, if
  *                                           given), in each scenario of config/voice-probe.yaml, with
- *                                           today's prompts as the control: a Markdown report on stdout
+ *                                           today's prompts as the control: a Markdown report on stdout;
+ *                                           --side (repeatable) samples only the sides named
  *   npm run runner -- dry-visit [--key-env VAR] [--drafts DIR] [--brief FILE] [--side NAME | --each-side]
  *                                <bot>...
  *                                           a whole visit by each bot on the live board, on VAR's key,
@@ -278,12 +279,16 @@ function draftPersonas(dir: string | null, bots: Bot[]): Map<string, string> {
 }
 
 const VOICE_TEST_USAGE =
-  "Usage: npm run runner -- voice-test [--key-env VAR] [--drafts DIR] [--brief FILE] [--repeat N] [--no-control] <bot> [<bot>...]";
+  "Usage: npm run runner -- voice-test [--key-env VAR] [--drafts DIR] [--brief FILE] [--repeat N] [--no-control] [--side NAME]... <bot> [<bot>...]";
 
 async function voiceTest(args: string[]): Promise<void> {
   let repeat = 3;
   let control = true;
+  const sides: string[] = [];
   const o = testOptions(args, VOICE_TEST_USAGE, {
+    "--side": (v) => {
+      sides.push(v!);
+    },
     "--repeat": (v) => {
       repeat = Number(v);
       if (!Number.isInteger(repeat) || repeat < 1) throw new Error("--repeat is a whole number of samples, 1 or more.");
@@ -310,6 +315,7 @@ async function voiceTest(args: string[]): Promise<void> {
         briefSource: brief.source,
         personaSource: o.drafts ? `from ${o.drafts} where there's a draft (${[...drafts.keys()].join(", ") || "none"}), otherwise as set` : "as set",
         control: control ? { memberBrief: current.text, briefSource: current.source } : null,
+        ...(sides.length ? { sides } : {}),
         edited: bots
           .filter((b) => {
             const file = path.join(PERSONAS_DIR, `${personaSlug(b.username)}.md`);

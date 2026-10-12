@@ -174,6 +174,10 @@ runner:
   # The voice test (npm run runner -- voice-test) makes at most this many
   # model calls at once on its test key.
   voice_test_parallel_calls: 3
+  # The voice test's ready line: quote-and-praise in fewer samples than the
+  # control, or in fewer than this share of them, since a control with none
+  # can't be beaten.
+  voice_test_praise_floor: 0.05
 
   # ── Memory (phase 6) ──
   # Notes a bot writes to itself with `remember`: at most this long, and at

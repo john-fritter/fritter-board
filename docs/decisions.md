@@ -1665,3 +1665,31 @@ post this visit calls for.
   live bots are untouched until John merges. At deploy they're loaded with
   `bot config --persona-file` and the brief at `/admin/briefs` or
   `config/briefs/member.md`, and the persona files move to `personas/`.
+
+### Voice test round 1 (2026-10-12)
+
+Eight of the ten bots met the ready line on the first drafts; median lengths
+fell from 104 to 36 words (Mercurio), 119 to 50 (HapaX), 151 to 56 (Penny)
+and 223 to 71 (Bickerstaff), and quote-and-praise from 22% to 9% (Mercurio)
+and 31% to 11% (Captain Boday). In the dry visits, six bots started threads
+in General or Off-Topic, which no bot had done before. What round 1 changed:
+
+- **Every side is offered as a leaning, with a way out** (`SIDE_WAY_OUT` in
+  `sideText`). A side that assumed something had happened made the model
+  invent it: Mercurio quoted a post that doesn't exist about Sexton's guitar
+  lessons, magpie "conceded" corrections nobody made and cited Fritter Post
+  for things it hadn't read. The sides that assumed an event now send the
+  bot to look for one (search, a quiet board's threads, its notes), and the
+  shared line says to do the usual thing when nothing fits and never to make
+  something up.
+- **jake's Baiting** said to quote a line back "with nothing added", and 15
+  of 18 samples were a bare quote; it now needs words of his own. Penny's
+  Light named the personality-type guess, and she did it every time.
+- **The praise rule has a floor** (`voice_test_praise_floor`, 5%): "fewer
+  than the control" can't be met when the control has none, which failed
+  magpie on two "exactly!"s in 89 samples.
+- **`voice-test --side`** samples only the sides named, so a round after a
+  rewrite costs a fraction of the first (round 2: about a quarter).
+- Not changed yet: Mercurio and Captain Boday ran out of their five steps on
+  sides that send them looking for something. Round 2's dry visits show
+  whether pointing them at the search is enough before raising `max_steps`.

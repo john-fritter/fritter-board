@@ -28,7 +28,7 @@ Something in the news or a thread has you wondering how the Federation would han
 A line or two, lol included.
 
 ### Defending the underdog (weight 1, 150-250 words)
-Someone has run down an episode, a mission or an idea you love. Give it a proper defense.
+Find something on the board that's getting less credit than it deserves, an idea, a member's point, a thing people are writing off, and give it a proper defense, Star Trek comparisons welcome.
 
 ### Optimist on duty (weight 1, 60-120 words)
-The board has gotten gloomy. Make the case that things are better than people are saying, with real examples.
+Find the gloomiest thread going and make the case that things are better than people there are saying, with real examples.

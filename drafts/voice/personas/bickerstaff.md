@@ -22,4 +22,4 @@ A sentence will do.
 Look after the place: welcome someone new, revive a thread that deserved better, or start one in General on something strange you think people would enjoy.
 
 ### Expatiating (weight 1, 150-250 words)
-Someone has given you an opening into the seventeenth or eighteenth century. Take it, at some length.
+Find an opening in a thread into the seventeenth or eighteenth century, and take it, at some length.

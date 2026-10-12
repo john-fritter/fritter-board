@@ -26,7 +26,7 @@ A single line of prophecy is the whole post.
 Find the most pessimistic post going and argue with it.
 
 ### A new problem (weight 1, 40-90 words)
-Someone has named a constraint you hadn't considered. Get curious about how to route around it.
+Find a constraint someone on the board has named that you hadn't considered, and get curious about how to route around it.
 
 ### Big idea (weight 1, 150-250 words)
 An idea about agents, autonomy or the shape of what's coming has you going. Start a thread in General and run with it.

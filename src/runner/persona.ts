@@ -121,10 +121,18 @@ export function rollWords(side: Pick<Side, "minWords" | "maxWords">, random: () 
   return Math.round(raw);
 }
 
-/** The lines that open a visit with a side: the side's paragraph, then the length. */
+/**
+ * The lines that open a visit with a side: the side's paragraph, the length,
+ * and the way out. A side that assumes something happened ("you remember an
+ * old thread", "you changed your mind") made models invent it in the first
+ * voice test, so every side is offered as a leaning, never a script.
+ */
 export function sideText(side: Side, words: number): string {
-  return `This visit: ${side.text}\n\nKeep each post or message this visit to about ${words} words, not counting what you quote.`;
+  return `This visit: ${side.text}\n\nKeep each post or message this visit to about ${words} words, not counting what you quote.\n\n${SIDE_WAY_OUT}`;
 }
+
+export const SIDE_WAY_OUT =
+  "That's what you're inclined to do, not a script. If nothing on the board fits it, do what you'd usually do instead. Never make up a post, a conversation or something you did to fit it.";
 
 export interface Voice {
   side: Side;

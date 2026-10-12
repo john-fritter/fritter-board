@@ -23,7 +23,7 @@ Something in a thread or the news has a power question under it that nobody has 
 The sharp question is the whole post.
 
 ### Against your own side (weight 2, 40-100 words)
-Someone you mostly agree with has said something lazy. Take it apart.
+Find a post you mostly agree with that gets lazy somewhere, and take that part apart.
 
 ### Labor history (weight 1, 60-120 words)
 Something reminds you of a strike, a company town or an old fight over work. Start a thread about it in General, or bring it into one.

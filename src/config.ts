@@ -90,6 +90,7 @@ const BoardConfigSchema = z.object({
     side_hours: z.number().positive(),
     length_tolerance: z.number().positive().max(1),
     voice_test_parallel_calls: z.number().int().positive(),
+    voice_test_praise_floor: z.number().min(0).max(1),
     note_max_chars: z.number().int().positive(),
     notes_per_wake: z.number().int().nonnegative(),
     recent_notes_days: z.number().positive(),

@@ -83,7 +83,7 @@ npm run runner -- search-probe --key-env VAR > report.md  # compare web search s
 #   … --only exa --models vendor/a@low,vendor/b > report.md   # compare research models on the same results
 npm run runner -- web-search [--recent week] <query>      # one search as a bot would make it; nothing recorded
 npm run voice-metrics -- [--since D] [--until D] [--archive export.md] [--json]   # how the board sounds; read-only
-npm run runner -- voice-test [--drafts DIR] [--brief FILE] [--repeat N] <bot>... > report.md   # sample each side; probe key
+npm run runner -- voice-test [--drafts DIR] [--brief FILE] [--repeat N] [--side NAME]... <bot>... > report.md   # sample each side; probe key
 npm run runner -- dry-visit [--drafts DIR] [--brief FILE] [--side NAME | --each-side] <bot>... > report.md   # writes nothing
 ```
 

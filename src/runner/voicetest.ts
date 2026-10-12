@@ -34,6 +34,8 @@ export interface VoiceTestInput {
   personaSource: string;
   /** The current member brief, to run the control with; null for no control. */
   control: { memberBrief: string; briefSource: string } | null;
+  /** Only these sides, by name (any case); every side when left out. */
+  sides?: string[];
   /** Bots whose persona in the database differs from its starting point in personas/, with the database's text. */
   edited?: { name: string; text: string }[];
 }
@@ -73,7 +75,13 @@ export async function runVoiceTest(deps: VoiceTestDeps, input: VoiceTestInput): 
   for (const bot of input.bots) {
     const parts = parsePersona(bot.persona);
     const system = voiceSystemPrompt(input.memberBrief, personaPrompt(bot.persona));
-    const sides: (Side | null)[] = parts.sides.length ? parts.sides : [null];
+    const wanted = input.sides?.map((n) => n.toLowerCase());
+    const chosen = wanted ? parts.sides.filter((s) => wanted.includes(s.name.toLowerCase())) : parts.sides;
+    if (wanted && chosen.length < wanted.length) {
+      const missing = input.sides!.filter((n) => !parts.sides.some((s) => s.name.toLowerCase() === n.toLowerCase()));
+      throw new Error(`${bot.name} has no side called ${missing.map((n) => `"${n}"`).join(" or ")}. Its sides: ${parts.sides.map((s) => s.name).join(", ") || "none"}.`);
+    }
+    const sides: (Side | null)[] = chosen.length ? chosen : [null];
     for (const scenario of input.scenarios) {
       for (const side of sides) {
         for (let i = 0; i < input.repeat; i++) {
@@ -186,7 +194,9 @@ function report(input: VoiceTestInput, samples: Sample[], stopped: string | null
     `# Voice test, ${at.toISOString().slice(0, 16).replace("T", " ")} UTC`,
     "",
     `- Bots: ${input.bots.map((b) => `${b.name} (${b.model}, effort ${b.effort})`).join(", ")}.`,
-    `- Scenarios: ${input.scenarios.map((s) => s.name).join(", ")}. ${input.repeat} sample${input.repeat === 1 ? "" : "s"} per side per scenario.`,
+    `- Scenarios: ${input.scenarios.map((s) => s.name).join(", ")}. ${input.repeat} sample${input.repeat === 1 ? "" : "s"} per side per scenario.${
+      input.sides ? ` Only these sides: ${input.sides.join(", ")}; the everyday side's median is checked only if it's among them.` : ""
+    }`,
     `- Under test: personas ${input.personaSource}; member brief ${input.briefSource}. Each sample is asked for a length rolled from its side's range, as a visit would ask.`,
     input.control
       ? `- Control: the same scenarios under each bot's current persona and the member brief ${input.control.briefSource}, with no side or length, as visits are now.`
@@ -215,7 +225,7 @@ function report(input: VoiceTestInput, samples: Sample[], stopped: string | null
     "",
     "## Against the ready line",
     "",
-    `Ready means: at least 70% of samples on length; the median inside the everyday side's range; quote and praise in fewer samples than the control. Whether the sides read differently is for reading below.`,
+    `Ready means: at least 70% of samples on length; the median inside the everyday side's range; quote and praise in fewer samples than the control, or in under ${Math.round(config.runner.voice_test_praise_floor * 100)}% of them. Whether the sides read differently is for reading below.`,
     "",
     "| bot | on length | median vs everyday range | quote and praise vs control | ready |",
     "|---|---|---|---|---|"
@@ -231,7 +241,7 @@ function report(input: VoiceTestInput, samples: Sample[], stopped: string | null
     const inRange = day && med !== null ? med >= day.minWords && med <= day.maxWords : null;
     const praise = tested.length ? tested.filter((s) => s.measure!.praise.length).length / tested.length : null;
     const praiseControl = control.length ? control.filter((s) => s.measure!.praise.length).length / control.length : null;
-    const fewer = praise !== null && praiseControl !== null ? praise < praiseControl || (praise === 0 && praiseControl === 0) : null;
+    const fewer = praise === null ? null : praise < config.runner.voice_test_praise_floor || (praiseControl !== null && praise < praiseControl);
     const mark = (b: boolean | null) => (b === null ? "?" : b ? "yes" : "no");
     const lengthOk = share === null ? null : share >= 0.7;
     lines.push(

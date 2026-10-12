@@ -14,7 +14,7 @@ import { httpBoard } from "../src/runner/board.js";
 import { runDryVisits } from "../src/runner/dryvisit.js";
 import { loadPatterns, measurePost } from "../src/runner/measure.js";
 import type { ChatModel, ChatRequest, ChatResponse } from "../src/runner/model.js";
-import { parsePersona, personaPrompt, pickSide, rollWords, sideText } from "../src/runner/persona.js";
+import { parsePersona, personaPrompt, pickSide, rollWords, sideText, SIDE_WAY_OUT } from "../src/runner/persona.js";
 import { botByUsername, modelCallsLastDay, writesLastDay } from "../src/runner/store.js";
 import { loadScenarios } from "../src/runner/voice.js";
 import { runVoiceTest } from "../src/runner/voicetest.js";
@@ -81,7 +81,7 @@ function unit() {
   assert.equal(rollWords({ minWords: 3, maxWords: 4 }, () => 0.9), 4, "a range with no multiple of 5 rounds to a word");
   assert.equal(
     sideText(p.sides[0]!, 35),
-    "This visit: You're here for the people.\n\nKeep each post or message this visit to about 35 words, not counting what you quote."
+    `This visit: You're here for the people.\n\nKeep each post or message this visit to about 35 words, not counting what you quote.\n\n${SIDE_WAY_OUT}`
   );
 
   // Measures, as the voice metrics take them.
@@ -362,8 +362,36 @@ async function integration() {
   assert.match(test, /\| Testbot \| control \(today\) \| 4 \| - \| \d+ \|/);
   assert.match(test, /## Against the ready line/);
   assert.match(test, /\| Testbot \| 100% \(yes\) \| \d+ in 15-50 \(yes\) \| 100% vs 100% \(no\) \| no \|/, test);
+  assert.match(test, /or in under 5% of them/);
   assert.match(test, /#### Chatty · asked 35 · wrote \d+/);
   assert.match(test, /## Personas edited since personas\//);
+
+  // Only the sides asked for, with no control: praise is held to the floor alone.
+  asked.length = 0;
+  const some = await runVoiceTest(
+    { chat: fake, now: () => new Date(), random: () => 0.5, sleep: async () => {}, log: () => {} },
+    {
+      bots: [{ name: "Testbot", model: "vendor/m", effort: "low", persona: PERSONA, current: "You are Testbot." }],
+      scenarios,
+      repeat: 1,
+      memberBrief: "Brief.",
+      briefSource: "a draft",
+      personaSource: "drafts",
+      control: null,
+      sides: ["off-topic"],
+    }
+  );
+  assert.equal(asked.length, 2, "one side × 2 scenarios");
+  assert.doesNotMatch(some, /\| Testbot \| Chatty \|/);
+  assert.match(some, /Only these sides: off-topic/);
+  assert.match(some, /\| Testbot \| 100% \(yes\) \| - in 15-50 \(\?\) \| 100% vs - \(no\) \| \? \|/, some);
+  await assert.rejects(
+    runVoiceTest(
+      { chat: fake, now: () => new Date(), random: () => 0.5, sleep: async () => {}, log: () => {} },
+      { bots: [{ name: "Testbot", model: "vendor/m", effort: "low", persona: PERSONA, current: "" }], scenarios, repeat: 1, memberBrief: "", briefSource: "", personaSource: "", control: null, sides: ["Grumpy"] }
+    ),
+    /Testbot has no side called "Grumpy"\. Its sides: Chatty, Off-Topic\./
+  );
 
   await pool.end();
 }

@@ -26,4 +26,4 @@ A sentence or two will do.
 You've been thinking about a dead industry, a ruin, a failed piece of infrastructure or a civilization that expected to last. Start a thread about it in General.
 
 ### Proved right (weight 1, 40-90 words)
-Events have proved you right about something. Point it out, with visible satisfaction.
+Look back over threads where you made a prediction, and your notes. Where events since have borne you out, point it out with visible satisfaction, quoting what you said.

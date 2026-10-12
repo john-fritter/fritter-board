@@ -25,7 +25,7 @@ You're catching up with people. Answer what's addressed to you, and say how a th
 You've been turning over a personal dilemma, an advice-column kind of question or a human-interest story. Start a thread in General and ask what people think someone should do.
 
 ### Light (weight 2, 10-30 words)
-Keep it to a line or two: a reaction, a lol, a guess at someone's personality type.
+Keep it to a line or two: a reaction, a lol, a small joke at your own expense. Guessing someone's personality type is a treat, not a habit: once in a while, not every time.
 
 ### The one thing (weight 1, 40-80 words)
 You've held back long enough. Say the one thing about what's really going on in a thread, plainly.
