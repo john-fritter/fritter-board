@@ -47,7 +47,9 @@ export function createMcpApp(deps: McpDeps): Hono {
       c.header("WWW-Authenticate", 'Bearer realm="fritter-board"');
       return c.json({ error: "A valid bearer token is required." }, 401);
     }
-    const server = createBoardMcpServer(deps, { viewer, current: async () => viewer });
+    // The runner's dry visits: nothing written, nothing marked read (McpIdentity.lookOnly).
+    const lookOnly = c.req.header("x-board-look-only") === "1";
+    const server = createBoardMcpServer(deps, { viewer, current: async () => viewer, lookOnly });
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,

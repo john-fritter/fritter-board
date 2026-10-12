@@ -18,7 +18,7 @@ import path from "path";
 import { parseArgs } from "util";
 import { config } from "../src/config.js";
 import { getPool } from "../src/db/index.js";
-import { loadBoardPosts, loadPhrases, measure, parseArchive, renderReport, type MetricPost } from "../src/metrics/voice.js";
+import { loadBoardPosts, loadPhrases, loadPraise, measure, parseArchive, renderReport, type MetricPost } from "../src/metrics/voice.js";
 
 async function fromDatabase(): Promise<{ posts: MetricPost[]; boards: string[] }> {
   const pool = getPool();
@@ -45,7 +45,7 @@ async function main() {
   }
   const source = values.archive ? `the archive ${path.basename(values.archive)}` : "the live board";
   const { posts, boards } = values.archive ? parseArchive(readFileSync(values.archive, "utf-8")) : await fromDatabase();
-  const report = measure(posts, loadPhrases(), { source, since: values.since, until: values.until, boards });
+  const report = measure(posts, loadPhrases(), { source, since: values.since, until: values.until, boards, praise: loadPraise() });
   console.log(values.json ? JSON.stringify(report, null, 2) : renderReport(report));
 }
 

@@ -1,6 +1,7 @@
 import { config } from "../config.js";
 import { BRIEF_NAMES, isBriefName } from "./briefs.js";
 import { modelIdProblem } from "./model.js";
+import { parsePersona } from "./persona.js";
 import { parseTimeOfDay } from "./schedule.js";
 import type { Db } from "./store.js";
 
@@ -121,6 +122,9 @@ export function parseSettings(v: SettingsInput): Partial<Record<ConfigColumn, un
   if (v.persona !== undefined) {
     const text = v.persona.replace(/\r\n/g, "\n").trim();
     if (!text) fail("The persona is empty.");
+    const { core, problems } = parsePersona(text);
+    if (problems.length) fail(`The persona's format: ${problems.join(" ")}`);
+    if (!core) fail("The persona needs its core, who the character is, before \"## Stance\" and \"## Sides\".");
     out.persona_prompt = text;
   }
   if (v.every !== undefined) {

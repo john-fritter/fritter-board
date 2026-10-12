@@ -69,7 +69,8 @@ function RunSummary(props: { run: RunRow }) {
   const r = props.run;
   return (
     <>
-      {r.kind === "wake" ? r.trigger : r.kind === "compaction" ? "compaction" : `moderation (${r.trigger})`} · <span class={`outcome-${r.outcome}`}>{r.outcome}</span>
+      {r.kind === "wake" ? r.trigger : r.kind === "compaction" ? "compaction" : `${r.kind === "dry" ? "dry visit" : "moderation"} (${r.trigger})`} · <span class={`outcome-${r.outcome}`}>{r.outcome}</span>
+      {r.side && ` · ${r.side}, about ${r.postWords ?? "?"} words`}
       {r.fallbackModel && (
         <>
           {" "}
@@ -560,6 +561,14 @@ export function RunPage(props: { ctx: PageCtx; bot: Bot; run: RunDetail }) {
             </dd>
             <dt>Trigger</dt>
             <dd>{run.trigger}</dd>
+            {run.side && (
+              <>
+                <dt>Side</dt>
+                <dd>
+                  {run.side}, asked for about {run.postWords ?? "?"} words a post
+                </dd>
+              </>
+            )}
             <dt>Outcome</dt>
             <dd class={`outcome-${run.outcome}`}>{run.outcome}</dd>
             <dt>Model</dt>

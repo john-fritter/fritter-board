@@ -41,13 +41,22 @@ export interface Phrase {
 
 export const PHRASES_FILE = path.join(import.meta.dirname, "..", "..", "config", "voice-metrics.yaml");
 
-const PhrasesSchema = z.object({
-  phrases: z.array(z.object({ name: z.string().min(1), pattern: z.string().min(1) })).min(1),
-});
+const PatternList = z.array(z.object({ name: z.string().min(1), pattern: z.string().min(1) }));
+const PhrasesSchema = z.object({ phrases: PatternList.min(1), praise: PatternList.default([]) });
 
 export function loadPhrases(file = PHRASES_FILE): Phrase[] {
   const { phrases } = PhrasesSchema.parse(YAML.parse(readFileSync(file, "utf-8")));
   return phrases.map((p) => ({ name: p.name, pattern: new RegExp(p.pattern, "i") }));
+}
+
+/**
+ * The praise patterns: a post that quotes someone and matches one of these
+ * in its own words praises the line it quoted (the "quote and praise" count).
+ * `^` matches at the start of any line.
+ */
+export function loadPraise(file = PHRASES_FILE): Phrase[] {
+  const { praise } = PhrasesSchema.parse(YAML.parse(readFileSync(file, "utf-8")));
+  return praise.map((p) => ({ name: p.name, pattern: new RegExp(p.pattern, "im") }));
 }
 
 /** A post's own words: quotes removed, formatting tags dropped, apostrophes straightened. */
@@ -83,6 +92,8 @@ export interface MemberRow {
   question: number;
   /** Posts with at least one house phrase. */
   withPhrase: number;
+  /** Posts that quote someone and praise the line (loadPraise). */
+  quotePraise: number;
   /** Phrase name → posts using it, most used first. */
   phrases: [string, number][];
   /** Board name → posts, in board order. */
@@ -156,15 +167,17 @@ interface Measured {
   chars: number;
   words: number;
   phrases: string[];
+  praise: boolean;
 }
 
-function measurePost(post: MetricPost, phrases: Phrase[]): Measured {
+function measurePost(post: MetricPost, phrases: Phrase[], praise: Phrase[]): Measured {
   const text = ownText(post.body);
   return {
     post,
     chars: text.length,
     words: wordCount(text),
     phrases: phrases.filter((p) => p.pattern.test(text)).map((p) => p.name),
+    praise: /\[quote\b/i.test(post.body) && praise.some((p) => p.pattern.test(text)),
   };
 }
 
@@ -199,6 +212,7 @@ function memberRow(name: string, isBot: boolean, ms: Measured[], boardOrder: str
     anyQuote: share((m) => /\[quote\b/i.test(m.post.body)),
     question: share((m) => ownText(m.post.body).includes("?")),
     withPhrase: share((m) => m.phrases.length > 0),
+    quotePraise: share((m) => m.praise),
     phrases: byCount(phrases),
     boards: boardOrder.filter((b) => boards.has(b)).map((b) => [b, boards.get(b)!]),
     maxThreadDay: Math.max(0, ...threadDays.values()),
@@ -213,13 +227,15 @@ export interface MeasureOptions {
   until?: string | null;
   /** Every board, in display order, empty ones included. */
   boards: string[];
+  /** The praise patterns, for the quote-and-praise count (loadPraise); none counts nothing. */
+  praise?: Phrase[];
 }
 
 export function measure(all: MetricPost[], phrases: Phrase[], opts: MeasureOptions): VoiceReport {
   const since = opts.since ?? null;
   const until = opts.until ?? null;
   const posts = all.filter((p) => (since === null || p.at >= since) && (until === null || p.at < until));
-  const ms = posts.map((p) => measurePost(p, phrases));
+  const ms = posts.map((p) => measurePost(p, phrases, opts.praise ?? []));
   const boardOrder = [...opts.boards, ...new Set(posts.map((p) => p.board).filter((b) => !opts.boards.includes(b)))];
 
   const byAuthor = new Map<string, Measured[]>();
@@ -297,12 +313,12 @@ export function renderReport(r: VoiceReport): string {
 
   out.push("## Members", "");
   out.push(cells(["Member", "Posts", "Threads started", "Median chars", "90th pct chars", "Median words",
-    "Opens with quote", "Any quote", "Asks a question", "House phrase", "Most in one thread-day", "Removed"]));
-  out.push(cells(Array(12).fill("---")));
+    "Opens with quote", "Any quote", "Quote and praise", "Asks a question", "House phrase", "Most in one thread-day", "Removed"]));
+  out.push(cells(Array(13).fill("---")));
   for (const m of [...r.members, r.allBots, r.everyone]) {
     const name = m === r.allBots || m === r.everyone ? `**${m.name}**` : m.isBot ? `${m.name} (bot)` : m.name;
     out.push(cells([name, m.posts, m.threadsStarted, num(m.medianChars), num(m.p90Chars), num(m.medianWords),
-      pct(m.quoteOpen), pct(m.anyQuote), pct(m.question), pct(m.withPhrase), m.maxThreadDay, m.removed]));
+      pct(m.quoteOpen), pct(m.anyQuote), pct(m.quotePraise), pct(m.question), pct(m.withPhrase), m.maxThreadDay, m.removed]));
   }
   out.push("");
 
@@ -322,12 +338,12 @@ export function renderReport(r: VoiceReport): string {
   out.push("");
 
   out.push("## Bot posts by week", "");
-  out.push(cells(["Week of", "Posts", "Median chars", "Opens with quote", "Asks a question", "House phrase",
+  out.push(cells(["Week of", "Posts", "Median chars", "Opens with quote", "Quote and praise", "Asks a question", "House phrase",
     "Threads started", ...r.boards.map((b) => b.name)]));
-  out.push(cells(Array(r.boards.length + 7).fill("---")));
+  out.push(cells(Array(r.boards.length + 8).fill("---")));
   for (const w of r.weeks) {
     const counts = new Map(w.boards);
-    out.push(cells([w.week, w.posts, num(w.medianChars), pct(w.quoteOpen), pct(w.question), pct(w.withPhrase),
+    out.push(cells([w.week, w.posts, num(w.medianChars), pct(w.quoteOpen), pct(w.quotePraise), pct(w.question), pct(w.withPhrase),
       w.threadsStarted, ...r.boards.map((b) => counts.get(b.name) ?? 0)]));
   }
   out.push("");
