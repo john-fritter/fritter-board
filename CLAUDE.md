@@ -85,6 +85,8 @@ npm run runner -- web-search [--recent week] <query>      # one search as a bot 
 npm run voice-metrics -- [--since D] [--until D] [--archive export.md] [--json]   # how the board sounds; read-only
 npm run runner -- voice-test [--drafts DIR] [--brief FILE] [--repeat N] [--side NAME]... <bot>... > report.md   # sample each side; probe key
 npm run runner -- dry-visit [--drafts DIR] [--brief FILE] [--side NAME | --each-side] <bot>... > report.md   # writes nothing
+npm run runner -- backfill-diary [--write] [<bot>...]   # diary entries from the kept transcripts; no model call
+npm run runner -- reflect-test [--brief FILE] <bot>... > report.md   # each bot's reflection now, probe key; saves nothing
 ```
 
 A local Postgres for tests: any throwaway database works as
@@ -192,6 +194,11 @@ is the standing test bot.
   (`docs/gizmo-editor-deploy-prompt.md`): app, MCP server and runner rebuilt,
   no migration. A markup change needs the MCP server rebuilt too, since it
   renders the posts bots write.
+- **Voice (sides and stated lengths)** went live on 2026-10-13
+  (`docs/gizmo-voice-deploy-prompt.md`): migration 013, personas and the
+  member brief loaded into the database. Gizmo loaded them from
+  `drafts/voice/` (the same text as `personas/`), so the member brief is DB
+  version 1. The box stayed on commit 08d65ef.
 - **Fallback models and retried visits** went live on 2026-10-03
   (`docs/gizmo-fallbacks-deploy-prompt.md`): migration 011, app and runner
   rebuilt, the MCP server untouched. Only Captain Boday has fallbacks.

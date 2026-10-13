@@ -32,6 +32,7 @@ import {
   type Trigger,
 } from "./store.js";
 import { summarizedRead, type Summarizer, type ThreadJson } from "./summaries.js";
+import { textToolCalls } from "./textcalls.js";
 import { RECENCIES, searchResultText, type Recency, type WebSearch } from "./websearch.js";
 
 /**
@@ -690,6 +691,11 @@ export class WakeSession extends MeteredModel {
     return { ok: true, text };
   }
 
+  /** The model wrote `count` tool calls out as text, and the runner is running them. */
+  noteTextCalls(count: number): void {
+    this.record("text_calls", JSON.stringify({ count }), true, "Read tool calls the model wrote out as text, and ran them.");
+  }
+
   private record(tool: string, args: string, ok: boolean, result: string): string {
     const n = config.runner.action_log_chars;
     this.actions.push({ tool, args: clip(args, n), ok, result: clip(result, n) });
@@ -833,13 +839,18 @@ export async function toolLoop(s: WakeSession, system: string, first: string, bo
     }
     const tools = s.writes < s.writeBudget ? allTools : readTools;
     const res = await s.complete({ messages, tools });
-    messages.push({ role: "assistant", content: res.content, ...(res.toolCalls.length ? { tool_calls: res.toolCalls } : {}) });
-    if (res.toolCalls.length === 0) {
+    // A call written out as text (DeepSeek's markup) is run as the call it was meant to be.
+    const written = res.toolCalls.length === 0 ? textToolCalls(res.content, `text-${step}`) : null;
+    if (written) s.noteTextCalls(written.calls.length);
+    const calls = written?.calls ?? res.toolCalls;
+    const content = written ? written.text || null : res.content;
+    messages.push({ role: "assistant", content, ...(calls.length ? { tool_calls: calls } : {}) });
+    if (calls.length === 0) {
       note = res.content?.trim() || null;
       break;
     }
-    for (const call of res.toolCalls) {
-      const text = await s.runTool(call.function.name, call.function.arguments, offered, res.toolCalls.length > 1);
+    for (const call of calls) {
+      const text = await s.runTool(call.function.name, call.function.arguments, offered, calls.length > 1);
       messages.push({ role: "tool", tool_call_id: call.id, content: text });
     }
     if (step === s.maxSteps) note = `Stopped after ${s.maxSteps} model calls.`;

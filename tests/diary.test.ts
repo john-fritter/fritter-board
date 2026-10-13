@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import type { InboxJson } from "../src/runner/board.js";
 import { missingSections } from "../src/runner/compaction.js";
+import { replayVisit } from "../src/runner/backfill.js";
 import { postExcerpt, quotedNames, VisitDiary } from "../src/runner/diary.js";
+import type { ChatMessage } from "../src/runner/model.js";
+import { textToolCalls } from "../src/runner/textcalls.js";
 
 // The visit diary's pure parts: what a post says in its own words, whom it
-// quotes, how a visit's tool calls become one entry; and the reflection's
-// section check.
+// quotes, how a visit's tool calls become one entry; the backfill's replay
+// of an old transcript; the reflection's section check; and tool calls a
+// model wrote out as text.
 
 async function main() {
   // ── A post in its own words ──
@@ -48,6 +52,71 @@ async function main() {
   const lurker = new VisitDiary();
   lurker.observe("get_user", { username: "dan" }, JSON.stringify({ name: "Dan" }));
   assert.equal(lurker.entry(), "Read Dan's profile. Posted nothing.");
+
+  // ── An old visit replayed (the backfill) ──
+  const call = (id: string, name: string, args: object) => ({ id, type: "function" as const, function: { name, arguments: JSON.stringify(args) } });
+  const toolsVisit: ChatMessage[] = [
+    { role: "user", content: `Memory here.\n\nYour inbox since your last visit:\n${JSON.stringify(inbox)}` },
+    { role: "assistant", content: null, tool_calls: [call("a", "read_thread", { thread_id: 9 }), call("b", "reply", { thread_id: 9, body: "Too slow." })] },
+    { role: "tool", tool_call_id: "a", content: JSON.stringify({ thread: { thread_id: 9, title: "Pike" }, posts: [{ number: 1 }, { number: 2 }] }) },
+    { role: "tool", tool_call_id: "b", content: "You can't reply in a locked thread." },
+    { role: "assistant", content: null, tool_calls: [call("c", "reply", { thread_id: 4, body: "Yes." })] },
+    { role: "tool", tool_call_id: "c", content: JSON.stringify({ posted: true, post_id: 70 }) },
+    { role: "assistant", content: "Done." },
+  ];
+  const logged = (tool: string, ok: boolean) => ({ tool, args: "{}", ok, result: "" });
+  assert.equal(
+    replayVisit({ username: "Testbot", mode: "tools", transcript: toolsVisit, actions: [logged("read_thread", true), logged("cleanup", true), logged("reply", false), logged("reply", true)] }),
+    "Read “Pike” (thread 9), #1–2. Replied in “Zoning vote” (thread 4): “Yes.”"
+  );
+  // Without a log that lines up, a JSON result counts as success and a sentence as a refusal.
+  assert.equal(
+    replayVisit({ username: "Testbot", mode: "tools", transcript: toolsVisit, actions: [] }),
+    "Read “Pike” (thread 9), #1–2. Replied in “Zoning vote” (thread 4): “Yes.”"
+  );
+  const single: ChatMessage[] = [
+    {
+      role: "user",
+      content: `Memory.\n\nYour inbox since your last visit:\n${JSON.stringify(inbox)}\n\nThreads you've just read:\n${JSON.stringify([{ thread: { thread_id: 9, title: "Pike" }, posts: [{ number: 5 }] }])}\n\nDecide.`,
+    },
+    { role: "assistant", content: '```json\n{"action":"reply","thread_id":9,"body":"[quote=\\"Dan\\" post=2]x[/quote]Not this year."}\n```' },
+  ];
+  assert.equal(
+    replayVisit({ username: "Testbot", mode: "single_shot", transcript: single, actions: [{ tool: "reply", args: "{}", ok: true, result: '{"posted":true,"post_id":80}' }] }),
+    "Read “Pike” (thread 9), #5. Replied in “Pike” (thread 9), quoting Dan: “Not this year.”"
+  );
+  assert.equal(
+    replayVisit({ username: "Testbot", mode: "single_shot", transcript: single, actions: [{ tool: "reply", args: "{}", ok: false, result: "Refused." }] }),
+    "Read “Pike” (thread 9), #5. Posted nothing."
+  );
+
+  // ── Tool calls written out as text ──
+  const dsml = `And now thread 26
+
+<｜DSML｜tool_calls>
+<｜DSML｜invoke name="reply">
+<｜DSML｜parameter name="body" string="true">[quote="blackbird86" post=382]A line.[/quote]
+
+Two paragraphs.</｜DSML｜parameter>
+<｜DSML｜parameter name="thread_id" string="false">26</｜DSML｜parameter>
+</｜DSML｜invoke>
+<|DSML|invoke name="remember">
+<|DSML|parameter name="text" string="true">Watch thread 26.</|DSML|parameter>
+<|DSML|parameter name="about" string="false">blackbird86</|DSML|parameter>
+</|DSML|invoke>
+</｜DSML｜tool_calls>`;
+  const parsed = textToolCalls(dsml, "text-3");
+  assert.ok(parsed);
+  assert.equal(parsed.text, "And now thread 26");
+  assert.deepEqual(
+    parsed.calls.map((c) => [c.id, c.function.name, JSON.parse(c.function.arguments)]),
+    [
+      ["text-3-1", "reply", { body: '[quote="blackbird86" post=382]A line.[/quote]\n\nTwo paragraphs.', thread_id: 26 }],
+      ["text-3-2", "remember", { text: "Watch thread 26.", about: "blackbird86" }],
+    ]
+  );
+  assert.equal(textToolCalls("Nothing to add today."), null);
+  assert.equal(textToolCalls("<｜DSML｜tool_calls></｜DSML｜tool_calls>"), null, "markup with no call in it is left as text");
 
   // ── The reflection's sections ──
   assert.deepEqual(missingSections("## People\nx\n**Threads**\ny\nPositions:\nz\n### To do\nNothing."), []);

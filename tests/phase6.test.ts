@@ -10,6 +10,7 @@ import { createMcpApp } from "../src/mcp/app.js";
 import { httpBoard } from "../src/runner/board.js";
 import { compactionDue } from "../src/runner/compaction.js";
 import { ModelError, type ChatModel, type ChatRequest, type ChatResponse } from "../src/runner/model.js";
+import { runReflectTest } from "../src/runner/reflecttest.js";
 import { Runner } from "../src/runner/runner.js";
 import { localMinutes } from "../src/runner/schedule.js";
 import { settingsText, writeStanding } from "../src/runner/settings.js";
@@ -313,6 +314,26 @@ async function main() {
   await notDue(ashId);
   await pool.query("UPDATE bots.config SET active = FALSE WHERE user_id = $1", [ashId]);
 
+  // ── The reflection test: the same reflection, nothing saved ──
+  const compactionsBefore = await runCount(testbotId, "compaction");
+  const versionsBefore = (await one("SELECT COUNT(*)::int AS n FROM bots.standing_versions WHERE user_id = $1", [testbotId])).n as number;
+  model.script((req) => {
+    assert.match(text(req, 0), /Now and then you look back and rewrite them/);
+    assert.match(lastText(req), /Your diary so far, oldest first:/);
+    return say("## People\nDan, bridges.\n## Threads\nBack Room chatter.\n## Positions\nBridges.\n## To do\nNothing.");
+  });
+  const report = await runReflectTest(
+    { db: pool, chat: model, now: () => new Date(), sleep: async () => {}, log: () => {} },
+    [(await botByUserId(pool, testbotId))!],
+    { briefSource: "as in the code" }
+  );
+  assert.equal(model.steps.length, 0);
+  assert.match(report, /\| Testbot \| [^|]+ \| 3 \| 1 \| \d+ \| \d+ \| - \| 1 \| 1000\/50 \| ok \|/);
+  assert.match(report, /### New standing notes\n\n````text\n## People\nDan, bridges\./);
+  assert.match(report, /### Standing notes now\n\n````text\nDan likes bridges/);
+  assert.equal((await one("SELECT COUNT(*)::int AS n FROM bots.standing_versions WHERE user_id = $1", [testbotId])).n, versionsBefore, "nothing saved");
+  assert.equal(await runCount(testbotId, "compaction"), compactionsBefore, "and no run");
+
   // ── Compaction ──
   await pool.query("DELETE FROM bots.runs WHERE kind = 'compaction'");
   await notDue(testbotId);
@@ -431,6 +452,51 @@ async function main() {
     [testbotId]
   );
   assert.equal(await compactionDue({ db: pool }, bot, now), null, "the last reflection saw it");
+
+  // ── A tool call written out as text is run ──
+  model.script(
+    () =>
+      say(
+        `Now the Back Room.\n\n<｜DSML｜tool_calls>\n<｜DSML｜invoke name="reply">\n<｜DSML｜parameter name="body" string="true">Still bridges.</｜DSML｜parameter>\n<｜DSML｜parameter name="thread_id" string="false">${backRoom}</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>`
+      ),
+    (req) => {
+      assert.equal(lastJson(req).posted, true);
+      const asked = req.messages[req.messages.length - 2]!;
+      assert.equal("content" in asked ? asked.content : null, "Now the Back Room.", "the markup leaves the transcript as a call");
+      return say("Done.");
+    }
+  );
+  await makeDue(testbotId);
+  await runner.tick();
+  assert.equal(model.steps.length, 0);
+  r = await lastRun(testbotId);
+  assert.equal(r.outcome, "done", r.error);
+  assert.deepEqual(r.actions.map((a: { tool: string; ok: boolean }) => [a.tool, a.ok]), [["text_calls", true], ["reply", true]]);
+  assert.equal((await one("SELECT body FROM posts WHERE thread_id = $1 ORDER BY id DESC LIMIT 1", [backRoom])).body, "Still bridges.");
+  await notDue(testbotId);
+
+  // ── The backfill: past visits replayed into the diary, dated as they were ──
+  const lost = await one("SELECT * FROM bots.diary WHERE user_id = $1 ORDER BY id DESC LIMIT 1", [testbotId]);
+  assert.equal(lost.run_id, r.id);
+  assert.match(lost.body, /Replied in “Back Room chatter” \(thread \d+\): “Still bridges\.”/);
+  await pool.query("DELETE FROM bots.diary WHERE id = $1", [lost.id]);
+  const backfill = (args: string[]) =>
+    spawnSync(TSX, [path.join(ROOT, "src", "runner", "main.ts"), "backfill-diary", ...args], {
+      env: { ...process.env, RUNNER_DATABASE_URL: DB_URL },
+      encoding: "utf-8",
+    });
+  let b = backfill(["Testbot"]);
+  assert.equal(b.status, 0, b.stderr);
+  assert.match(b.stdout, new RegExp(`Testbot run ${r.id}, [^:]+:\\d\\d:[^:]+: ${lost.body.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\n`));
+  assert.match(b.stdout, /Nothing saved; run again with --write/);
+  assert.equal((await one("SELECT COUNT(*)::int AS n FROM bots.diary WHERE run_id = $1", [r.id])).n, 0);
+  b = backfill(["--write", "Testbot"]);
+  assert.equal(b.status, 0, b.stderr);
+  const back = await one("SELECT * FROM bots.diary WHERE run_id = $1", [r.id]);
+  assert.equal(back.body, lost.body);
+  assert.equal(back.created_at.getTime(), (await one("SELECT started_at FROM bots.runs WHERE id = $1", [r.id])).started_at.getTime());
+  b = backfill(["--write", "Testbot"]);
+  assert.equal((await one("SELECT COUNT(*)::int AS n FROM bots.diary WHERE run_id = $1", [r.id])).n, 1, "run again, nothing doubles");
 
   // ── Summaries of long threads ──
   const { threadId: long } = await createThread(forum, dan, await boardId("back-room"), "A long talk", "Post one.");

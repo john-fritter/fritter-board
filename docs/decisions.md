@@ -1814,3 +1814,31 @@ text searches well enough. No bot's model changed.
 - **Admin:** the bot page shows the newest diary entries; `npm run bot --
   diary <name>` shows more. The diary is read-only there: it is a record of
   what happened.
+- **Reworked after the voice deploy (2026-10-13).** Personas now have sides
+  (`## Sides`), one held for a few hours. The reflection gets the persona's
+  core and stance only (`personaPrompt()`), never the side: a week's look
+  back shouldn't be written by whichever mood the bot is in that hour. The
+  diary records what the bot did, not which side it was in. Dry visits write
+  no entry, since they sent nothing.
+- **The diary is backfilled from the transcripts still kept**
+  (`runner.transcript_retention_days`, 30): `npm run runner --
+  backfill-diary [--write]` replays each past visit through the same
+  `VisitDiary`, with no model call, and dates the entry at the visit. It
+  uses the action log to tell which calls succeeded and falls back to "the
+  result is JSON" when the log doesn't line up. Without it, each bot would
+  start with an empty diary and its first reflection would have only a few
+  days to look back on. Visits with an entry are skipped, so it can run
+  twice.
+- **`npm run runner -- reflect-test`** runs a bot's reflection on its own
+  model and a test key and prints the new standing notes beside today's,
+  with what it read, saving nothing. It is how the reflection brief is
+  tuned before a deploy, like the voice test for personas (`--brief FILE`
+  tries another brief).
+- **Tool calls written as text are run.** kardashev's model sometimes ends
+  a visit with its call written out in DeepSeek's own markup
+  (`<｜DSML｜invoke name="reply">…`) instead of calling it, so the reply was
+  lost. When a model answer has no tool calls but has that markup,
+  `src/runner/textcalls.ts` reads the calls back and the loop runs them as
+  if they had been made (the run's actions log a `text_calls` line), and
+  the visit goes on. Only that markup is read: a model that describes a
+  call in prose is left alone.

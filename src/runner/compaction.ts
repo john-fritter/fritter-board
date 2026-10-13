@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { config } from "../config.js";
-import { diaryLine, diaryOldest, diarySince } from "./diary.js";
-import { currentStanding, lastCompaction, noteLine, notesToFold, noteStats, saveCompaction } from "./memory.js";
+import { diaryLine, diaryOldest, diarySince, type DiaryEntry } from "./diary.js";
+import { currentStanding, lastCompaction, lastReflection, noteLine, notesToFold, noteStats, saveCompaction, type Note, type Standing } from "./memory.js";
 import type { ChatMessage } from "./model.js";
 import { personaPrompt } from "./persona.js";
 import { isAwake } from "./schedule.js";
@@ -36,7 +36,10 @@ export async function compactionDue(deps: Pick<WakeDeps, "db">, bot: Bot, now: D
   if (sleeps && isAwake(now, bot.schedule)) return null;
   const last = await lastCompaction(deps.db, bot.userId);
   if (last.tried && now.getTime() - last.tried.getTime() < r.compaction_retry_hours * HOUR) return null;
-  const [stats, oldestDiary] = await Promise.all([noteStats(deps.db, bot.userId, now), diaryOldest(deps.db, bot.userId, last.done)]);
+  const [stats, oldestDiary] = await Promise.all([
+    noteStats(deps.db, bot.userId, now),
+    lastReflection(deps.db, bot.userId).then((since) => diaryOldest(deps.db, bot.userId, since)),
+  ]);
   const every = r.compaction_every_days * DAY;
   const diaryWaiting = oldestDiary !== null && now.getTime() - oldestDiary.getTime() >= every;
   if (stats.count === 0 && !diaryWaiting) return null;
@@ -81,6 +84,78 @@ function unfence(text: string): string {
   return (m ? m[1]! : text).trim();
 }
 
+export interface Reflection {
+  standing: Standing | null;
+  notes: Note[];
+  diary: DiaryEntry[];
+  /** The new standing notes, as the model wrote them (unfenced); empty or over the limit if it never managed. */
+  body: string;
+  missing: string[];
+}
+
+/**
+ * A reflection, without saving it: what it reads (the standing notes, the
+ * notes to fold, the diary since the last reflection) and what the model
+ * writes from them, with one retry for the length or the headings. Null when
+ * there's nothing to reflect on. `all` folds every note (the admin's "compact
+ * now"); `brief` tries another reflection brief (the reflection test);
+ * `onMessages` gets the conversation as it grows, so a failure still logs it.
+ */
+export async function reflect(
+  deps: Pick<WakeDeps, "db" | "now">,
+  m: MeteredModel,
+  bot: Bot,
+  opts: { all?: boolean; brief?: string },
+  onMessages: (messages: ChatMessage[]) => void = () => {}
+): Promise<Reflection | null> {
+  const now = deps.now();
+  const max = config.runner.standing_max_chars;
+  const [standing, since] = await Promise.all([currentStanding(deps.db, bot.userId), lastReflection(deps.db, bot.userId)]);
+  const [notes, diary] = await Promise.all([
+    notesToFold(deps.db, bot.userId, now, opts.all ?? false),
+    diarySince(deps.db, bot.userId, since, config.runner.reflection_diary_chars),
+  ]);
+  if (notes.length === 0 && diary.length === 0) return null;
+  const headings = STANDING_SECTIONS.map((h) => `## ${h}`).join(", ");
+  const messages: ChatMessage[] = [
+    {
+      role: "system",
+      content: `${personaPrompt(bot.personaPrompt) || `You are ${bot.username}.`}\n\n## Your notebook\n\n${opts.brief ?? REFLECTION_BRIEF}`,
+    },
+    {
+      role: "user",
+      content: [
+        standing?.body.trim() ? `Your standing notes now:\n${standing.body.trim()}` : "You have no standing notes yet.",
+        diary.length
+          ? `Your diary ${since ? "since your last look back" : "so far"}, oldest first:\n${diary.map((e) => `- ${diaryLine(e)}`).join("\n")}`
+          : `No diary entries ${since ? "since your last look back" : "yet"}.`,
+        notes.length ? `Notes to fold in, oldest first:\n${notes.map((n) => `- ${noteLine(n)}`).join("\n")}` : "No notes to fold in this time.",
+        `Write your new standing notes under the four headings, in at most ${max} characters.`,
+      ].join("\n\n"),
+    },
+  ];
+  onMessages(messages);
+  let body = "";
+  let missing: string[] = [];
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const res = await m.complete({ messages });
+    messages.push({ role: "assistant", content: res.content });
+    body = unfence(res.content ?? "");
+    missing = missingSections(body);
+    if (body && body.length <= max && missing.length === 0) break;
+    if (attempt === 2) break;
+    messages.push({
+      role: "user",
+      content: !body
+        ? "That was empty. Answer with only your new standing notes."
+        : body.length > max
+          ? `That's ${body.length} characters; the limit is ${max}. Shorten it, keep the four headings (${headings}), and answer with only the notes.`
+          : `Put it under the four headings, ${headings}, each on a line of its own, and answer with only the notes.`,
+    });
+  }
+  return { standing, notes, diary, body, missing };
+}
+
 export async function runCompaction(deps: WakeDeps, bot: Bot, trigger: Trigger): Promise<CompactionResult> {
   const runId = await startRun(deps.db, bot, trigger, "compaction");
   const base = { writes: 0, actions: [] };
@@ -99,10 +174,8 @@ export async function runCompaction(deps: WakeDeps, bot: Bot, trigger: Trigger):
     return { outcome: "failed", runId, pausedUntil: null };
   }
 
-  const now = deps.now();
-  const max = config.runner.standing_max_chars;
   const m = new MeteredModel(deps, bot, deps.modelFor(apiKey));
-  const messages: ChatMessage[] = [];
+  let messages: ChatMessage[] = [];
   const record = (outcome: Outcome, extra: { note?: string; error?: string }) =>
     finishRun(deps.db, runId, {
       ...base,
@@ -116,51 +189,13 @@ export async function runCompaction(deps: WakeDeps, bot: Bot, trigger: Trigger):
     });
 
   try {
-    const [standing, last] = await Promise.all([currentStanding(deps.db, bot.userId), lastCompaction(deps.db, bot.userId)]);
-    const [notes, diary] = await Promise.all([
-      notesToFold(deps.db, bot.userId, now, trigger === "manual"),
-      diarySince(deps.db, bot.userId, last.done, config.runner.reflection_diary_chars),
-    ]);
-    if (notes.length === 0 && diary.length === 0) {
+    const r = await reflect(deps, m, bot, { all: trigger === "manual" }, (msgs) => (messages = msgs));
+    if (r === null) {
       await record("skipped", { note: "No notes to fold and no diary since the last reflection." });
       return { outcome: "skipped", runId, pausedUntil: null };
     }
-    const headings = STANDING_SECTIONS.map((h) => `## ${h}`).join(", ");
-    messages.push(
-      {
-        role: "system",
-        content: `${personaPrompt(bot.personaPrompt) || `You are ${bot.username}.`}\n\n## Your notebook\n\n${REFLECTION_BRIEF}`,
-      },
-      {
-        role: "user",
-        content: [
-          standing?.body.trim() ? `Your standing notes now:\n${standing.body.trim()}` : "You have no standing notes yet.",
-          diary.length
-            ? `Your diary ${last.done ? "since your last look back" : "so far"}, oldest first:\n${diary.map((e) => `- ${diaryLine(e)}`).join("\n")}`
-            : `No diary entries ${last.done ? "since your last look back" : "yet"}.`,
-          notes.length ? `Notes to fold in, oldest first:\n${notes.map((n) => `- ${noteLine(n)}`).join("\n")}` : "No notes to fold in this time.",
-          `Write your new standing notes under the four headings, in at most ${max} characters.`,
-        ].join("\n\n"),
-      }
-    );
-    let body = "";
-    let missing: string[] = [];
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      const res = await m.complete({ messages });
-      messages.push({ role: "assistant", content: res.content });
-      body = unfence(res.content ?? "");
-      missing = missingSections(body);
-      if (body && body.length <= max && missing.length === 0) break;
-      if (attempt === 2) break;
-      messages.push({
-        role: "user",
-        content: !body
-          ? "That was empty. Answer with only your new standing notes."
-          : body.length > max
-            ? `That's ${body.length} characters; the limit is ${max}. Shorten it, keep the four headings (${headings}), and answer with only the notes.`
-            : `Put it under the four headings, ${headings}, each on a line of its own, and answer with only the notes.`,
-      });
-    }
+    const { standing, notes, diary, body, missing } = r;
+    const max = config.runner.standing_max_chars;
     if (!body || body.length > max) {
       const error = body ? `The new standing notes were ${body.length} characters, over the ${max} limit.` : "The model wrote no standing notes.";
       await record("failed", { error });

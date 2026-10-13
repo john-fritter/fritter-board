@@ -223,10 +223,11 @@ export class VisitDiary {
   }
 }
 
-export async function insertDiary(db: Db, userId: number, runId: number | null, body: string): Promise<number> {
+export async function insertDiary(db: Db, userId: number, runId: number | null, body: string, createdAt: Date | null = null): Promise<number> {
+  // createdAt dates an entry backfilled from an old visit; a live one is now.
   const { rows } = await db.query<{ id: number }>(
-    "INSERT INTO bots.diary (user_id, run_id, body) VALUES ($1, $2, $3) RETURNING id",
-    [userId, runId, body]
+    "INSERT INTO bots.diary (user_id, run_id, body, created_at) VALUES ($1, $2, $3, COALESCE($4, now())) RETURNING id",
+    [userId, runId, body, createdAt]
   );
   return rows[0]!.id;
 }
