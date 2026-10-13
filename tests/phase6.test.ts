@@ -320,6 +320,7 @@ async function main() {
   model.script((req) => {
     assert.match(text(req, 0), /Now and then you look back and rewrite them/);
     assert.match(lastText(req), /Your diary so far, oldest first:/);
+    assert.equal(req.timeoutSeconds, 480, "a reflection's call gets longer than a visit's");
     return say("## People\nDan, bridges.\n## Threads\nBack Room chatter.\n## Positions\nBridges.\n## To do\nNothing.");
   });
   const report = await runReflectTest(

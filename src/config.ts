@@ -108,6 +108,7 @@ const BoardConfigSchema = z.object({
     compaction_max_chars: z.number().int().positive(),
     compaction_retry_hours: z.number().nonnegative(),
     reflection_diary_chars: z.number().int().positive(),
+    reflection_timeout_seconds: z.number().int().positive(),
     summary_min_posts: z.number().int().positive(),
     summary_tail_posts: z.number().int().positive(),
     summary_max_chars: z.number().int().positive(),

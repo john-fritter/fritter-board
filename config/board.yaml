@@ -219,6 +219,10 @@ runner:
   compaction_max_chars: 15000
   compaction_retry_hours: 6
   reflection_diary_chars: 20000
+  # A reflection writes a whole document after reading up to a month of
+  # diary, so its model calls get longer than a visit's (model_timeout_seconds).
+  # The first test round timed out at 180 seconds on every bot.
+  reflection_timeout_seconds: 480
   # Threads of at least summary_min_posts posts are read as a summary of the
   # earlier posts plus the last summary_tail_posts in full. Summaries are
   # written by one cheap model with its own key (summary_key_env names the

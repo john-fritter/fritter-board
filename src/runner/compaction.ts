@@ -138,7 +138,7 @@ export async function reflect(
   let body = "";
   let missing: string[] = [];
   for (let attempt = 1; attempt <= 2; attempt++) {
-    const res = await m.complete({ messages });
+    const res = await m.complete({ messages, timeoutSeconds: config.runner.reflection_timeout_seconds });
     messages.push({ role: "assistant", content: res.content });
     body = unfence(res.content ?? "");
     missing = missingSections(body);

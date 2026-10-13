@@ -1842,3 +1842,8 @@ text searches well enough. No bot's model changed.
   if they had been made (the run's actions log a `text_calls` line), and
   the visit goes on. Only that markup is read: a model that describes a
   call in prose is left alone.
+- **The reflection's model calls get 480 seconds** (`reflection_timeout_seconds`),
+  not a visit's 180. In the first test round (2026-10-13) every bot's
+  reflection timed out or got a 504 at 180: it reads up to a month of diary
+  and writes a whole document, often after reasoning. It runs while the bot
+  is asleep, so the wait costs nothing a member sees.
