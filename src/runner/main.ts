@@ -1,17 +1,19 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import "../dotenv.js";
 import { config } from "../config.js";
 import { httpBoard } from "./board.js";
 import { currentBriefs, defaultBriefs } from "./briefs.js";
+import { runDryVisits } from "./dryvisit.js";
 import { modelIdProblem, NanoGptModel, type ReasoningEffort } from "./model.js";
 import { probeModels } from "./probe.js";
 import { Runner } from "./runner.js";
 import { loadQueries, runSearchProbe } from "./searchprobe.js";
 import { EFFORTS } from "./settings.js";
-import { createRunnerPool, RUNNER_LOCK_KEY } from "./store.js";
+import { allBots, createRunnerPool, RUNNER_LOCK_KEY, type Bot } from "./store.js";
 import { Summarizer } from "./summaries.js";
 import { loadScenarios, runVoiceProbe, type Persona } from "./voice.js";
+import { runVoiceTest } from "./voicetest.js";
 import {
   RECENCIES,
   RESEARCHER,
@@ -50,6 +52,18 @@ import {
  *   npm run runner -- web-search [--recent day|week|month|year] <query>...
  *                                           one search as a bot would make it, with runner.env's
  *                                           keys, printed with its pages; nothing is recorded
+ *   npm run runner -- voice-test [--key-env VAR] [--drafts DIR] [--brief FILE] [--repeat N]
+ *                                [--no-control] [--side NAME]... <bot>...
+ *                                           sample posts from each bot on its own model, under each
+ *                                           side of its persona (drafts in DIR/<name>.md instead, if
+ *                                           given), in each scenario of config/voice-probe.yaml, with
+ *                                           today's prompts as the control: a Markdown report on stdout;
+ *                                           --side (repeatable) samples only the sides named
+ *   npm run runner -- dry-visit [--key-env VAR] [--drafts DIR] [--brief FILE] [--side NAME | --each-side]
+ *                                <bot>...
+ *                                           a whole visit by each bot on the live board, on VAR's key,
+ *                                           over a look-only connection: what it would have posted, in a
+ *                                           Markdown report on stdout; the board gets nothing
  */
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -216,6 +230,158 @@ async function probe(args: string[]): Promise<void> {
   process.exit(0);
 }
 
+/** A bot's persona file name: its username in lower case, other characters as hyphens (Captain Boday → captain-boday). */
+const personaSlug = (username: string) => username.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+/** The options the voice test and dry visits share, read off the front of args. */
+function testOptions(args: string[], usage: string, more: Record<string, (value: string | null) => void> = {}) {
+  const o = { keyEnv: "NANOGPT_PROBE_KEY", drafts: null as string | null, brief: null as string | null };
+  while (args[0]?.startsWith("--")) {
+    const flag = args.shift()!;
+    const handler = more[flag];
+    if (handler && handler.length === 0) {
+      handler(null);
+      continue;
+    }
+    const value = args.shift();
+    if (value === undefined) throw new Error(usage);
+    if (flag === "--key-env") o.keyEnv = value;
+    else if (flag === "--drafts") o.drafts = value;
+    else if (flag === "--brief") o.brief = value;
+    else if (handler) handler(value);
+    else throw new Error(`Unknown option ${flag}. ${usage}`);
+  }
+  if (args.length === 0) throw new Error(usage);
+  const key = process.env[o.keyEnv]?.trim();
+  if (!key) throw new Error(`Set ${o.keyEnv} to a NanoGPT key to test with.`);
+  return { ...o, key };
+}
+
+/** The bots named, from the database, in the order given. */
+async function namedBots(db: Parameters<typeof allBots>[0], names: string[]): Promise<Bot[]> {
+  const bots = await allBots(db);
+  return names.map((name) => bots.find((b) => b.username.toLowerCase() === name.trim().toLowerCase()) ?? fail(`There's no bot called ${name}.`));
+}
+
+const fail = (message: string): never => {
+  throw new Error(message);
+};
+
+/** Each bot's draft persona from DIR/<slug>.md, where there is one. */
+function draftPersonas(dir: string | null, bots: Bot[]): Map<string, string> {
+  const out = new Map<string, string>();
+  if (!dir) return out;
+  for (const b of bots) {
+    const file = path.join(dir, `${personaSlug(b.username)}.md`);
+    if (existsSync(file)) out.set(b.username, readFileSync(file, "utf-8").trim());
+  }
+  return out;
+}
+
+const VOICE_TEST_USAGE =
+  "Usage: npm run runner -- voice-test [--key-env VAR] [--drafts DIR] [--brief FILE] [--repeat N] [--no-control] [--side NAME]... <bot> [<bot>...]";
+
+async function voiceTest(args: string[]): Promise<void> {
+  let repeat = 3;
+  let control = true;
+  const sides: string[] = [];
+  const o = testOptions(args, VOICE_TEST_USAGE, {
+    "--side": (v) => {
+      sides.push(v!);
+    },
+    "--repeat": (v) => {
+      repeat = Number(v);
+      if (!Number.isInteger(repeat) || repeat < 1) throw new Error("--repeat is a whole number of samples, 1 or more.");
+    },
+    "--no-control": () => {
+      control = false;
+    },
+  });
+  const url = process.env["RUNNER_DATABASE_URL"] ?? fail("RUNNER_DATABASE_URL is required, for the bots' models and personas.");
+  const pool = createRunnerPool(url);
+  try {
+    const bots = await namedBots(pool, args);
+    const drafts = draftPersonas(o.drafts, bots);
+    const current = await memberBrief();
+    const brief = o.brief ? { text: readFileSync(o.brief, "utf-8").trim(), source: `from ${o.brief}` } : current;
+    const scenarios = loadScenarios();
+    const report = await runVoiceTest(
+      { chat: new NanoGptModel(o.key), now: () => new Date(), random: Math.random, sleep, log: (line) => console.error(`${new Date().toISOString()} ${line}`) },
+      {
+        bots: bots.map((b) => ({ name: b.username, model: b.model, effort: b.reasoningEffort, persona: drafts.get(b.username) ?? b.personaPrompt, current: b.personaPrompt })),
+        scenarios,
+        repeat,
+        memberBrief: brief.text,
+        briefSource: brief.source,
+        personaSource: o.drafts ? `from ${o.drafts} where there's a draft (${[...drafts.keys()].join(", ") || "none"}), otherwise as set` : "as set",
+        control: control ? { memberBrief: current.text, briefSource: current.source } : null,
+        ...(sides.length ? { sides } : {}),
+        edited: bots
+          .filter((b) => {
+            const file = path.join(PERSONAS_DIR, `${personaSlug(b.username)}.md`);
+            return !existsSync(file) || readFileSync(file, "utf-8").trim() !== b.personaPrompt.trim();
+          })
+          .map((b) => ({ name: b.username, text: b.personaPrompt })),
+      }
+    );
+    await printAll(report);
+  } finally {
+    await pool.end();
+  }
+  process.exit(0);
+}
+
+const DRY_VISIT_USAGE =
+  "Usage: npm run runner -- dry-visit [--key-env VAR] [--drafts DIR] [--brief FILE] [--side NAME | --each-side] <bot> [<bot>...]";
+
+async function dryVisit(args: string[]): Promise<void> {
+  let sides = "pick";
+  const o = testOptions(args, DRY_VISIT_USAGE, {
+    "--side": (v) => {
+      sides = v!;
+    },
+    "--each-side": () => {
+      sides = "each";
+    },
+  });
+  const url = process.env["RUNNER_DATABASE_URL"] ?? fail("RUNNER_DATABASE_URL is required (the fritter_bots role).");
+  const mcpUrl = process.env["MCP_URL"] ?? "http://127.0.0.1:3101/mcp";
+  const pool = createRunnerPool(url);
+  try {
+    const bots = await namedBots(pool, args);
+    const drafts = draftPersonas(o.drafts, bots);
+    const brief = o.brief ? { text: readFileSync(o.brief, "utf-8").trim(), source: `from ${o.brief}` } : null;
+    const summaryKey = process.env[config.runner.summary_key_env]?.trim();
+    const report = await runDryVisits(
+      {
+        db: pool,
+        connectBoard: httpBoard(mcpUrl),
+        modelFor: (key) => new NanoGptModel(key),
+        secret: (name) => process.env[name]?.trim() || undefined,
+        now: () => new Date(),
+        random: Math.random,
+        sleep,
+        summarizer: summaryKey ? new Summarizer(new NanoGptModel(summaryKey), { now: () => new Date(), sleep }) : null,
+        webSearch: null,
+        log: (line) => console.error(`${new Date().toISOString()} ${line}`),
+      },
+      {
+        bots,
+        apiKey: o.key,
+        sides,
+        personas: drafts,
+        personaSource: o.drafts ? `from ${o.drafts} where there's a draft (${[...drafts.keys()].join(", ") || "none"}), otherwise as set` : "as set",
+        ...(brief ? { memberBrief: brief.text } : {}),
+        briefSource: brief?.source ?? "as bots get it now",
+      }
+    );
+    await printAll(report);
+  } finally {
+    await pool.end();
+  }
+  process.exit(0);
+}
+
 const SEARCH_PROBE_USAGE =
   "Usage: npm run runner -- search-probe [--key-env VAR] [--only <service>[,<service>...]] [--models <model>[@<effort>][,...]]";
 
@@ -299,7 +465,10 @@ async function main(): Promise<void> {
   if (command === "probe") return probe(rest);
   if (command === "search-probe") return searchProbe(rest);
   if (command === "web-search") return webSearchOnce(rest);
-  if (command !== undefined) throw new Error(`Unknown command ${command}. Usage: npm run runner [-- probe … | search-probe … | web-search …]`);
+  if (command === "voice-test") return voiceTest(rest);
+  if (command === "dry-visit") return dryVisit(rest);
+  if (command !== undefined)
+    throw new Error(`Unknown command ${command}. Usage: npm run runner [-- probe … | search-probe … | web-search … | voice-test … | dry-visit …]`);
   await run();
 }
 

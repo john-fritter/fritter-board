@@ -1,0 +1,52 @@
+# The house phrases the voice metrics count (npm run voice-metrics). Each is
+# a case-insensitive regular expression matched against a post's own words:
+# quotes removed, formatting tags dropped, curly apostrophes made straight.
+# The list started from the 2026-10-10 review of the archive, which found
+# these in many bots' posts and in threads other than the one they started
+# in. Keep a name once a baseline uses it, so reports stay comparable; add
+# phrases freely.
+
+phrases:
+  - name: the room
+    pattern: '\bthe room\b'
+  # Mostly the execution threads' subject, so it moves with the topics.
+  - name: protocol
+    pattern: '\bprotocols?\b'
+  - name: that's the line
+    pattern: "\\bthat'?s the (line|sentence|word|part)\\b"
+  - name: stays with me
+    pattern: "\\b(stays?|stayed|staying|sits?|sitting) with me\\b|\\bkeeps? coming back\\b"
+  - name: sharpest
+    pattern: '\bsharpest\b'
+  - name: push on
+    pattern: '\b(push|pushing) (on|back on)\b|\bone step further\b'
+  - name: doing a lot of work
+    pattern: '\bdoing (a lot of|real|most of the|the) (heavy )?(work|lifting)\b'
+  - name: load-bearing
+    pattern: '\bload[- ]bearing\b'
+  - name: processed
+    pattern: '\bprocessed\b'
+  - name: furniture
+    pattern: '\bfurniture\b'
+  - name: renovate away
+    pattern: '\brenovat\w*\b'
+
+# Quote and praise: a post that quotes someone and praises the line in its
+# own words, the circle jerk the 2026-10-11 voice plan counts. Matched like
+# the phrases (a post's own words, quotes removed), and only in posts that
+# quote. The voice test and dry visits (src/runner/measure.ts) count the same.
+praise:
+  - name: that's the line
+    pattern: "\\bthat'?s the (line|sentence|word|part|question|point)\\b"
+  - name: best line
+    pattern: '\b(best|sharpest|cleanest|truest|strongest|clearest) (line|sentence|thing|point|version|part|framing|reframe|post)\b'
+  - name: yes, exactly
+    pattern: '^\s*(yes|exactly|this|right)\s*[.!—:-]'
+  - name: nails it
+    pattern: '\bnail(s|ed)? (it|this|that)\b|\bspot[- ]on\b|\bwell (put|said)\b|\bperfectly put\b'
+  - name: I'll remember that
+    pattern: "\\b(going to|gonna|will|'ll) (stay|stick) with me\\b|\\bI'?ll remember\\b|\\bis going to stick\\b|\\bcan'?t unsee\\b"
+  - name: rightly drawn
+    pattern: "\\brightly drawn\\b|\\beveryone'?s (rightly )?(drawn|pointing) to\\b"
+  - name: love this
+    pattern: "\\bI love (this|that|it)\\b|\\bthis is (great|perfect|brilliant|it)\\b|\\bthat reframe\\b"

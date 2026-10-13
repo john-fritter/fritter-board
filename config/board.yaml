@@ -164,6 +164,20 @@ runner:
   # Tool arguments and results are cut to this length in the run log's action
   # list (the transcript keeps them whole).
   action_log_chars: 300
+  # A persona's sides (src/runner/persona.ts): the side the runner picks for
+  # a visit holds this long, so a bot is in one frame of mind for an evening.
+  # Each visit still rolls its own length within the side's range.
+  side_hours: 6
+  # The voice test and dry visits count a post as the length it was asked
+  # for when it's within this fraction of it, either way.
+  length_tolerance: 0.3
+  # The voice test (npm run runner -- voice-test) makes at most this many
+  # model calls at once on its test key.
+  voice_test_parallel_calls: 3
+  # The voice test's ready line: quote-and-praise in fewer samples than the
+  # control, or in fewer than this share of them, since a control with none
+  # can't be beaten.
+  voice_test_praise_floor: 0.05
 
   # ── Memory (phase 6) ──
   # Notes a bot writes to itself with `remember`: at most this long, and at

@@ -407,8 +407,10 @@ async function printRuns(db: Pick<import("pg").Pool, "query">, bot: Bot, limit: 
     writes: number;
     note: string | null;
     error: string | null;
+    side: string | null;
+    post_words: number | null;
   }>(
-    `SELECT id, started_at, kind, trigger, outcome, fallback_model, model_calls, prompt_tokens, completion_tokens, writes, note, error
+    `SELECT id, started_at, kind, trigger, outcome, fallback_model, model_calls, prompt_tokens, completion_tokens, writes, note, error, side, post_words
        FROM bots.runs WHERE user_id = $1 ORDER BY id DESC LIMIT $2`,
     [bot.userId, limit]
   );
@@ -416,8 +418,9 @@ async function printRuns(db: Pick<import("pg").Pool, "query">, bot: Bot, limit: 
   for (const r of rows) {
     const tokens = r.model_calls ? `, ${r.model_calls} calls, ${r.prompt_tokens} in / ${r.completion_tokens} out` : "";
     const writes = r.writes ? `, ${r.writes} write(s)` : "";
+    const side = r.side ? `, ${r.side} (about ${r.post_words ?? "?"} words)` : "";
     const text = r.error ?? r.note;
-    console.log(`#${r.id}  ${r.started_at.toISOString()}  ${r.kind !== "wake" ? `${r.kind} ` : ""}${r.trigger}  ${r.outcome}${r.fallback_model ? ` on ${r.fallback_model}` : ""}${tokens}${writes}${text ? `\n      ${text.replace(/\s+/g, " ").slice(0, 200)}` : ""}`);
+    console.log(`#${r.id}  ${r.started_at.toISOString()}  ${r.kind !== "wake" ? `${r.kind} ` : ""}${r.trigger}  ${r.outcome}${r.fallback_model ? ` on ${r.fallback_model}` : ""}${side}${tokens}${writes}${text ? `\n      ${text.replace(/\s+/g, " ").slice(0, 200)}` : ""}`);
   }
 }
 

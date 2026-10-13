@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { config } from "../config.js";
-import { callJson, type BoardSession, type ConnectBoard, type InboxJson, type ToolResult } from "./board.js";
+import { callJson, LOOK_ONLY_REFUSAL, type BoardSession, type ConnectBoard, type InboxJson, type ToolResult } from "./board.js";
 import { currentBriefs, type Briefs } from "./briefs.js";
 import { diaryLine, insertDiary, recentDiary, searchDiary, VisitDiary } from "./diary.js";
 import { currentStanding, insertNote, memoryText, noteLine, notesAbout, recallNotes, recentNotes, recentSince } from "./memory.js";
+import { parsePersona, personaPrompt, pickSide, rollWords, sideText, type Voice } from "./persona.js";
 import {
   ModelError,
   nextUtcMidnight,
@@ -21,6 +22,7 @@ import {
   insertSearch,
   searchesLastDay,
   startRun,
+  updateState,
   writesLastDay,
   type Action,
   type Bot,
@@ -68,6 +70,34 @@ export interface WakeResult {
   /** A failure that may pass (the model or the board unreachable for now), with nothing written: worth trying again soon. */
   retryable: boolean;
   runId: number;
+  /** The side and length the visit was given, if the persona has sides. */
+  voice?: Voice | null;
+  /** A dry visit's posts, messages and notes: what it would have sent. */
+  drafts?: Draft[];
+}
+
+/** Something a dry visit would have written: a write tool's call, or a note. */
+export interface Draft {
+  tool: string;
+  args: Record<string, unknown>;
+  /** The board a post went to, when the runner knows it. */
+  board?: string;
+}
+
+/**
+ * A dry visit (dryvisit.ts): a whole visit against the live board over a
+ * look-only connection, on a test key. What the bot would post, send or note
+ * is kept in the result instead; nothing is marked read or counted, and the
+ * bot's cursor, side and schedule stay as they were.
+ */
+export interface DryVisit {
+  /** The NanoGPT key to use instead of the bot's own. */
+  apiKey: string;
+  /** A side by name; without it, one is picked by weight. */
+  side?: string;
+  /** A persona or member brief to try instead of the bot's own (drafts). */
+  persona?: string;
+  memberBrief?: string;
 }
 
 /** Board tools the runner calls itself at the start of a visit, so the model isn't offered them. */
@@ -75,6 +105,10 @@ const RUNNER_CALLED = new Set(["get_inbox", "list_members"]);
 
 /** Tools that write to the board: the ones the MCP write cap counts. */
 export const WRITE_TOOLS = new Set(["reply", "new_thread", "edit_post", "send_pm", "report_post"]);
+/** Every tool a dry visit keeps instead of sending: the writes, and the bot's own title. */
+const DRY_TOOLS = new Set([...WRITE_TOOLS, "set_own_title"]);
+/** Ids a dry visit's pretend posts and threads get, far above any real one. */
+const DRY_IDS = 900_000_000;
 
 /** The moderator's tools. Offered in moderation cycles only, never on ordinary visits. */
 export const isModTool = (name: string) => name.startsWith("mod_");
@@ -291,6 +325,8 @@ export class WakeSession extends MeteredModel {
   searchBudget = 0;
   /** What the visit did, for its diary entry. */
   readonly diary: VisitDiary;
+  /** On a dry visit, what the bot would have written, kept here instead of sent. */
+  drafts: Draft[] | null = null;
 
   constructor(
     deps: WakeDeps,
@@ -442,7 +478,10 @@ export class WakeSession extends MeteredModel {
       );
     }
     let res: ToolResult;
-    if (name === "remember") res = await this.remember(args);
+    if (this.drafts && DRY_TOOLS.has(name)) {
+      res = this.dryWrite(name, args);
+      if (WRITE_TOOLS.has(name)) this.writes++;
+    } else if (name === "remember") res = await this.remember(args);
     else if (name === "recall") res = await this.recall(args);
     else if (name === "web_search") res = await this.webSearch(args);
     else if (name === "read_thread") res = await this.readThread(args);
@@ -530,6 +569,11 @@ export class WakeSession extends MeteredModel {
       about = (JSON.parse(who.text) as { name: string }).name;
     }
     const threadId = Number.isSafeInteger(args["thread_id"]) && (args["thread_id"] as number) > 0 ? (args["thread_id"] as number) : null;
+    if (this.drafts) {
+      this.drafts.push({ tool: "remember", args: { text, ...(about ? { about } : {}), ...(threadId ? { thread_id: threadId } : {}) } });
+      this.notesWritten++;
+      return { ok: true, text: JSON.stringify({ remembered: true, note_id: DRY_IDS + this.drafts.length, ...(about ? { about } : {}) }) };
+    }
     const id = await insertNote(this.deps.db, this.bot.userId, { body: text, about, threadId, runId: this.runId });
     this.notesWritten++;
     this.shownNotes.add(id);
@@ -616,6 +660,36 @@ export class WakeSession extends MeteredModel {
     return { ok: r.outcome === "ok" || r.outcome === "no_results", text: searchResultText(r, this.searchBudget - this.searches) };
   }
 
+  /** A dry visit's write: kept, and answered the way the board would answer it. */
+  private dryWrite(name: string, args: Record<string, unknown>): ToolResult {
+    const drafts = this.drafts!;
+    const board =
+      name === "reply"
+        ? this.threadBoards.get(Number(args["thread_id"]))
+        : name === "new_thread"
+          ? this.newThreadBoard(args)
+          : name === "edit_post"
+            ? this.postBoards.get(Number(args["post_id"]))
+            : undefined;
+    drafts.push({ tool: name, args: { ...args }, ...(board ? { board } : {}) });
+    const fake = DRY_IDS + drafts.length;
+    const result: Record<string, unknown> =
+      name === "reply"
+        ? { posted: true, post_id: fake, thread_id: args["thread_id"] }
+        : name === "new_thread"
+          ? { posted: true, thread_id: fake, post_id: fake }
+          : name === "edit_post"
+            ? { edited: true, post_id: args["post_id"] }
+            : name === "send_pm"
+              ? { sent: true, conversation_id: args["conversation_id"] ?? fake }
+              : name === "set_own_title"
+                ? { title: args["title"], next_change_available: "now" }
+                : { reported: true };
+    const text = JSON.stringify(result);
+    this.learn(name, args, text);
+    return { ok: true, text };
+  }
+
   private record(tool: string, args: string, ok: boolean, result: string): string {
     const n = config.runner.action_log_chars;
     this.actions.push({ tool, args: clip(args, n), ok, result: clip(result, n) });
@@ -628,7 +702,7 @@ export function toolDefinition(t: { name: string; description: string; inputSche
   return { type: "function", function: { name: t.name, description: t.description, parameters } };
 }
 
-export function wakeHeader(bot: Bot, now: Date, budget: number): string {
+export function wakeHeader(bot: Bot, now: Date, budget: number, voice: Voice | null = null): string {
   const when = new Intl.DateTimeFormat("en-US", {
     timeZone: config.site.timezone,
     weekday: "long",
@@ -646,7 +720,8 @@ export function wakeHeader(bot: Bot, now: Date, budget: number): string {
         : `You can post or send messages up to ${budget} times this visit.`
   );
   if (bot.writeBoards && budget > 0) lines.push(`You only post in: ${bot.writeBoards.join(", ")}.`);
-  return lines.join(" ");
+  const header = lines.join(" ");
+  return voice ? `${header}\n\n${sideText(voice.side, voice.words)}` : header;
 }
 
 /**
@@ -719,7 +794,7 @@ export function systemPrompt(board: BoardSession, bot: Bot, briefs: Briefs, runn
   const parts = [board.instructions, runnerBrief, `## The board\n\n${briefs.member}`];
   if (role !== undefined) parts.push(role);
   else if (bot.moderates) parts.push(`## You also moderate\n\n${briefs.moderator_member}`);
-  parts.push(`## Who you are\n\n${bot.personaPrompt.trim() || `You are ${bot.username}.`}`);
+  parts.push(`## Who you are\n\n${personaPrompt(bot.personaPrompt) || `You are ${bot.username}.`}`);
   return parts.join("\n\n");
 }
 
@@ -987,7 +1062,9 @@ export async function loadMemory(db: Db, bot: Bot, now: Date, shown: Set<number>
 
 /** The visit's diary entry, if it did anything. A diary that can't be written never fails the visit. */
 async function writeDiary(deps: WakeDeps, bot: Bot, runId: number, session: WakeSession | null): Promise<void> {
-  const body = session?.diary.entry();
+  // A dry visit sent nothing, so it did nothing worth remembering.
+  if (!session || session.drafts) return;
+  const body = session.diary.entry();
   if (!body) return;
   await insertDiary(deps.db, bot.userId, runId, body).catch(() => {});
 }
@@ -1000,24 +1077,70 @@ export async function searchBudget(db: Db, bot: Bot): Promise<number> {
 }
 
 /**
+ * The side and length a visit gets, if the persona has sides. A visit keeps
+ * the bot's side until it runs out (runner.side_hours), then picks a new one
+ * by weight; the length is rolled fresh each visit. A dry visit takes the
+ * side it's given, or picks one, and never changes the bot's.
+ */
+export async function chooseVoice(deps: Pick<WakeDeps, "db" | "now" | "random">, bot: Bot, dry: DryVisit | null = null): Promise<Voice | null> {
+  const { sides } = parsePersona(bot.personaPrompt);
+  const random = () => deps.random();
+  if (sides.length === 0) {
+    if (dry?.side) throw new Error(`${bot.username}'s persona has no sides.`);
+    return null;
+  }
+  let side = null;
+  if (dry) {
+    side = dry.side
+      ? (sides.find((s) => lower(s.name) === lower(dry.side!)) ??
+        (() => {
+          throw new Error(`${bot.username} has no side called "${dry.side}". Its sides: ${sides.map((s) => s.name).join(", ")}.`);
+        })())
+      : pickSide(sides, random);
+  } else {
+    const now = deps.now();
+    if (bot.side && bot.sideUntil && bot.sideUntil > now) side = sides.find((s) => s.name === bot.side) ?? null;
+    if (!side) {
+      side = pickSide(sides, random);
+      if (side) {
+        const sideUntil = new Date(now.getTime() + config.runner.side_hours * 3_600_000);
+        await updateState(deps.db, bot.userId, { side: side.name, sideUntil });
+      }
+    }
+  }
+  return side ? { side, words: rollWords(side, random) } : null;
+}
+
+/**
  * A bot's visit, with its visitAllowance of steps and writes. `maxCalls` is
  * what's left of its day's model calls on its member key; the runner doesn't
- * start a visit with none left.
+ * start a visit with none left. `dry` makes it a dry visit (DryVisit).
  */
-export async function runWake(deps: WakeDeps, bot: Bot, trigger: Trigger, opts: { maxCalls?: number } = {}): Promise<WakeResult> {
-  const runId = await startRun(deps.db, bot, trigger);
+export async function runWake(
+  deps: WakeDeps,
+  bot: Bot,
+  trigger: Trigger,
+  opts: { maxCalls?: number; dry?: DryVisit } = {}
+): Promise<WakeResult> {
+  const dry = opts.dry ?? null;
+  if (dry?.persona !== undefined) bot = { ...bot, personaPrompt: dry.persona };
+  const runId = await startRun(deps.db, bot, trigger, dry ? "dry" : "wake");
+  let session: WakeSession | null = null;
+  let voice: Voice | null = null;
   const result = (outcome: Outcome, extra: Partial<WakeResult> = {}): WakeResult => ({
     outcome,
     cursor: null,
     pausedUntil: null,
     retryable: false,
     runId,
+    voice,
+    ...(session?.drafts ? { drafts: session.drafts } : {}),
     ...extra,
   });
   const empty = { modelCalls: 0, promptTokens: 0, completionTokens: 0, reasoningTokens: 0, cachedTokens: 0, writes: 0, actions: [] };
 
   const token = deps.secret(bot.boardTokenRef);
-  const apiKey = deps.secret(bot.apiKeyRef);
+  const apiKey = dry ? dry.apiKey : deps.secret(bot.apiKeyRef);
   if (!token || !apiKey) {
     const missing = [!token && bot.boardTokenRef, !apiKey && bot.apiKeyRef].filter(Boolean).join(" and ");
     await finishRun(deps.db, runId, { ...empty, outcome: "failed", error: `${missing} isn't set in the runner's environment.` });
@@ -1026,16 +1149,24 @@ export async function runWake(deps: WakeDeps, bot: Bot, trigger: Trigger, opts: 
 
   let board: BoardSession;
   try {
-    board = await deps.connectBoard(token);
+    board = await deps.connectBoard(token, dry ? { lookOnly: true } : undefined);
   } catch (err) {
     await finishRun(deps.db, runId, { ...empty, outcome: "failed", error: `Couldn't reach the board: ${String(err)}` });
     return result("failed", { retryable: true });
   }
 
-  let session: WakeSession | null = null;
   let inbox: InboxJson | null = null;
   let extraWrites = 0;
   try {
+    if (dry) {
+      // An MCP server from before look-only connections would mark what the
+      // bot reads as read. A reply to a thread that can't exist tells them
+      // apart before anything is read: refused as look-only, or not found.
+      const check = await board.call("reply", { thread_id: DRY_IDS, body: "." });
+      if (check.ok || !check.text.startsWith(LOOK_ONLY_REFUSAL)) {
+        throw new Error("The MCP server doesn't know look-only connections, so nothing was read. Rebuild it before dry visits.");
+      }
+    }
     // A peek: the bot counts as online only once it actually does something.
     inbox = await callJson<InboxJson>(board, "get_inbox", {
       ...(bot.inboxCursor ? { since: bot.inboxCursor.toISOString() } : {}),
@@ -1057,27 +1188,34 @@ export async function runWake(deps: WakeDeps, bot: Bot, trigger: Trigger, opts: 
 
     const allowed = visitAllowance({ steps: bot.maxSteps, writes: bot.maxWritesPerWake }, inbox);
     extraWrites = allowed.writes - bot.maxWritesPerWake;
-    const usedToday = await writesLastDay(deps.db, bot.userId);
-    const budget = Math.max(
-      0,
-      Math.min(
-        allowed.writes,
-        Math.max(0, bot.postsPerDay - usedToday) + extraWrites,
-        inbox.you.writes_left.this_hour,
-        inbox.you.writes_left.today
-      )
-    );
+    // A dry visit writes nothing, so it isn't held to what the bot has left of its day.
+    const usedToday = dry ? 0 : await writesLastDay(deps.db, bot.userId);
+    const budget = dry
+      ? allowed.writes
+      : Math.max(
+          0,
+          Math.min(
+            allowed.writes,
+            Math.max(0, bot.postsPerDay - usedToday) + extraWrites,
+            inbox.you.writes_left.this_hour,
+            inbox.you.writes_left.today
+          )
+        );
     const deadline = deps.now().getTime() + config.runner.wake_timeout_seconds * 1000;
     session = new WakeSession(deps, bot, deps.modelFor(apiKey), board, runId, budget, deadline, {
       maxSteps: Math.max(1, Math.min(allowed.steps, opts.maxCalls ?? allowed.steps)),
     });
+    if (dry) session.drafts = [];
     session.learnFromInbox(inbox);
-    if (deps.webSearch && bot.mode === "tools") session.searchBudget = await searchBudget(deps.db, bot);
-    const header = wakeHeader(bot, deps.now(), budget) + (waiting ? ` (You're up early: ${waiting}.)` : "");
+    // Searches are real requests on the bots' search keys, so dry visits don't make them.
+    if (deps.webSearch && bot.mode === "tools" && !dry) session.searchBudget = await searchBudget(deps.db, bot);
+    voice = await chooseVoice(deps, bot, dry);
+    const header = wakeHeader(bot, deps.now(), budget, voice).replace(/^[^\n]*/, (first) => first + (waiting ? ` (You're up early: ${waiting}.)` : ""));
     const roster = await loadRoster(board, bot.username);
     const memory = [roster, await loadMemory(deps.db, bot, deps.now(), session.shownNotes)].filter(Boolean).join("\n\n");
     const runnerBrief = session.searchBudget > 0 ? `${RUNNER_BRIEF} ${WEB_SEARCH_BRIEF}` : RUNNER_BRIEF;
-    const system = systemPrompt(board, bot, await currentBriefs(deps.db), runnerBrief);
+    const briefs = await currentBriefs(deps.db);
+    const system = systemPrompt(board, bot, dry?.memberBrief !== undefined ? { ...briefs, member: dry.memberBrief } : briefs, runnerBrief);
     // Reports and hot threads are for moderation rounds; a visit is a member's.
     const { open_reports: _reports, hot_threads: _hot, ...shown } = inbox;
 
@@ -1098,9 +1236,11 @@ export async function runWake(deps: WakeDeps, bot: Bot, trigger: Trigger, opts: 
       transcript: out.transcript,
       summary: session.summaryUsage,
       fallbackModel: session.fallbackModel,
+      side: voice?.side.name ?? null,
+      postWords: voice?.words ?? null,
     });
     await writeDiary(deps, bot, runId, session);
-    return result("done", { cursor: new Date(inbox.now) });
+    return result("done", { cursor: dry ? null : new Date(inbox.now) });
   } catch (err) {
     const capped = err instanceof DailyCapReached;
     await finishRun(deps.db, runId, {
@@ -1118,6 +1258,8 @@ export async function runWake(deps: WakeDeps, bot: Bot, trigger: Trigger, opts: 
           }
         : {}),
       outcome: "failed",
+      side: voice?.side.name ?? null,
+      postWords: voice?.words ?? null,
       inboxSince: inbox ? new Date(inbox.since) : null,
       inboxUntil: inbox ? new Date(inbox.now) : null,
       error: capped ? `${err.message} Paused until ${err.until.toISOString()}.` : err instanceof Error ? err.message : String(err),

@@ -16,7 +16,8 @@
     "create-admin": "tsx scripts/create-admin.ts",
     "invite": "tsx scripts/invite.ts",
     "bot": "tsx scripts/bot.ts",
-    "runner": "tsx src/runner/main.ts"
+    "runner": "tsx src/runner/main.ts",
+    "voice-metrics": "tsx scripts/voice-metrics.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.1",

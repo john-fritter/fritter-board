@@ -67,7 +67,7 @@ async function settingsCall<T>(fn: () => Promise<T>): Promise<T> {
 
 export interface RunRow {
   id: number;
-  kind: "wake" | "compaction" | "moderation";
+  kind: "wake" | "compaction" | "moderation" | "dry";
   trigger: string;
   outcome: string;
   startedAt: Date;
@@ -83,6 +83,9 @@ export interface RunRow {
   writes: number;
   note: string | null;
   error: string | null;
+  /** The persona's side the visit was on, and the length in words it was asked for. */
+  side: string | null;
+  postWords: number | null;
 }
 
 export interface Action {
@@ -116,7 +119,7 @@ export interface RunDetail extends RunRow {
 }
 
 const RUN_COLUMNS = `id, kind, trigger, outcome, started_at, finished_at, model, fallback_model, model_calls, prompt_tokens,
-  completion_tokens, cached_tokens, summary_calls, writes, note, error`;
+  completion_tokens, cached_tokens, summary_calls, writes, note, error, side, post_words`;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const toRun = (r: any): RunRow => ({
@@ -136,6 +139,8 @@ const toRun = (r: any): RunRow => ({
   writes: r.writes,
   note: r.note,
   error: r.error,
+  side: r.side,
+  postWords: r.post_words,
 });
 
 async function recentRuns(db: Db, userId: number, limit: number, offset = 0): Promise<RunRow[]> {

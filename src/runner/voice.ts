@@ -4,6 +4,7 @@ import YAML from "yaml";
 import { z } from "zod";
 import { config } from "../config.js";
 import { ModelError, type ChatModel, type ChatResponse, type ReasoningEffort } from "./model.js";
+import { personaPrompt } from "./persona.js";
 import { isReachable, probeModel, probeTable, type ProbeResult } from "./probe.js";
 
 /**
@@ -223,7 +224,7 @@ export async function runVoiceProbe(deps: VoiceProbeDeps, input: VoiceProbeInput
       targets = results.filter(isReachable).map((r) => ({ model: r.model, effort: r.effort }));
     }
     for (const persona of input.personas) {
-      const system = voiceSystemPrompt(input.memberBrief, persona.text);
+      const system = voiceSystemPrompt(input.memberBrief, personaPrompt(persona.text));
       for (const scenario of input.scenarios) {
         for (const t of targets) {
           const done = new Set<ReasoningEffort>();
