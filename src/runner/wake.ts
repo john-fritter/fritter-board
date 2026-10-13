@@ -264,13 +264,13 @@ export class MeteredModel {
    * retry_wait_seconds; if it fails again, each later fallback is tried once,
    * at the same effort, and the first to answer serves the rest of the run.
    */
-  async complete(req: Omit<ChatRequest, "model" | "reasoningEffort">): Promise<ChatResponse> {
+  async complete(req: Omit<ChatRequest, "model" | "reasoningEffort">, effort: ReasoningEffort = this.effort): Promise<ChatResponse> {
     const failures: string[] = [];
     for (let i = this.current, retried = false; ; ) {
       const model = this.models[i]!;
       try {
         this.modelCalls++;
-        const res = await this.model.complete({ ...req, model, reasoningEffort: this.effort });
+        const res = await this.model.complete({ ...req, model, reasoningEffort: effort });
         this.usage.promptTokens += res.usage.promptTokens;
         this.usage.completionTokens += res.usage.completionTokens;
         this.usage.reasoningTokens += res.usage.reasoningTokens;

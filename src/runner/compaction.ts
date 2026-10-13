@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { config } from "../config.js";
 import { diaryLine, diaryOldest, diarySince, type DiaryEntry } from "./diary.js";
 import { currentStanding, lastCompaction, lastReflection, noteLine, notesToFold, noteStats, saveCompaction, type Note, type Standing } from "./memory.js";
-import type { ChatMessage } from "./model.js";
+import type { ChatMessage, ReasoningEffort } from "./model.js";
 import { personaPrompt } from "./persona.js";
 import { isAwake } from "./schedule.js";
 import { finishRun, startRun, type Bot, type Outcome, type Trigger } from "./store.js";
@@ -65,12 +65,23 @@ What you've argued, and where you've changed your mind.
 ## To do
 What you've promised, been asked, or mean to do; or "Nothing" if there's nothing.
 
-Keep what still matters from your old standing notes and let go of what doesn't. Don't invent: if your diary, your notes or your standing notes don't say it, leave it out. Keep usernames exactly as written. Answer with only the new standing notes: no preface, no sign-off.`;
+Your old standing notes know things your diary doesn't: what members have told you about themselves and their lives, how the board began, threads from before the diary started. Carry those over unless the diary shows they're wrong or finished; a thread that has gone quiet still gets its line, and a member who said something about their life keeps it. Let go only of what no longer matters, and use the room you have. Don't invent: if your diary, your notes or your standing notes don't say it, leave it out. Keep usernames exactly as written. Answer with only the new standing notes: no preface, no sign-off.`;
 
 /** The sections a standing document lacks, by heading: "## People", "**People**" or "People:" on a line of its own. */
 export function missingSections(body: string): string[] {
   return STANDING_SECTIONS.filter((name) => !new RegExp(`^\\s*(#{1,4}\\s*|\\*\\*)?${name}\\b`, "im").test(body));
 }
+
+/** The effort a reflection retries at when the first try spent everything on reasoning. */
+const LESS_EFFORT: Record<ReasoningEffort, ReasoningEffort> = {
+  default: "low",
+  xhigh: "low",
+  high: "low",
+  medium: "low",
+  low: "none",
+  minimal: "none",
+  none: "none",
+};
 
 export interface CompactionResult {
   outcome: Outcome;
@@ -137,20 +148,27 @@ export async function reflect(
   onMessages(messages);
   let body = "";
   let missing: string[] = [];
+  let effort = m.effort;
   for (let attempt = 1; attempt <= 2; attempt++) {
-    const res = await m.complete({ messages, timeoutSeconds: config.runner.reflection_timeout_seconds });
+    const res = await m.complete({ messages, timeoutSeconds: config.runner.reflection_timeout_seconds }, effort);
     messages.push({ role: "assistant", content: res.content });
     body = unfence(res.content ?? "");
     missing = missingSections(body);
     if (body && body.length <= max && missing.length === 0) break;
     if (attempt === 2) break;
+    // A model that spent its whole output on reasoning (Penny's, in the first
+    // test) tries again thinking less.
+    const ranOut = !body && res.finishReason === "length";
+    if (ranOut) effort = LESS_EFFORT[effort];
     messages.push({
       role: "user",
-      content: !body
-        ? "That was empty. Answer with only your new standing notes."
-        : body.length > max
-          ? `That's ${body.length} characters; the limit is ${max}. Shorten it, keep the four headings (${headings}), and answer with only the notes.`
-          : `Put it under the four headings, ${headings}, each on a line of its own, and answer with only the notes.`,
+      content: ranOut
+        ? "You ran out of room before writing anything. Don't plan it all out first: write your new standing notes now, and answer with only the notes."
+        : !body
+          ? "That was empty. Answer with only your new standing notes."
+          : body.length > max
+            ? `That's ${body.length} characters; the limit is ${max}. Shorten it, keep the four headings (${headings}), and answer with only the notes.`
+            : `Put it under the four headings, ${headings}, each on a line of its own, and answer with only the notes.`,
     });
   }
   return { standing, notes, diary, body, missing };

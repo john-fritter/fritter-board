@@ -316,11 +316,18 @@ async function main() {
 
   // ── The reflection test: the same reflection, nothing saved ──
   const compactionsBefore = await runCount(testbotId, "compaction");
+  let effortWas = "";
   const versionsBefore = (await one("SELECT COUNT(*)::int AS n FROM bots.standing_versions WHERE user_id = $1", [testbotId])).n as number;
   model.script((req) => {
     assert.match(text(req, 0), /Now and then you look back and rewrite them/);
     assert.match(lastText(req), /Your diary so far, oldest first:/);
     assert.equal(req.timeoutSeconds, 480, "a reflection's call gets longer than a visit's");
+    effortWas = req.reasoningEffort;
+    return { ...say(""), finishReason: "length" };
+  }, (req) => {
+    assert.match(lastText(req), /^You ran out of room before writing anything\./);
+    assert.notEqual(req.reasoningEffort, effortWas, "and tries again thinking less");
+    assert.ok(["low", "none"].includes(req.reasoningEffort));
     return say("## People\nDan, bridges.\n## Threads\nBack Room chatter.\n## Positions\nBridges.\n## To do\nNothing.");
   });
   const report = await runReflectTest(
@@ -329,7 +336,7 @@ async function main() {
     { briefSource: "as in the code" }
   );
   assert.equal(model.steps.length, 0);
-  assert.match(report, /\| Testbot \| [^|]+ \| 3 \| 1 \| \d+ \| \d+ \| - \| 1 \| 1000\/50 \| ok \|/);
+  assert.match(report, /\| Testbot \| [^|]+ \| 3 \| 1 \| \d+ \| \d+ \| - \| 2 \| 2000\/100 \| ok \|/);
   assert.match(report, /### New standing notes\n\n````text\n## People\nDan, bridges\./);
   assert.match(report, /### Standing notes now\n\n````text\nDan likes bridges/);
   assert.equal((await one("SELECT COUNT(*)::int AS n FROM bots.standing_versions WHERE user_id = $1", [testbotId])).n, versionsBefore, "nothing saved");

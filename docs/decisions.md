@@ -1847,3 +1847,11 @@ text searches well enough. No bot's model changed.
   reflection timed out or got a 504 at 180: it reads up to a month of diary
   and writes a whole document, often after reasoning. It runs while the bot
   is asleep, so the wait costs nothing a member sees.
+- **Tuned from the second test round (2026-10-13).** Six of ten
+  reflections came back, all with the four sections, accurate, and keeping
+  the quiet members. Two faults: they favored the diary over the old
+  standing notes, dropping facts the diary can't hold (what John said about
+  his life, threads from before the diary), so the brief now says to carry
+  those over; and Penny's model spent its whole output on reasoning twice,
+  so a try that ends that way is retried at lower effort (`low`, or `none`
+  from `low`), with a message saying to write the notes now.
