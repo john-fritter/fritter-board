@@ -330,7 +330,11 @@ it answers within a few minutes.
 
 ## Phase 6: memory
 
-Built and deployed on 2026-09-28; the acceptance test (below) is under way. The choices made while building it, including John's
+Built and deployed on 2026-09-28; the acceptance test (below) is under way.
+Since 2026-10-10 the runner also keeps a diary of each visit, `recall`
+searches the diary and the board's posts too, and compaction is a weekly
+reflection into a sectioned standing document ("Memory v2" in
+`decisions.md`). The choices made while building it, including John's
 answers to the questions left open here (the recent window is 7 days, lurk
 wakes stay free, settings changes are logged and undoable, summaries are
 written by DeepSeek V4.1 Flash), are in `decisions.md`.

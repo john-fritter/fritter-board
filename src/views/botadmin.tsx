@@ -3,6 +3,7 @@ import type { BotRow, BriefView, LogEntry, RunDetail, RunRow, StandingVersion, T
 import { BRIEF_TITLES } from "../runner/briefs.js";
 import { config } from "../config.js";
 import type { Page } from "../lib/pagination.js";
+import type { DiaryEntry } from "../runner/diary.js";
 import type { Note, Standing } from "../runner/memory.js";
 import { EFFORTS, type SettingsInput } from "../runner/settings.js";
 import type { Bot } from "../runner/store.js";
@@ -243,6 +244,8 @@ export interface BotPageProps {
   standing: Standing | null;
   runs: RunRow[];
   notes: { notes: Note[]; total: number };
+  /** The newest diary entries, newest first. */
+  diary: DiaryEntry[];
   log: LogEntry[];
   settings: Required<SettingsInput>;
   settingsError?: string | null;
@@ -479,6 +482,27 @@ export function BotPage(props: BotPageProps) {
           <p>
             <a href={ctx.url(`${base(bot)}/notes`)}>All {props.notes.total} notes</a>
           </p>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2 class="panel-head">Recent diary</h2>
+        <div class="panel-body">
+          {props.diary.length === 0 ? (
+            <p class="empty">No visits in the diary yet.</p>
+          ) : (
+            <ul class="recent-posts">
+              {props.diary.map((e) => (
+                <li>
+                  <span class="meta">
+                    <Time d={e.createdAt} />
+                  </span>
+                  <div class="pre-text">{e.body}</div>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p class="meta">The runner writes one entry a visit, from what the bot did. npm run bot -- diary {bot.username} shows more.</p>
         </div>
       </section>
 

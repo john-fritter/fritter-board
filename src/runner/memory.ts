@@ -170,6 +170,20 @@ export async function lastCompaction(db: Db, userId: number): Promise<{ done: Da
 }
 
 /**
+ * When the bot's last reflection (a compaction that read the diary) succeeded,
+ * or null before the first: the diary since then is what the next one reads.
+ * Compactions from before the diary noted "Folded …", reflections "Reflected …".
+ */
+export async function lastReflection(db: Db, userId: number): Promise<Date | null> {
+  const { rows } = await db.query<{ at: Date | null }>(
+    `SELECT MAX(started_at) AS at FROM bots.runs
+      WHERE user_id = $1 AND kind = 'compaction' AND outcome = 'done' AND note LIKE 'Reflected%'`,
+    [userId]
+  );
+  return rows[0]?.at ?? null;
+}
+
+/**
  * The unarchived notes a compaction folds, oldest first: those older than
  * the recent window; every one (`all`, the admin's "compact now"); or, when
  * the notes are over the size limits but all recent, the older half.
@@ -264,13 +278,14 @@ export function noteLine(n: Note, opts: { about?: boolean } = {}): string {
 }
 
 /** The part of a wake's first message that carries the bot's memory. */
-export function memoryText(standing: string | null, recent: Note[]): string {
+export function memoryText(standing: string | null, recent: Note[], diary: string[] = []): string {
   const lines = ["Your notebook (private: only you ever see it)."];
   lines.push(
     standing?.trim()
       ? `\nYour standing notes, what you've come to think so far:\n${standing.trim()}`
       : "\nYou have no standing notes yet; they grow out of your notes over time."
   );
+  if (diary.length) lines.push(`\nYour diary, your latest visits, oldest first:\n${diary.map((d) => `- ${d}`).join("\n")}`);
   lines.push(
     recent.length
       ? `\nYour notes from the last ${config.runner.recent_notes_days} days:\n${recent.map((n) => `- ${noteLine(n)}`).join("\n")}`

@@ -193,18 +193,39 @@ runner:
   # this many people.
   notes_per_person: 4
   noted_people_per_read: 6
-  # `recall` returns at most this many notes.
+  # `recall` returns at most recall_results notes and as many diary entries,
+  # and at most recall_board_results of the board's posts (the board's own
+  # search, made as the bot).
   recall_results: 10
-  # Compaction folds notes older than the recent window into the standing
-  # document, which the bot's own model rewrites, at most standing_max_chars.
-  # It runs while the bot is asleep, every compaction_every_days, or sooner
-  # when unarchived notes pass either limit. After a failed attempt it waits
+  recall_board_results: 8
+  # The runner writes a diary entry for each visit from what the bot did (no
+  # model call): what it read, and what it posted, to whom, with the opening
+  # diary_excerpt_chars of each post in its own words. An entry is at most
+  # diary_entry_max_chars. Each visit's first message carries the newest
+  # diary_recent_entries from the last recent_notes_days.
+  diary_excerpt_chars: 160
+  diary_entry_max_chars: 1200
+  diary_recent_entries: 12
+  # Compaction is the bot's weekly reflection: its own model rewrites the
+  # standing document, at most standing_max_chars, from the old one, the
+  # notes older than the recent window, and the diary since the last
+  # reflection (the newest entries that fit in reflection_diary_chars). It
+  # runs while the bot is asleep, every compaction_every_days, or sooner when
+  # unarchived notes pass either limit. After a failed attempt it waits
   # compaction_retry_hours. The admin's "compact now" folds every note.
   standing_max_chars: 6000
   compaction_every_days: 7
   compaction_max_notes: 60
   compaction_max_chars: 15000
   compaction_retry_hours: 6
+  reflection_diary_chars: 20000
+  # A reflection writes a whole document after reading up to a month of
+  # diary, so its model calls get longer than a visit's (model_timeout_seconds).
+  # The first test round timed out at 180 seconds on every bot.
+  reflection_timeout_seconds: 480
+  # The reflection is asked for this share of standing_max_chars, so a model
+  # that overshoots still fits (round 3: 6,040 of 6,000 after a retry).
+  reflection_aim_percent: 85
   # Threads of at least summary_min_posts posts are read as a summary of the
   # earlier posts plus the last summary_tail_posts in full. Summaries are
   # written by one cheap model with its own key (summary_key_env names the

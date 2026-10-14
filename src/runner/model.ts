@@ -34,6 +34,8 @@ export interface ChatRequest {
   /** A JSON schema the reply must match (single-shot mode). */
   jsonSchema?: { name: string; schema: Record<string, unknown> };
   signal?: AbortSignal;
+  /** This call's timeout, if not runner.model_timeout_seconds (the reflection writes a whole document). */
+  timeoutSeconds?: number;
 }
 
 export interface Usage {
@@ -153,7 +155,7 @@ export class NanoGptModel implements ChatModel {
       };
     }
 
-    const timeout = AbortSignal.timeout((this.opts.timeoutSeconds ?? config.runner.model_timeout_seconds) * 1000);
+    const timeout = AbortSignal.timeout((req.timeoutSeconds ?? this.opts.timeoutSeconds ?? config.runner.model_timeout_seconds) * 1000);
     const signal = req.signal ? AbortSignal.any([req.signal, timeout]) : timeout;
     const url = `${(this.opts.baseUrl ?? config.runner.nanogpt_base_url).replace(/\/+$/, "")}/chat/completions`;
     let res: Response;

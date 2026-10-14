@@ -3,6 +3,7 @@ import { invalid, notFound } from "../forum/errors.js";
 import { asAdmin } from "../forum/permissions.js";
 import type { Viewer } from "../forum/types.js";
 import { paginate, type Page } from "../lib/pagination.js";
+import { searchDiary } from "../runner/diary.js";
 import { currentStanding, type Note, type Standing } from "../runner/memory.js";
 import {
   applyColumns,
@@ -235,14 +236,15 @@ export async function getBot(ctx: BotAdminCtx, viewer: Viewer | null, name: stri
   const bot = await findBot(ctx, viewer, name);
   const recent = config.pagination.bot_page_recent;
   const { rows: cfg } = await ctx.pool.query("SELECT * FROM bots.config WHERE user_id = $1", [bot.userId]);
-  const [row, standing, runs, notes, log] = await Promise.all([
+  const [row, standing, runs, notes, log, diary] = await Promise.all([
     botRow(ctx.pool, bot),
     currentStanding(ctx.pool, bot.userId),
     recentRuns(ctx.pool, bot.userId, recent),
     notesPage(ctx.pool, bot.userId, { about: "", folded: "all" }, recent, 0),
     logEntries(ctx.pool, bot.userId, recent),
+    searchDiary(ctx.pool, bot.userId, "", "", recent),
   ]);
-  return { row, standing, runs, notes, log, settings: settingsText(cfg[0]!) };
+  return { row, standing, runs, notes, log, diary, settings: settingsText(cfg[0]!) };
 }
 
 // ── Settings and controls ──────────────────────────────────────────────────

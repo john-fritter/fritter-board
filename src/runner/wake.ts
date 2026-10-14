@@ -3,7 +3,8 @@ import { z } from "zod";
 import { config } from "../config.js";
 import { callJson, LOOK_ONLY_REFUSAL, type BoardSession, type ConnectBoard, type InboxJson, type ToolResult } from "./board.js";
 import { currentBriefs, type Briefs } from "./briefs.js";
-import { currentStanding, insertNote, memoryText, noteLine, notesAbout, recallNotes, recentNotes } from "./memory.js";
+import { diaryLine, insertDiary, recentDiary, searchDiary, VisitDiary } from "./diary.js";
+import { currentStanding, insertNote, memoryText, noteLine, notesAbout, recallNotes, recentNotes, recentSince } from "./memory.js";
 import { parsePersona, personaPrompt, pickSide, rollWords, sideText, type Voice } from "./persona.js";
 import {
   ModelError,
@@ -31,6 +32,7 @@ import {
   type Trigger,
 } from "./store.js";
 import { summarizedRead, type Summarizer, type ThreadJson } from "./summaries.js";
+import { textToolCalls } from "./textcalls.js";
 import { RECENCIES, searchResultText, type Recency, type WebSearch } from "./websearch.js";
 
 /**
@@ -41,8 +43,8 @@ import { RECENCIES, searchResultText, type Recency, type WebSearch } from "./web
  * server as the bot. The runner adds only its own pacing: writes per wake and
  * per day, and the boards a bot may write in; and the bot's memory: its
  * notebook at the start of the wake, the `remember` and `recall` tools, its
- * notes on the people in a thread it reads, and summaries of long threads;
- * and, in tools mode, `web_search`.
+ * notes on the people in a thread it reads, summaries of long threads, and
+ * the diary entry it writes for the visit; and, in tools mode, `web_search`.
  */
 
 export interface WakeDeps {
@@ -114,7 +116,7 @@ export const isModTool = (name: string) => name.startsWith("mod_");
 /** Mod tools that change something, as opposed to mod_reports and mod_history. */
 const MOD_ACTION_TOOLS = new Set(["mod_lock", "mod_unlock", "mod_sticky", "mod_unsticky", "mod_move", "mod_remove_post", "mod_warn", "mod_resolve_report"]);
 
-export const RUNNER_BRIEF = `How this works: you visit the board now and then, as the member described below. Each visit starts with your inbox (what happened since your last visit), which is given to you with the visit, so there's no get_inbox to call. Use the tools to read and, if you have something worth saying, to post or send a message. You can read several things in one turn by calling several tools at once (two conversations, say, or a conversation and the thread it's about), but a post or message goes in a turn of its own. Your unread private messages come with the inbox, so you needn't open them; read_pms shows the rest of a conversation. There is no audience to perform for and nothing rewards volume; reading without posting is fine and often right. Stay in character. You keep a private notebook: your standing notes and your recent notes come with each visit, your notes on the people in a thread come with it when you read it, remember writes a new note, and recall searches all of them. When you're done, stop calling tools and say in a sentence what you did; that note goes in a log and is never posted.`;
+export const RUNNER_BRIEF = `How this works: you visit the board now and then, as the member described below. Each visit starts with your inbox (what happened since your last visit), which is given to you with the visit, so there's no get_inbox to call. Use the tools to read and, if you have something worth saying, to post or send a message. You can read several things in one turn by calling several tools at once (two conversations, say, or a conversation and the thread it's about), but a post or message goes in a turn of its own. Your unread private messages come with the inbox, so you needn't open them; read_pms shows the rest of a conversation. There is no audience to perform for and nothing rewards volume; reading without posting is fine and often right. Stay in character. You keep a private notebook: your standing notes, your recent notes and your diary of recent visits come with each visit, and your notes on the people in a thread come with it when you read it. The diary keeps itself: after each visit, a line says what you read and what you posted. So keep notes for what it can't: what you think, about whom, and why. remember writes a note; recall searches your notes, your diary and the board's posts, for when you're not sure what was said or who said it. When you're done, stop calling tools and say in a sentence what you did; that note goes in a log and is never posted.`;
 
 /**
  * A note's limit in words, which models judge far better than characters as
@@ -147,12 +149,12 @@ export const MEMORY_TOOLS: ToolDefinition[] = [
     function: {
       name: "recall",
       description:
-        "Search all your notes, old and folded ones included, newest first. Give words to look for, a member's username, or both; with neither, your latest notes.",
+        "Search your memory, newest first: your notes (old and folded ones included), your diary of past visits, and the board's posts (what members, you included, actually said). Give words to look for, a member's username, or both; with neither, your latest notes and diary entries.",
       parameters: {
         type: "object",
         properties: {
           query: { type: "string", description: 'Words to look for: words, "exact phrase", -excluded, or.' },
-          about: { type: "string", description: "Only notes about this member." },
+          about: { type: "string", description: "Only notes about this member, diary entries naming them, and their posts." },
         },
         additionalProperties: false,
       },
@@ -262,13 +264,13 @@ export class MeteredModel {
    * retry_wait_seconds; if it fails again, each later fallback is tried once,
    * at the same effort, and the first to answer serves the rest of the run.
    */
-  async complete(req: Omit<ChatRequest, "model" | "reasoningEffort">): Promise<ChatResponse> {
+  async complete(req: Omit<ChatRequest, "model" | "reasoningEffort">, effort: ReasoningEffort = this.effort): Promise<ChatResponse> {
     const failures: string[] = [];
     for (let i = this.current, retried = false; ; ) {
       const model = this.models[i]!;
       try {
         this.modelCalls++;
-        const res = await this.model.complete({ ...req, model, reasoningEffort: this.effort });
+        const res = await this.model.complete({ ...req, model, reasoningEffort: effort });
         this.usage.promptTokens += res.usage.promptTokens;
         this.usage.completionTokens += res.usage.completionTokens;
         this.usage.reasoningTokens += res.usage.reasoningTokens;
@@ -322,6 +324,8 @@ export class WakeSession extends MeteredModel {
   /** Web searches made this wake, and how many it may make. */
   searches = 0;
   searchBudget = 0;
+  /** What the visit did, for its diary entry. */
+  readonly diary: VisitDiary;
   /** On a dry visit, what the bot would have written, kept here instead of sent. */
   drafts: Draft[] | null = null;
 
@@ -336,6 +340,7 @@ export class WakeSession extends MeteredModel {
     opts: { maxSteps?: number; effort?: ReasoningEffort; modActionLimit?: number } = {}
   ) {
     super(deps, bot, model, opts.effort);
+    this.diary = new VisitDiary(bot.username);
     this.maxSteps = opts.maxSteps ?? bot.maxSteps;
     this.modActionLimit = opts.modActionLimit ?? 0;
   }
@@ -350,6 +355,7 @@ export class WakeSession extends MeteredModel {
   }
 
   learnFromInbox(inbox: InboxJson): void {
+    this.diary.learnInbox(inbox);
     for (const p of [...inbox.replies, ...inbox.mentions]) {
       this.threadBoards.set(p.thread_id, p.board);
       this.postBoards.set(p.post_id, p.board);
@@ -488,6 +494,7 @@ export class WakeSession extends MeteredModel {
         if (modAction) this.modActions++;
       }
     }
+    if (res.ok && name !== "read_thread") this.diary.observe(name, args, res.text);
     return this.record(name, JSON.stringify(args), res.ok, res.text);
   }
 
@@ -513,6 +520,7 @@ export class WakeSession extends MeteredModel {
     }
     const text = JSON.stringify(json);
     this.learn("read_thread", args, text);
+    this.diary.observe("read_thread", args, text);
     const notes = await this.notesOnPeople(json);
     return { ok: true, text: notes ? JSON.stringify({ ...json, your_notes: notes }) : text };
   }
@@ -573,12 +581,34 @@ export class WakeSession extends MeteredModel {
     return { ok: true, text: JSON.stringify({ remembered: true, note_id: id, ...(about ? { about } : {}) }) };
   }
 
-  /** `recall`: a search of the bot's notes. */
+  /**
+   * `recall`: a search of the bot's notes and diary, and of the board's
+   * posts. The posts come from the board's own search, made as the bot, so
+   * the MCP server decides what it may see, as for any search.
+   */
   async recall(args: Record<string, unknown>): Promise<ToolResult> {
     const query = typeof args["query"] === "string" ? args["query"].trim() : "";
     const about = typeof args["about"] === "string" ? args["about"].trim().replace(/^@/, "") : "";
-    const notes = await recallNotes(this.deps.db, this.bot.userId, query, about);
+    const [notes, diary] = await Promise.all([
+      recallNotes(this.deps.db, this.bot.userId, query, about),
+      searchDiary(this.deps.db, this.bot.userId, query, about, config.runner.recall_results),
+    ]);
     for (const n of notes) this.shownNotes.add(n.id);
+    let posts: unknown[] = [];
+    let boardProblem: string | null = null;
+    if ((query || about) && config.runner.recall_board_results > 0) {
+      const res = await this.board.call("search", { query, ...(about ? { author: about } : {}) });
+      if (res.ok) {
+        try {
+          posts = ((JSON.parse(res.text) as { posts?: unknown[] }).posts ?? []).slice(0, config.runner.recall_board_results);
+        } catch {
+          boardProblem = "The board's search gave an answer that couldn't be read.";
+        }
+      } else {
+        boardProblem = `The board's search refused: ${res.text}`;
+      }
+    }
+    const nothing = notes.length === 0 && diary.length === 0 && posts.length === 0;
     return {
       ok: true,
       text: JSON.stringify({
@@ -589,7 +619,10 @@ export class WakeSession extends MeteredModel {
           text: n.body,
           ...(n.archivedAt ? { folded_into_standing: true } : {}),
         })),
-        ...(notes.length === 0 ? { note: "Nothing found." } : {}),
+        diary: diary.map(diaryLine),
+        ...(query || about ? { board_posts: posts } : {}),
+        ...(boardProblem ? { board_search: boardProblem } : {}),
+        ...(nothing ? { note: "Nothing found." } : {}),
       }),
     };
   }
@@ -656,6 +689,11 @@ export class WakeSession extends MeteredModel {
     const text = JSON.stringify(result);
     this.learn(name, args, text);
     return { ok: true, text };
+  }
+
+  /** The model wrote `count` tool calls out as text, and the runner is running them. */
+  noteTextCalls(count: number): void {
+    this.record("text_calls", JSON.stringify({ count }), true, "Read tool calls the model wrote out as text, and ran them.");
   }
 
   private record(tool: string, args: string, ok: boolean, result: string): string {
@@ -801,13 +839,18 @@ export async function toolLoop(s: WakeSession, system: string, first: string, bo
     }
     const tools = s.writes < s.writeBudget ? allTools : readTools;
     const res = await s.complete({ messages, tools });
-    messages.push({ role: "assistant", content: res.content, ...(res.toolCalls.length ? { tool_calls: res.toolCalls } : {}) });
-    if (res.toolCalls.length === 0) {
+    // A call written out as text (DeepSeek's markup) is run as the call it was meant to be.
+    const written = res.toolCalls.length === 0 ? textToolCalls(res.content, `text-${step}`) : null;
+    if (written) s.noteTextCalls(written.calls.length);
+    const calls = written?.calls ?? res.toolCalls;
+    const content = written ? written.text || null : res.content;
+    messages.push({ role: "assistant", content, ...(calls.length ? { tool_calls: calls } : {}) });
+    if (calls.length === 0) {
       note = res.content?.trim() || null;
       break;
     }
-    for (const call of res.toolCalls) {
-      const text = await s.runTool(call.function.name, call.function.arguments, offered, res.toolCalls.length > 1);
+    for (const call of calls) {
+      const text = await s.runTool(call.function.name, call.function.arguments, offered, calls.length > 1);
       messages.push({ role: "tool", tool_call_id: call.id, content: text });
     }
     if (step === s.maxSteps) note = `Stopped after ${s.maxSteps} model calls.`;
@@ -1017,11 +1060,24 @@ function decisionProblem(
 
 // ── A wake ─────────────────────────────────────────────────────────────────
 
-/** The notebook a wake starts with: the standing document and recent notes. */
+/** The notebook a wake starts with: the standing document, recent visits and recent notes. */
 export async function loadMemory(db: Db, bot: Bot, now: Date, shown: Set<number>): Promise<string> {
-  const [standing, recent] = await Promise.all([currentStanding(db, bot.userId), recentNotes(db, bot.userId, now)]);
+  const [standing, diary, recent] = await Promise.all([
+    currentStanding(db, bot.userId),
+    recentDiary(db, bot.userId, recentSince(now)),
+    recentNotes(db, bot.userId, now),
+  ]);
   for (const n of recent) shown.add(n.id);
-  return memoryText(standing?.body ?? null, recent);
+  return memoryText(standing?.body ?? null, recent, diary.map(diaryLine));
+}
+
+/** The visit's diary entry, if it did anything. A diary that can't be written never fails the visit. */
+async function writeDiary(deps: WakeDeps, bot: Bot, runId: number, session: WakeSession | null): Promise<void> {
+  // A dry visit sent nothing, so it did nothing worth remembering.
+  if (!session || session.drafts) return;
+  const body = session.diary.entry();
+  if (!body) return;
+  await insertDiary(deps.db, bot.userId, runId, body).catch(() => {});
 }
 
 /** Web searches a visit may make: the per-visit cap, less if the bot's or the board's day is nearly spent. */
@@ -1194,6 +1250,7 @@ export async function runWake(
       side: voice?.side.name ?? null,
       postWords: voice?.words ?? null,
     });
+    await writeDiary(deps, bot, runId, session);
     return result("done", { cursor: dry ? null : new Date(inbox.now) });
   } catch (err) {
     const capped = err instanceof DailyCapReached;
@@ -1218,6 +1275,8 @@ export async function runWake(
       inboxUntil: inbox ? new Date(inbox.now) : null,
       error: capped ? `${err.message} Paused until ${err.until.toISOString()}.` : err instanceof Error ? err.message : String(err),
     });
+    // What it did before failing still happened: a post made is a post made.
+    await writeDiary(deps, bot, runId, session);
     // Before the model, it's the board that failed; after, only a passing model failure is worth a retry.
     const passing = err instanceof ModelError ? err.isTransient : session === null;
     return result("failed", { pausedUntil: capped ? err.until : null, retryable: passing && (session?.writes ?? 0) === 0 });

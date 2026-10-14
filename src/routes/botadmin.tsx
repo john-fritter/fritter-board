@@ -84,6 +84,7 @@ export function registerBotAdminRoutes(app: Hono<AppEnv>, s: Services): void {
         standing={data.standing}
         runs={data.runs}
         notes={data.notes}
+        diary={data.diary}
         log={data.log}
         settings={data.settings}
         saved={saved ? (SAVED[saved] ?? null) : null}

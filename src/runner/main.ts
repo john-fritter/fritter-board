@@ -2,11 +2,14 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import "../dotenv.js";
 import { config } from "../config.js";
+import { pastVisits, replayVisit } from "./backfill.js";
 import { httpBoard } from "./board.js";
 import { currentBriefs, defaultBriefs } from "./briefs.js";
 import { runDryVisits } from "./dryvisit.js";
 import { modelIdProblem, NanoGptModel, type ReasoningEffort } from "./model.js";
+import { insertDiary } from "./diary.js";
 import { probeModels } from "./probe.js";
+import { runReflectTest } from "./reflecttest.js";
 import { Runner } from "./runner.js";
 import { loadQueries, runSearchProbe } from "./searchprobe.js";
 import { EFFORTS } from "./settings.js";
@@ -64,6 +67,14 @@ import {
  *                                           a whole visit by each bot on the live board, on VAR's key,
  *                                           over a look-only connection: what it would have posted, in a
  *                                           Markdown report on stdout; the board gets nothing
+ *   npm run runner -- backfill-diary [--write] [<bot>...]
+ *                                           the diary entries the past visits still in bots.runs would
+ *                                           have written, printed; with --write, saved, dated at each
+ *                                           visit (visits that already have one are skipped). No model call
+ *   npm run runner -- reflect-test [--key-env VAR] [--brief FILE] <bot>...
+ *                                           each bot's weekly reflection now, on its own model and VAR's
+ *                                           key, with FILE's reflection brief if given: the new standing
+ *                                           notes next to today's in a Markdown report; nothing is saved
  */
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -382,6 +393,71 @@ async function dryVisit(args: string[]): Promise<void> {
   process.exit(0);
 }
 
+const BACKFILL_USAGE = "Usage: npm run runner -- backfill-diary [--write] [<bot>...]";
+
+async function backfillDiary(args: string[]): Promise<void> {
+  let write = false;
+  while (args[0]?.startsWith("--")) {
+    const flag = args.shift()!;
+    if (flag === "--write") write = true;
+    else throw new Error(`Unknown option ${flag}. ${BACKFILL_USAGE}`);
+  }
+  const url = process.env["RUNNER_DATABASE_URL"] ?? fail("RUNNER_DATABASE_URL is required (the fritter_bots role).");
+  const pool = createRunnerPool(url);
+  try {
+    if (args.length) await namedBots(pool, args);
+    const visits = await pastVisits(pool, args);
+    const counts = new Map<string, { visits: number; entries: number }>();
+    const lines: string[] = [];
+    for (const v of visits) {
+      const c = counts.get(v.username) ?? { visits: 0, entries: 0 };
+      counts.set(v.username, c);
+      c.visits++;
+      let entry: string | null = null;
+      try {
+        entry = replayVisit(v);
+      } catch (err) {
+        lines.push(`${v.username} run ${v.id}: couldn't be read (${err instanceof Error ? err.message : String(err)})`);
+        continue;
+      }
+      if (!entry) continue;
+      c.entries++;
+      lines.push(`${v.username} run ${v.id}, ${v.startedAt.toISOString()}: ${entry}`);
+      if (write) await insertDiary(pool, v.userId, v.id, entry, v.startedAt);
+    }
+    lines.push(
+      "",
+      ...[...counts].map(([name, c]) => `${name}: ${c.visits} past visit(s), ${c.entries} with something to write${write ? ", saved" : ""}.`),
+      visits.length ? (write ? "Saved." : "Nothing saved; run again with --write to save these.") : "No past visits without a diary entry."
+    );
+    await printAll(`${lines.join("\n")}\n`);
+  } finally {
+    await pool.end();
+  }
+  process.exit(0);
+}
+
+const REFLECT_TEST_USAGE = "Usage: npm run runner -- reflect-test [--key-env VAR] [--brief FILE] <bot> [<bot>...]";
+
+async function reflectTest(args: string[]): Promise<void> {
+  const o = testOptions(args, REFLECT_TEST_USAGE);
+  if (o.drafts) throw new Error(`reflect-test takes no --drafts. ${REFLECT_TEST_USAGE}`);
+  const url = process.env["RUNNER_DATABASE_URL"] ?? fail("RUNNER_DATABASE_URL is required (the fritter_bots role).");
+  const pool = createRunnerPool(url);
+  try {
+    const bots = await namedBots(pool, args);
+    const report = await runReflectTest(
+      { db: pool, chat: new NanoGptModel(o.key), now: () => new Date(), sleep, log: (line) => console.error(`${new Date().toISOString()} ${line}`) },
+      bots,
+      o.brief ? { brief: readFileSync(o.brief, "utf-8").trim(), briefSource: `from ${o.brief}` } : { briefSource: "as in the code" }
+    );
+    await printAll(report);
+  } finally {
+    await pool.end();
+  }
+  process.exit(0);
+}
+
 const SEARCH_PROBE_USAGE =
   "Usage: npm run runner -- search-probe [--key-env VAR] [--only <service>[,<service>...]] [--models <model>[@<effort>][,...]]";
 
@@ -467,8 +543,12 @@ async function main(): Promise<void> {
   if (command === "web-search") return webSearchOnce(rest);
   if (command === "voice-test") return voiceTest(rest);
   if (command === "dry-visit") return dryVisit(rest);
+  if (command === "backfill-diary") return backfillDiary(rest);
+  if (command === "reflect-test") return reflectTest(rest);
   if (command !== undefined)
-    throw new Error(`Unknown command ${command}. Usage: npm run runner [-- probe … | search-probe … | web-search … | voice-test … | dry-visit …]`);
+    throw new Error(
+      `Unknown command ${command}. Usage: npm run runner [-- probe … | search-probe … | web-search … | voice-test … | dry-visit … | backfill-diary … | reflect-test …]`
+    );
   await run();
 }
 
