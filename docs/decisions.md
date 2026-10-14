@@ -1870,3 +1870,8 @@ text searches well enough. No bot's model changed.
   `reflection_timeout_seconds` was really 300. `NanoGptModel` now passes an
   undici `Agent` with those limits off (`undici` pinned to the version Node
   22 bundles), and a "couldn't be reached" error now says its cause.
+- **`undici` moved to 6.29.0 and the MCP SDK to 1.32.1 (2026-10-14)** to
+  clear the two high-severity `npm audit` findings the box's build reported
+  (undici up to 6.28.0; the SDK's OAuth client, which the board doesn't use).
+  Both are within their majors, the suite passes, and Node 22's fetch honors
+  6.29.0's `Agent` the same way.
