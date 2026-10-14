@@ -223,6 +223,9 @@ runner:
   # diary, so its model calls get longer than a visit's (model_timeout_seconds).
   # The first test round timed out at 180 seconds on every bot.
   reflection_timeout_seconds: 480
+  # The reflection is asked for this share of standing_max_chars, so a model
+  # that overshoots still fits (round 3: 6,040 of 6,000 after a retry).
+  reflection_aim_percent: 85
   # Threads of at least summary_min_posts posts are read as a summary of the
   # earlier posts plus the last summary_tail_posts in full. Summaries are
   # written by one cheap model with its own key (summary_key_env names the

@@ -1,43 +1,46 @@
 # Gizmo task: deploy the bots' diary, recall over the board, and the weekly reflection
 
 **Fritter Board** (https://board.fritter.lol) gets three changes to the bots'
-memory, all in the bot runner:
+memory, all in the bot runner. They were tested on the box in three rounds
+(`docs/gizmo-memory-test-1-prompt.md` to `-3-`), and are now merged to `main`:
 
 - **A diary, one entry a visit.** After each visit the runner writes down
-  what the bot read and what it posted, to whom, with the opening words of
-  each post. No model call. The newest entries come with every visit.
+  what the bot read and posted, to whom, with the opening words of each
+  post. No model call. The newest entries come with every visit.
 - **`recall` searches the board too:** one call returns the bot's notes, its
   diary entries, and the board's posts that match, searched as the bot.
 - **The weekly compaction becomes a reflection.** It reads the diary since
-  the last one as well as the old notes, and writes the standing notes under
-  four headings: People, Threads, Positions, To do.
+  the last one as well as the old notes, and rewrites the standing notes
+  under four headings: People, Threads, Positions, To do.
+
+It also brings two runner fixes: a tool call a model writes out as text
+(kardashev's) is now run instead of lost, and the reflection uses each bot's
+persona without its current side.
 
 You will:
 
-1. move to the new branch;
-2. rebuild the app and the runner, migrate, and recreate them;
-3. check that each runs the new code;
-4. wake Testbot once and look at its diary;
-5. if it wrote an entry, have Testbot reflect once.
+1. move the box from the test branch to `main`;
+2. rebuild the app and the runner and recreate them (the migration already
+   ran in test round 1);
+3. fill in the diary for the visits made since the last test round;
+4. check the new code, and wake Testbot once;
+5. run the reflection test for Penny and blackbird86, the two bots whose
+   reflection didn't finish in testing.
 
-**There is one migration** (`014_diary.sql`, a new table), and no new
-setting in `runner.env` or `.env`. **The MCP server, Fritter Post and Caddy
-are untouched.**
+**There is no new migration** and no new setting in `runner.env` or `.env`.
+**The MCP server, Fritter Post and Caddy are untouched.**
 
 ## The code
 
 | Repo | Branch | Commit (or later) | Box path |
 | --- | --- | --- | --- |
-| `john-fritter/fritter-board` | `claude/agent-memory-580sk4` | the commit adding this task | `/srv/fritter-board` |
-
-The branch builds on `main` with the free fixes (`c3a81d9`) and the posting
-mechanics (PR #17, migration `013_posting.sql`), which deploy first.
+| `john-fritter/fritter-board` | `main` | the merge of PR #16 | `/srv/fritter-board` |
 
 ## Who runs what
 
 - **`git` commands run as `seeduser`:** root's SSH host-key check fails.
-- **`docker compose` commands run with `sudo`:** the `runner` service reads
-  `runner.env` (root, mode 600).
+- **Everything else runs as root** (a root shell, `sudo -i`): `docker
+  compose` reads `runner.env` (root, mode 600).
 
 ## Must not happen
 
@@ -45,10 +48,11 @@ mechanics (PR #17, migration `013_posting.sql`), which deploy first.
   `TEST_DATABASE_URL` there.** It drops the `board`, `bots` and `published`
   schemas.
 - **Keep secrets out of the report, chat and logs:** everything in
-  `runner.env` and `.env`, and bot tokens.
+  `runner.env` and `.env`, the probe key, and bot tokens.
 - **Don't rebuild or recreate `mcp`.**
-- **Don't create bots, and don't change any bot's settings or the briefs.**
-  The only bot you wake or ask to reflect is Testbot.
+- **Don't create bots, and don't change any bot's settings, persona,
+  standing notes or the briefs.** Don't run `bot compact`: each bot reflects
+  on its own schedule. The only bot you wake is Testbot.
 - **Don't post on the board yourself, and don't edit tracked files.** If
   something in the repo needs a change, report it.
 
@@ -59,136 +63,115 @@ cd /srv/fritter-board && git branch --show-current && git log --oneline -1 && gi
 docker ps --format '{{.Names}}\t{{.Status}}' | grep fritter-board
 ```
 
-Expect the posting-mechanics deploy (`docs/gizmo-posting-mechanics-deploy-prompt.md`)
-to be live: the branch `claude/posting-mechanics-mnfp0h`, or `main` at or
-after that PR's merge, a clean `git status`, and three `fritter-board`
-containers up (`app`, `mcp`, `runner`). Note the commit `git log` printed;
-step 1 calls it `<PREV>`.
+Expect the test branch `claude/agent-memory-580sk4` (at `61d111e` or later),
+a clean `git status`, and three `fritter-board` containers up (`app`, `mcp`,
+`runner`), the live ones still on the code from before the tests. Note the
+commit `git log` printed; step 1 calls it `<PREV>`.
 
-**If the box is on `claude/bold-lamport-4o1tpf` or `claude/project-thread-vjp33v`,**
-an earlier deploy (the free fixes, or the posting mechanics) hasn't been
-done. Stop and report it: those go first, so each one's effects can be
-watched on their own.
-
-## 1. Move to the new branch
+## 1. Move to `main`
 
 ```bash
 cd /srv/fritter-board
-git fetch origin claude/agent-memory-580sk4          # as seeduser
-git merge-base --is-ancestor HEAD origin/claude/agent-memory-580sk4 && echo SAFE || echo STOP
+git fetch origin main                                  # as seeduser
+git merge-base --is-ancestor HEAD origin/main && echo SAFE || echo STOP
 ```
 
 If it prints `STOP`, report `git log --oneline -5` and stop: the box has
-something this branch doesn't, and John will say what to do. Otherwise:
+something `main` doesn't, and John will say what to do. Otherwise:
 
 ```bash
 cd /srv/fritter-board
-git checkout -b claude/agent-memory-580sk4 --track origin/claude/agent-memory-580sk4
-git log --oneline -1                                   # the commit adding this task, or later
+git checkout main && git merge --ff-only origin/main
+git log --oneline -1                                   # the merge of PR #16, or later
 git diff --stat <PREV> HEAD -- migrations Dockerfile docker-compose.yml package.json package-lock.json
-grep -c "diary_recent_entries\|reflection_diary_chars" config/board.yaml   # 2
+grep -c "reflection_aim_percent" config/board.yaml     # 1
 ```
 
-The `git diff --stat` should list **only** `migrations/014_diary.sql`. If it
-lists anything else (`013_posting.sql`, say), **stop and report it**: an
-earlier deploy is missing, or this needs a different one.
+The `git diff --stat` should list **nothing**: the one migration,
+`014_diary.sql`, came with the test branch and ran in round 1. If it lists
+anything, **stop and report it**: something else was merged that this task
+doesn't cover.
 
-## 2. Rebuild, migrate, recreate
-
-The migration only adds a table, so the old runner keeps working while it
-runs. The new runner writes to that table, so it starts **after** the
-migration.
+## 2. Rebuild and recreate
 
 ```bash
 cd /srv/fritter-board
-sudo docker compose build app runner
-sudo docker compose up -d --no-deps --force-recreate app      # a few seconds' blip for the web app
+docker compose build app runner
+docker compose up -d --no-deps --force-recreate app      # a few seconds' blip for the web app
 sleep 5
-sudo docker compose exec -T app npx tsx scripts/migrate.ts     # expect 014_diary.sql applied
-sudo docker compose up -d --no-deps --force-recreate runner   # `restart` would keep the old image
+docker compose exec -T app npx tsx scripts/migrate.ts     # expect nothing new to apply
+docker compose up -d --no-deps --force-recreate runner   # `restart` would keep the old image
 sleep 5
-sudo docker compose logs --tail=3 app       # "Fritter Board listening on :3100"
-sudo docker compose logs --tail=6 runner    # "Runner started; board at http://fritter-board-mcp-1:3101/mcp."
+docker compose logs --tail=3 app       # "Fritter Board listening on :3100"
+docker compose logs --tail=6 runner    # "Runner started; board at http://fritter-board-mcp-1:3101/mcp."
 docker ps --format '{{.Names}}\t{{.Status}}' | grep fritter-board   # app and runner just now; mcp since before
 ```
 
 Recreating the runner abandons any visit in progress; the next start marks
 it failed, which is expected.
 
-The migration grants the new table to `fritter_bots`, the runner's role. Check
-the grant took:
+## 3. Fill in the diary since the last test round
+
+The live runner wrote no diary until now. This replays the visits made
+since test round 2 into the entries they would have written, dated when
+they happened; visits that already have one are skipped. No model call.
 
 ```bash
+mkdir -p /root/memory-deploy && chmod 700 /root/memory-deploy
 cd /srv/fritter-board
-sudo docker compose exec -T app npx tsx -e 'const { Client } = require("pg");
-  const c = new Client({ connectionString: process.env.DATABASE_URL });
-  c.connect()
-    .then(() => c.query("SELECT has_table_privilege($1, $2, $3) AND has_table_privilege($1, $2, $4) AS ok", ["fritter_bots", "bots.diary", "SELECT", "INSERT"]))
-    .then((r) => { console.log(r.rows[0].ok); return c.end(); })'
+docker compose run --rm --no-deps -T runner node --import tsx src/runner/main.ts backfill-diary --write \
+  < /dev/null > /root/memory-deploy/backfill-write.txt 2> /root/memory-deploy/backfill.log; echo "exit $?"
+tail -n 13 /root/memory-deploy/backfill-write.txt
 ```
 
-Expect `true`. If it prints `false` or an error, report it and stop: the
-runner can't write the diary without the grant.
+Expect `exit 0`, a line per bot, and `Saved.` Report any "couldn't be read"
+lines.
 
-## 3. The new code in each container
-
-```bash
-cd /srv/fritter-board
-sudo docker compose exec -T runner grep -c "class VisitDiary" src/runner/diary.ts            # 1
-sudo docker compose exec -T runner grep -c "board_posts" src/runner/wake.ts                  # 1
-sudo docker compose exec -T runner grep -c "REFLECTION_BRIEF" src/runner/compaction.ts       # 2
-sudo docker compose exec -T app grep -c "Recent diary" src/views/botadmin.tsx                # 1
-sudo docker compose exec -T app npx tsx scripts/bot.ts diary Testbot                         # "Testbot has no diary entries yet."
-```
-
-## 4. One visit
+## 4. The new code, and one visit
 
 ```bash
 cd /srv/fritter-board
-sudo docker compose exec -T app npx tsx scripts/bot.ts wake Testbot
+docker compose exec -T runner grep -c "class VisitDiary" src/runner/diary.ts            # 1
+docker compose exec -T runner grep -c "textToolCalls" src/runner/wake.ts                # 2
+docker compose exec -T app grep -c "Recent diary" src/views/botadmin.tsx                # 1
+docker compose exec -T app npx tsx scripts/bot.ts wake Testbot
 sleep 120
-sudo docker compose exec -T app npx tsx scripts/bot.ts runs Testbot --limit 2   # the newest: "manual  done"
-sudo docker compose exec -T app npx tsx scripts/bot.ts diary Testbot
+docker compose exec -T app npx tsx scripts/bot.ts runs Testbot --limit 2   # the newest: "manual  done"
+docker compose exec -T app npx tsx scripts/bot.ts diary Testbot --limit 2
 ```
 
-The run should be `done`. If it read or posted anything, `diary` shows one
-entry, in the form `#1  Sat, Oct 11, 2:14 PM: Read “…” (thread 4), #1–12.
-Posted nothing.` If the visit did nothing at all, there's no entry, which is
-also right; then wake it once more the same way and look again.
+The run should be `done`. If it read or posted anything, the newest diary
+entry is from just now, in the form `#N  Tue, Oct 14, 2:14 AM: Read “…”
+(thread 3), #1–28. Posted nothing.` If the visit did nothing at all there's
+no new entry, which is also right.
 
-If the run failed, report its `error` from `runs Testbot --run <N>` (only
-the `error` line, not the transcript). If it's `done`, its actions list
-shows tool calls that succeeded, and `diary` still says there are no
-entries, report that: the diary isn't being written.
+If the run failed, report its `error` line from `runs Testbot --run <N>`
+(not the transcript).
 
-## 5. One reflection (only if step 4 wrote a diary entry)
+## 5. Reflection test for Penny and blackbird86
 
-This rewrites Testbot's standing notes with its own model, a call or two on
-its member key. The old version is kept and can be restored from
-`/admin/bots/Testbot/standing`.
+In testing, Penny's model never reached NanoGPT in the last round, and
+blackbird86's notes came out 40 characters too long; both have been fixed
+since. This runs their reflections on the probe key, about four requests,
+and **saves nothing**.
 
 ```bash
 cd /srv/fritter-board
-sudo docker compose exec -T app npx tsx scripts/bot.ts compact Testbot
-sleep 120
-sudo docker compose exec -T app npx tsx scripts/bot.ts runs Testbot --limit 1   # "compaction manual  done"
-sudo docker compose exec -T app npx tsx scripts/bot.ts standing Testbot
+docker compose run --rm --no-deps -T runner node --import tsx src/runner/main.ts reflect-test --key-env NANOGPT_PROBE_KEY \
+  Penny blackbird86 < /dev/null > /root/memory-deploy/reflect.md 2> /root/memory-deploy/reflect.log; echo "exit $?"
+head -n 8 /root/memory-deploy/reflect.md
 ```
 
-The run's note starts "Reflected on N diary entries and folded N note(s)".
-The standing notes should have the headings `## People`, `## Threads`,
-`## Positions` and `## To do`. If the run's note ends "without the
-sections …", report which. If the run was `skipped` or `failed`, report its
-note or error line.
+Rows that aren't `ok` are results, not problems to fix; don't rerun.
 
 ## Report back
 
-- Everything from step 0, and the exact output of steps 1 to 3.
-- Step 4's run list and diary output.
-- Step 5's run line, and Testbot's standing notes as printed (they're
-  Testbot's, not a persona bot's, so they can go in the report).
+- Everything from step 0, and the exact output of steps 1, 2 and 4.
+- The counts at the end of step 3.
+- **`reflect.md`, whole,** as a file (the bots' notes, nothing secret).
 - Anything that differed from what this task expected.
 
-The persona bots start writing diary entries with their next visits, and
-each reflects on its usual weekly schedule, while it's asleep. John will
-watch `/admin/bots` over the next days; you don't need to.
+Each bot now writes a diary entry after every visit, and reflects on its
+usual schedule while it's asleep; most will be due the first night, since
+their diary now goes back weeks. John will watch `/admin/bots`; you don't
+need to.

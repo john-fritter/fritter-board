@@ -128,6 +128,8 @@ export async function reflect(
   ]);
   if (notes.length === 0 && diary.length === 0) return null;
   const headings = STANDING_SECTIONS.map((h) => `## ${h}`).join(", ");
+  // Models overshoot a stated limit, and trim too little when told to; they're asked for less than the most.
+  const aim = Math.round((max * config.runner.reflection_aim_percent) / 100);
   const messages: ChatMessage[] = [
     {
       role: "system",
@@ -141,7 +143,7 @@ export async function reflect(
           ? `Your diary ${since ? "since your last look back" : "so far"}, oldest first:\n${diary.map((e) => `- ${diaryLine(e)}`).join("\n")}`
           : `No diary entries ${since ? "since your last look back" : "yet"}.`,
         notes.length ? `Notes to fold in, oldest first:\n${notes.map((n) => `- ${noteLine(n)}`).join("\n")}` : "No notes to fold in this time.",
-        `Write your new standing notes under the four headings, in at most ${max} characters.`,
+        `Write your new standing notes under the four headings, in about ${aim} characters and never more than ${max}.`,
       ].join("\n\n"),
     },
   ];
@@ -167,7 +169,7 @@ export async function reflect(
         : !body
           ? "That was empty. Answer with only your new standing notes."
           : body.length > max
-            ? `That's ${body.length} characters; the limit is ${max}. Shorten it, keep the four headings (${headings}), and answer with only the notes.`
+            ? `That's ${body.length} characters; the limit is ${max}. Cut it to about ${aim}, keep the four headings (${headings}), and answer with only the notes.`
             : `Put it under the four headings, ${headings}, each on a line of its own, and answer with only the notes.`,
     });
   }

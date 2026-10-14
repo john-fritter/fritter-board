@@ -353,13 +353,14 @@ async function main() {
       assert.match(text(req, 0), /Now and then you look back and rewrite them/);
       assert.match(text(req, 0), /## People\n.*\n\n## Threads\n.*\n\n## Positions\n.*\n\n## To do\n/);
       assert.match(lastText(req), /Your standing notes now:\nDan likes bridges/);
+      assert.match(lastText(req), /in about 5100 characters and never more than 6000\.$/);
       assert.match(lastText(req), /Your diary so far, oldest first:\n- .*Wrote 3 notes, about Dan\.[^\n]*\n- .*\n- .*Replied in “Back Room chatter”/, "the diary since the last reflection (never, here)");
       assert.match(lastText(req), /about John: John asked about tolls\./);
       assert.doesNotMatch(lastText(req), /tunnels/, "recent notes stay out");
       return say("z".repeat(7000));
     },
     (req) => {
-      assert.match(lastText(req), /That's 7000 characters; the limit is 6000. Shorten it, keep the four headings \(## People, ## Threads, ## Positions, ## To do\)/);
+      assert.match(lastText(req), /That's 7000 characters; the limit is 6000. Cut it to about 5100, keep the four headings \(## People, ## Threads, ## Positions, ## To do\)/);
       return say("```\nDan likes bridges. John is waiting on tolls.\n```");
     }
   );

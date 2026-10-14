@@ -1855,3 +1855,10 @@ text searches well enough. No bot's model changed.
   those over; and Penny's model spent its whole output on reasoning twice,
   so a try that ends that way is retried at lower effort (`low`, or `none`
   from `low`), with a message saying to write the notes now.
+- **The reflection is asked for 85% of the limit** (`reflection_aim_percent`):
+  in the third round blackbird86's notes came back at 6,040 characters even
+  after the retry asked it to shorten them. Rounds 2 and 3 together had
+  nine bots write accurate notes in the four sections that kept the quiet
+  members and the old facts; Penny's model never answered (once it ran out
+  of room, once NanoGPT couldn't be reached), and the deploy task tests it
+  again.
