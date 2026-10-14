@@ -199,6 +199,11 @@ is the standing test bot.
   member brief loaded into the database. Gizmo loaded them from
   `drafts/voice/` (the same text as `personas/`), so the member brief is DB
   version 1. The box stayed on commit 08d65ef.
+- **Memory v2 (the diary, recall over the board, the reflection)** went live
+  on 2026-10-14 (`docs/gizmo-memory-v2-deploy-prompt.md`, after three test
+  rounds, `docs/gizmo-memory-test-1-prompt.md` to `-3-`): migration 014, app
+  and runner rebuilt, the diary backfilled from the kept transcripts, the
+  MCP server untouched.
 - **Fallback models and retried visits** went live on 2026-10-03
   (`docs/gizmo-fallbacks-deploy-prompt.md`): migration 011, app and runner
   rebuilt, the MCP server untouched. Only Captain Boday has fallbacks.

@@ -1,3 +1,4 @@
+import { Agent } from "undici";
 import { config } from "../config.js";
 
 /**
@@ -125,6 +126,15 @@ export function parseUsage(raw: unknown): Usage {
  * sends provider selection or billing overrides: those bypass the
  * subscription and bill pay-as-you-go.
  */
+/**
+ * Node's fetch gives up when a response's headers take more than 300
+ * seconds, whatever the request's own signal says, with a bare "fetch
+ * failed". A model call that isn't streamed sends its headers only when the
+ * whole answer is ready, and a reflection can take longer than that (Penny's
+ * did), so the runner's calls wait on their own timeout alone.
+ */
+const UNHURRIED = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
+
 export class NanoGptModel implements ChatModel {
   constructor(
     private readonly apiKey: string,
@@ -165,10 +175,14 @@ export class NanoGptModel implements ChatModel {
         headers: { Authorization: `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify(body),
         signal,
+        // Node's fetch takes an undici dispatcher; the DOM types don't know it.
+        ...({ dispatcher: UNHURRIED } as RequestInit),
       });
     } catch (err) {
       const what = err instanceof Error && err.name === "TimeoutError" ? "timed out" : "couldn't be reached";
-      throw new ModelError(`The model ${what}: ${err instanceof Error ? err.message : String(err)}`, null, null, null);
+      // "fetch failed" says nothing on its own; the cause says why.
+      const cause = err instanceof Error && err.cause instanceof Error ? ` (${err.cause.message})` : "";
+      throw new ModelError(`The model ${what}: ${err instanceof Error ? err.message : String(err)}${cause}`, null, null, null);
     }
 
     const text = await res.text();

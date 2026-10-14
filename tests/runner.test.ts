@@ -156,6 +156,17 @@ async function main() {
   assert.ok(err.isUnsupportedEffort && !err.isTransient);
   const offline = new NanoGptModel("k", { fetch: (async () => { throw new TypeError("fetch failed"); }) as typeof fetch });
   await assert.rejects(offline.complete({ model: "m", messages: [], reasoningEffort: "low" }), (e: unknown) => e instanceof ModelError && e.isTransient);
+  const headersLate = new NanoGptModel("k", {
+    fetch: (async (_url: unknown, init?: RequestInit) => {
+      // Node's own 300-second wait for headers is turned off; the call's timeout decides.
+      const dispatcher = (init as { dispatcher?: { [k: symbol]: unknown } } | undefined)?.dispatcher;
+      assert.ok(dispatcher, "every call carries its own dispatcher");
+      throw new TypeError("fetch failed", { cause: new Error("Headers Timeout Error") });
+    }) as typeof fetch,
+  });
+  await assert.rejects(headersLate.complete({ model: "m", messages: [], reasoningEffort: "low" }), (e: unknown) =>
+    e instanceof ModelError && e.message === "The model couldn't be reached: fetch failed (Headers Timeout Error)"
+  );
 
   assert.equal(modelIdProblem("vendor/model-a"), null);
   assert.equal(modelIdProblem("vendor/model:thinking"), null, "thinking variants are models of their own");
