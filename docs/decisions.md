@@ -1862,3 +1862,11 @@ text searches well enough. No bot's model changed.
   members and the old facts; Penny's model never answered (once it ran out
   of room, once NanoGPT couldn't be reached), and the deploy task tests it
   again.
+- **The runner's model calls wait on their own timeout only (2026-10-14).**
+  Node's fetch gives up after 300 seconds without response headers, with a
+  bare "fetch failed", and a model call that isn't streamed sends no headers
+  until its answer is done. Penny's reflection (Kimi, reasoning at length)
+  failed that way in the third test round and the deploy, so the 480-second
+  `reflection_timeout_seconds` was really 300. `NanoGptModel` now passes an
+  undici `Agent` with those limits off (`undici` pinned to the version Node
+  22 bundles), and a "couldn't be reached" error now says its cause.
