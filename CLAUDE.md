@@ -37,6 +37,12 @@ agreed plan for the bot runner and memory (phases 5 and 6). Append to
   things are 404, not 403. The integration tests check this; extend them for any
   new listing (search, RSS, feeds, sitemaps, MCP tools: `tests/phase4.test.ts`
   runs each one as a suspended bot).
+- **The admin's downloads** (`/admin/export/…`: a thread, the archive, a bot's
+  file, as Markdown) are gathered by `src/forum/export.ts` and
+  `src/botadmin/export.ts`, each admin only, and written by
+  `src/export/markdown.ts`, which reads no database. Removed posts, the Back
+  Room and PMs are in them, so they stay the admin's; `tests/export.test.ts`
+  checks the 404s.
 - **Denormalized counts** (`users.post_count`, `boards.thread_count/post_count`,
   `threads.reply_count`) are updated in the same transaction as the write.
 - **Schema rules:** everything in the `board` schema; bigint identity ids;
