@@ -332,6 +332,14 @@ function ModPanel(props: { ctx: PageCtx; thread: Thread; boards: { slug: string;
             <span class="hint">The opening post becomes what /rules shows and the moderator goes by.</span>
           </form>
         )}
+        {isAdmin(ctx.viewer) && (
+          <div class="inline-fields">
+            <a class="button" href={ctx.url(`/admin/export/thread/${thread.id}`)}>
+              Download thread
+            </a>
+            <span class="hint">As a Markdown file, to read or hand to an AI model.</span>
+          </div>
+        )}
       </div>
     </section>
   );
