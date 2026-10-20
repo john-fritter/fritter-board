@@ -43,7 +43,14 @@ function howToRead(extra: string[] = []): string {
 
 /** What the file holds: "Range: everything. Back Room: left out." and so on. */
 function exportedLine(what: string, opts: ExportOptions, scope: [string, boolean][] = []): string {
-  const range = opts.since ? `only what was written since ${formatStamp(opts.since)}` : "everything";
+  const range =
+    opts.since && opts.until
+      ? `only what was written from ${formatStamp(opts.since)} to ${formatStamp(opts.until)}`
+      : opts.since
+        ? `only what was written since ${formatStamp(opts.since)}`
+        : opts.until
+          ? `only what was written before ${formatStamp(opts.until)}`
+          : "everything";
   return [
     `${what}, exported ${formatStamp(new Date())} from ${SITE}.`,
     `Range: ${range}.`,

@@ -439,8 +439,9 @@ export function parseArchive(md: string): { posts: MetricPost[]; boards: string[
       continue;
     }
     if (section === "Boards") {
-      const b = /^- (.+?) \([^)]*\): /.exec(line);
-      if (b) boards.push(b[1]!);
+      // The members-only Back Room is left out, as the live board shows it to a visitor.
+      const b = /^- (.+?) \(([^)]*)\): /.exec(line);
+      if (b && !/members only/.test(b[2]!)) boards.push(b[1]!);
       continue;
     }
     if (section !== "Threads") continue;
@@ -449,7 +450,8 @@ export function parseArchive(md: string): { posts: MetricPost[]; boards: string[
     const threadLine = /^Board: (.+?) · started by .+? · thread (\d+) ·/.exec(next);
     if (/^### "/.test(line) && threadLine) {
       finish();
-      board = threadLine[1]!;
+      // A members-only thread's posts are skipped: board null takes no posts.
+      board = / \(members only\)$/.test(threadLine[1]!) ? null : threadLine[1]!;
       threadId = Number(threadLine[2]);
       continue;
     }

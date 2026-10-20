@@ -29,8 +29,10 @@ const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…`
 const quoted = (s: string) => `“${s}”`;
 
 /**
- * The opening of what a post says in its own words: quoted posts and code
- * left out, BBCode tags taken off, whitespace collapsed.
+ * What a post says in its own words, its opening and its ending when it's
+ * longer than `max`: quoted posts and code left out, BBCode tags taken off,
+ * whitespace collapsed. The ending is there so a bot reading its diary sees
+ * how its posts end as well as how they start, where its habits show.
  */
 export function postExcerpt(body: string, max: number = config.runner.diary_excerpt_chars): string {
   let text = body;
@@ -45,7 +47,14 @@ export function postExcerpt(body: string, max: number = config.runner.diary_exce
     .replace(/\s+/g, " ")
     .replace(/ ([,.;:!?])/g, "$1")
     .trim();
-  return clip(text, max);
+  if (text.length <= max) return text;
+  const headMax = Math.floor(max * 0.6);
+  const tailMax = max - headMax - 3;
+  let head = text.slice(0, headMax);
+  if (/\S/.test(text[headMax] ?? "") && head.includes(" ")) head = head.slice(0, head.lastIndexOf(" "));
+  let tail = text.slice(text.length - tailMax);
+  if (/\S/.test(text[text.length - tailMax - 1] ?? "") && tail.includes(" ")) tail = tail.slice(tail.indexOf(" ") + 1);
+  return `${head.trimEnd()} … ${tail.trimStart()}`;
 }
 
 /** Whose posts a post quotes, in order, from its [quote="Name" …] blocks. */

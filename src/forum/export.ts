@@ -15,6 +15,8 @@ import type { Role, UserStatus, Viewer } from "./types.js";
 export interface ExportOptions {
   /** Only what was written from this moment on; null for everything. */
   since: Date | null;
+  /** Only what was written before this moment; null for up to now. */
+  until: Date | null;
   /** Include members-only boards (the Back Room). */
   backRoom: boolean;
   /** Include private messages (the archive only; a member's file always has them). */
@@ -179,7 +181,7 @@ const toPost = (r: PostRow): ExportPost => ({
 
 /**
  * Posts in threads matching `threadWhere` (over threads t and boards b),
- * numbered by their place in the whole thread, then cut to the since date
+ * numbered by their place in the whole thread, then cut to the dates
  * and `postWhere` (over the numbered rows x). Oldest first.
  */
 async function selectPosts(
@@ -187,9 +189,11 @@ async function selectPosts(
   threadWhere: string,
   postWhere: string,
   params: unknown[],
-  since: Date | null
+  since: Date | null,
+  until: Date | null
 ): Promise<PostRow[]> {
   const sinceParam = params.length + 1;
+  const untilParam = params.length + 2;
   const { rows } = await ctx.pool.query<PostRow>(
     `SELECT * FROM (
        SELECT p.id, p.thread_id, p.author_id, ROW_NUMBER() OVER (PARTITION BY p.thread_id ORDER BY p.id) AS number,
@@ -203,9 +207,10 @@ async function selectPosts(
          LEFT JOIN users eu ON eu.id = p.edited_by
          LEFT JOIN users du ON du.id = p.deleted_by
         WHERE t.deleted_at IS NULL AND ${threadWhere}) x
-      WHERE ($${sinceParam}::timestamptz IS NULL OR x.created_at >= $${sinceParam}) AND ${postWhere}
+      WHERE ($${sinceParam}::timestamptz IS NULL OR x.created_at >= $${sinceParam})
+        AND ($${untilParam}::timestamptz IS NULL OR x.created_at < $${untilParam}) AND ${postWhere}
       ORDER BY x.thread_id, x.id`,
-    [...params, since]
+    [...params, since, until]
   );
   return rows;
 }
@@ -284,6 +289,7 @@ async function selectModActions(
   params: unknown[]
 ): Promise<ExportModAction[]> {
   const sinceParam = params.length + 1;
+  const untilParam = params.length + 2;
   const { rows } = await ctx.pool.query<{
     created_at: Date;
     moderator: string;
@@ -312,9 +318,10 @@ async function selectModActions(
        LEFT JOIN users u ON a.target_type = 'user' AND u.id = a.target_id
        LEFT JOIN boards fb ON fb.slug = a.details->>'from_board'
        LEFT JOIN boards tb ON tb.slug = a.details->>'to_board'
-      WHERE ($${sinceParam}::timestamptz IS NULL OR a.created_at >= $${sinceParam}) AND (${where})
+      WHERE ($${sinceParam}::timestamptz IS NULL OR a.created_at >= $${sinceParam})
+        AND ($${untilParam}::timestamptz IS NULL OR a.created_at < $${untilParam}) AND (${where})
       ORDER BY a.id`,
-    [...params, opts.since]
+    [...params, opts.since, opts.until]
   );
   return rows
     .filter((r) => opts.backRoom || !r.private_target)
@@ -357,8 +364,9 @@ async function selectReports(ctx: ForumContext, viewer: Viewer, opts: ExportOpti
        JOIN threads t ON t.id = p.thread_id
        JOIN boards b ON b.id = t.board_id
       WHERE ${boardsSql(viewer, opts)} AND ($1::timestamptz IS NULL OR r.created_at >= $1)
+        AND ($2::timestamptz IS NULL OR r.created_at < $2)
       ORDER BY r.id`,
-    [opts.since]
+    [opts.since, opts.until]
   );
   return rows.map((r) => ({
     at: r.created_at,
@@ -373,9 +381,15 @@ async function selectReports(ctx: ForumContext, viewer: Viewer, opts: ExportOpti
 
 // ── Private messages ───────────────────────────────────────────────────────
 
-/** Conversations matching `where` (over pm_conversations c), with their messages since the date. */
-async function selectConversations(ctx: ForumContext, since: Date | null, where: string, params: unknown[]): Promise<ExportConversation[]> {
+/** Conversations matching `where` (over pm_conversations c), with their messages between the dates. */
+async function selectConversations(
+  ctx: ForumContext,
+  opts: ExportOptions,
+  where: string,
+  params: unknown[]
+): Promise<ExportConversation[]> {
   const sinceParam = params.length + 1;
+  const untilParam = params.length + 2;
   const { rows } = await ctx.pool.query<{
     conversation_id: number;
     subject: string;
@@ -391,9 +405,10 @@ async function selectConversations(ctx: ForumContext, since: Date | null, where:
        FROM pm_conversations c
        JOIN pm_messages m ON m.conversation_id = c.id
        JOIN users a ON a.id = m.author_id
-      WHERE m.deleted_at IS NULL AND ($${sinceParam}::timestamptz IS NULL OR m.created_at >= $${sinceParam}) AND (${where})
+      WHERE m.deleted_at IS NULL AND ($${sinceParam}::timestamptz IS NULL OR m.created_at >= $${sinceParam})
+        AND ($${untilParam}::timestamptz IS NULL OR m.created_at < $${untilParam}) AND (${where})
       ORDER BY c.id, m.id`,
-    [...params, since]
+    [...params, opts.since, opts.until]
   );
   if (rows.length === 0) return [];
   const ids = [...new Set(rows.map((r) => r.conversation_id))];
@@ -440,11 +455,11 @@ const toMember = (r: any): ExportMember => ({
 
 // ── The three exports ──────────────────────────────────────────────────────
 
-/** One thread, every post or those since the date, with its moderation. */
+/** One thread, every post or those between the dates, with its moderation. */
 export async function exportThread(ctx: ForumContext, viewer: Viewer | null, threadId: number, opts: ExportOptions): Promise<ThreadExport> {
   const v = admin(viewer);
   await getThread(ctx, v, threadId);
-  const rows = await selectPosts(ctx, `t.id = $1 AND ${visibleBoardsSql(v)}`, "TRUE", [threadId], opts.since);
+  const rows = await selectPosts(ctx, `t.id = $1 AND ${visibleBoardsSql(v)}`, "TRUE", [threadId], opts.since, opts.until);
   const [t] = await selectThreads(ctx, [threadId]);
   // The thread's own options: whatever board it's in, it was asked for by name.
   const own: ExportOptions = { ...opts, backRoom: true, pms: false };
@@ -470,8 +485,8 @@ export async function exportArchive(ctx: ForumContext, viewer: Viewer | null, op
       ORDER BY c.sort_order, c.id, b.sort_order, b.id`
   );
   const { rows: members } = await ctx.pool.query(`${MEMBER_SELECT} WHERE deleted_at IS NULL ORDER BY joined_at, id`);
-  const threads = await threadsOf(ctx, await selectPosts(ctx, boardsSql(v, opts), "TRUE", [], opts.since));
-  const conversations = opts.pms ? await selectConversations(ctx, opts.since, "TRUE", []) : null;
+  const threads = await threadsOf(ctx, await selectPosts(ctx, boardsSql(v, opts), "TRUE", [], opts.since, opts.until));
+  const conversations = opts.pms ? await selectConversations(ctx, opts, "TRUE", []) : null;
   return {
     options: opts,
     boards: boards.map((b) => ({
@@ -500,11 +515,11 @@ export async function exportMember(ctx: ForumContext, viewer: Viewer | null, use
   const v = admin(viewer);
   const { rows } = await ctx.pool.query(`${MEMBER_SELECT} WHERE id = $1 AND deleted_at IS NULL`, [userId]);
   if (!rows[0]) throw notFound();
-  const posts = await selectPosts(ctx, boardsSql(v, opts), "x.author_id = $1", [userId], opts.since);
+  const posts = await selectPosts(ctx, boardsSql(v, opts), "x.author_id = $1", [userId], opts.since, opts.until);
   const threads = new Map((await selectThreads(ctx, [...new Set(posts.map((p) => p.thread_id))])).map((t) => [t.id, t]));
   const conversations = await selectConversations(
     ctx,
-    opts.since,
+    opts,
     "EXISTS (SELECT 1 FROM pm_participants pp WHERE pp.conversation_id = c.id AND pp.user_id = $1)",
     [userId]
   );

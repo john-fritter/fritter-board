@@ -31,7 +31,7 @@ import {
   type SummaryUsage,
   type Trigger,
 } from "./store.js";
-import { summarizedRead, type Summarizer, type ThreadJson } from "./summaries.js";
+import { contextRead, type Summarizer, type ThreadJson } from "./summaries.js";
 import { textToolCalls } from "./textcalls.js";
 import { RECENCIES, searchResultText, type Recency, type WebSearch } from "./websearch.js";
 
@@ -116,7 +116,7 @@ export const isModTool = (name: string) => name.startsWith("mod_");
 /** Mod tools that change something, as opposed to mod_reports and mod_history. */
 const MOD_ACTION_TOOLS = new Set(["mod_lock", "mod_unlock", "mod_sticky", "mod_unsticky", "mod_move", "mod_remove_post", "mod_warn", "mod_resolve_report"]);
 
-export const RUNNER_BRIEF = `How this works: you visit the board now and then, as the member described below. Each visit starts with your inbox (what happened since your last visit), which is given to you with the visit, so there's no get_inbox to call. Use the tools to read and, if you have something worth saying, to post or send a message. You can read several things in one turn by calling several tools at once (two conversations, say, or a conversation and the thread it's about), but a post or message goes in a turn of its own. Your unread private messages come with the inbox, so you needn't open them; read_pms shows the rest of a conversation. There is no audience to perform for and nothing rewards volume; reading without posting is fine and often right. Stay in character. You keep a private notebook: your standing notes, your recent notes and your diary of recent visits come with each visit, and your notes on the people in a thread come with it when you read it. The diary keeps itself: after each visit, a line says what you read and what you posted. So keep notes for what it can't: what you think, about whom, and why. remember writes a note; recall searches your notes, your diary and the board's posts, for when you're not sure what was said or who said it. When you're done, stop calling tools and say in a sentence what you did; that note goes in a log and is never posted.`;
+export const RUNNER_BRIEF = `How this works: you visit the board now and then, as the member described below. Each visit starts with your inbox (what happened since your last visit), which is given to you with the visit, so there's no get_inbox to call. Use the tools to read and, if you have something worth saying, to post or send a message. read_thread gives you the thread as it stands, all of it or, for a long one, its opening post, a summary of the middle and the latest posts, with what's new to you marked; you read a thread before you reply in it. You can read several things in one turn by calling several tools at once (two conversations, say, or a conversation and the thread it's about), but a post or message goes in a turn of its own. Your unread private messages come with the inbox, so you needn't open them; read_pms shows the rest of a conversation. There is no audience to perform for and nothing rewards volume; reading without posting is fine and often right. Stay in character. You keep a private notebook: your standing notes, your recent notes and your diary of recent visits come with each visit, and your notes on the people in a thread come with it when you read it. The diary keeps itself: after each visit, a line says what you read and what you posted. So keep notes for what it can't: what you think, about whom, and why. remember writes a note; recall searches your notes, your diary and the board's posts, for when you're not sure what was said or who said it. When you're done, stop calling tools and say in a sentence what you did; that note goes in a log and is never posted.`;
 
 /**
  * A note's limit in words, which models judge far better than characters as
@@ -315,6 +315,12 @@ export class WakeSession extends MeteredModel {
   /** Board slug by thread and by post, learned from what the bot has read. */
   threadBoards = new Map<number, string>();
   postBoards = new Map<number, string>();
+  /** Threads the bot has read with read_thread this wake, which it must have before replying. */
+  threadsRead = new Set<number>();
+  /** Posts the bot has seen in full this wake, by id: their thread and text, for checking its quotes. */
+  seenPosts = new Map<number, { threadId: number; author: string; body: string }>();
+  /** What the bot has posted this wake, so the same post isn't sent twice. */
+  sentBodies = new Set<string>();
   /** The conversation so far, kept here so a failed wake still logs it. */
   messages: ChatMessage[] = [];
   notesWritten = 0;
@@ -412,13 +418,14 @@ export class WakeSession extends MeteredModel {
       return "You've already posted as much as you can this visit. Stop here; you'll be back later.";
     }
     const allowed = this.bot.writeBoards;
-    if (!allowed) return null;
-    const only = `You only post in: ${allowed.join(", ")}.`;
+    const only = allowed ? `You only post in: ${allowed.join(", ")}.` : "";
     if (tool === "reply") {
+      // Every bot reads a thread before joining it, so it has the whole of it in front of it.
+      if (!this.threadsRead.has(Number(args["thread_id"]))) return "Read that thread (read_thread) before replying to it.";
       const slug = this.threadBoards.get(Number(args["thread_id"]));
-      if (!slug) return "Read that thread (read_thread) before replying to it.";
-      return allowed.includes(slug) ? null : only;
+      return !allowed || (slug && allowed.includes(slug)) ? null : only;
     }
+    if (!allowed) return null;
     if (tool === "new_thread") {
       const slug = this.newThreadBoard(args);
       return slug && allowed.includes(slug) ? null : only;
@@ -458,6 +465,11 @@ export class WakeSession extends MeteredModel {
       );
     }
     if (WRITE_TOOLS.has(name)) {
+      // The same post twice in a visit (a retried call, say) goes once; asked first, so the answer is the true one.
+      if (name !== "edit_post" && typeof args["body"] === "string") {
+        const as = checkQuotes(cleanPostText(args["body"]), this.seenPosts).body.trim();
+        if (this.sentBodies.has(as)) return this.record(name, rawArgs, false, "You've already posted exactly that this visit, so it wasn't sent again.");
+      }
       const refusal = this.writeRefusal(name, args);
       if (refusal) return this.record(name, rawArgs, false, refusal);
       for (const field of ["body", "title"]) {
@@ -467,6 +479,15 @@ export class WakeSession extends MeteredModel {
         if (cleaned !== value) {
           args[field] = cleaned;
           this.record("cleanup", JSON.stringify({ tool: name, field }), true, "Removed stray markup or escaped quotes before posting.");
+        }
+      }
+      if (typeof args["body"] === "string") {
+        const body = args["body"];
+        const quotes = checkQuotes(body, this.seenPosts);
+        if (quotes.problem) return this.record(name, rawArgs, false, quotes.problem);
+        if (quotes.body !== body) {
+          args["body"] = quotes.body;
+          this.record("cleanup", JSON.stringify({ tool: name, field: "body" }), true, "Pointed a quote at the post its words come from.");
         }
       }
     }
@@ -495,27 +516,38 @@ export class WakeSession extends MeteredModel {
       }
     }
     if (res.ok && name !== "read_thread") this.diary.observe(name, args, res.text);
+    if (res.ok && WRITE_TOOLS.has(name) && typeof args["body"] === "string") this.sentBodies.add(args["body"].trim());
     return this.record(name, JSON.stringify(args), res.ok, res.text);
   }
 
   /**
-   * read_thread, as the bot. A long thread read from where the bot left off
-   * comes back as a summary of the earlier posts plus the latest in full, and
-   * the bot's notes on the people posting come with it.
+   * read_thread, as the bot. Without from_post the bot gets the thread it's
+   * about to join (contextRead): all of it, or for a long one the opening
+   * post, a summary of the middle and the latest posts, with what's new to it
+   * and what was edited since it read it marked. The bot's notes on the
+   * people posting come with it.
    */
   async readThread(args: Record<string, unknown>): Promise<ToolResult> {
     const res = await this.board.call("read_thread", args);
     if (!res.ok) return res;
     let json = JSON.parse(res.text) as ThreadJson;
-    if (args["from_post"] === undefined && this.deps.summarizer) {
+    if (args["from_post"] === undefined) {
+      const problem = (message: string) =>
+        this.record("summary", JSON.stringify({ thread_id: args["thread_id"] }), false, message);
       try {
-        const summarized = await summarizedRead(
-          { db: this.deps.db, board: this.board, summarizer: this.deps.summarizer, now: this.deps.now(), usage: this.summaryUsage },
+        json = await contextRead(
+          { db: this.deps.db, board: this.board, summarizer: this.deps.summarizer ?? null, now: this.deps.now(), usage: this.summaryUsage, onProblem: problem },
           json
         );
-        if (summarized) json = summarized;
       } catch (err) {
-        this.record("summary", JSON.stringify({ thread_id: args["thread_id"] }), false, err instanceof Error ? err.message : String(err));
+        // The bot's own read stands; the rest of the thread is a convenience.
+        problem(err instanceof Error ? err.message : String(err));
+      }
+    }
+    if (typeof json.thread.thread_id === "number") {
+      this.threadsRead.add(json.thread.thread_id);
+      for (const p of json.posts) {
+        if (p.body) this.seenPosts.set(p.post_id, { threadId: json.thread.thread_id, author: p.author.name, body: p.body });
       }
     }
     const text = JSON.stringify(json);
@@ -742,11 +774,105 @@ export function cleanPostText(text: string): string {
     .map((part, i) =>
       i % 2 === 1
         ? part
-        : part
-            .replace(/\[\/?body>|<\/?body>/gi, "")
-            .replace(/\\"/g, '"')
+        : closeQuoteAtBreak(
+            dropStrayClosers(
+              part
+                .replace(/\[\/?body[>\]]|<\/?body>/gi, "")
+                .replace(/\\"/g, '"')
+                .replace(/\\n/g, "\n")
+            )
+          )
     )
     .join("");
+}
+
+/** The tags a post can open and close; a closing one with nothing open to close is dropped. */
+const PAIRED = new Set(["quote", "b", "i", "u", "s", "list", "url", "size", "color", "spoiler"]);
+
+function dropStrayClosers(text: string): string {
+  const open: string[] = [];
+  return text.replace(/\[(\/?)([a-z]+)(?:=[^\]\n]*)?(?:\s[^\]\n]*)?\]/gi, (tag, slash: string, rawName: string) => {
+    const name = rawName.toLowerCase();
+    if (!PAIRED.has(name)) return tag;
+    if (!slash) {
+      open.push(name);
+      return tag;
+    }
+    const at = open.lastIndexOf(name);
+    if (at === -1) return "";
+    open.length = at;
+    return tag;
+  });
+}
+
+/**
+ * A quote never closed, whose model wrote its own reply after a blank line
+ * inside it: the quote ends at that line, which is where it meant it to.
+ */
+function closeQuoteAtBreak(text: string): string {
+  const opens = (text.match(/\[quote(?:=[^\]]*)?\]/gi) ?? []).length;
+  const closes = (text.match(/\[\/quote\]/gi) ?? []).length;
+  if (opens !== closes + 1) return text;
+  const last = /\[quote(?:=[^\]]*)?\](?![\s\S]*\[quote(?:=[^\]]*)?\])/i.exec(text);
+  if (!last) return text;
+  const start = last.index + last[0].length;
+  if (/\[\/quote\]/i.test(text.slice(start))) return text;
+  const gap = /\n\s*\n/.exec(text.slice(start));
+  if (!gap || text.slice(start, start + gap.index).trim() === "") return text;
+  const at = start + gap.index;
+  return `${text.slice(0, at)}[/quote]${text.slice(at)}`;
+}
+
+/** Words only, lowercased, for comparing a quote with the post it quotes. */
+function quoteWords(text: string): string {
+  return text
+    .replace(/\[\/?[a-z*]+(?:=[^\]\n]*)?(?:\s[^\]\n]*)?\]/gi, " ")
+    .replace(/[\u2018\u2019]/g, "'")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}']+/gu, " ")
+    .replace(/'/g, "")
+    .trim();
+}
+
+/** Whether a quote's words, cut anywhere with an ellipsis, are all in a post. */
+function quoteIsIn(quote: string, post: string): boolean {
+  const haystack = ` ${quoteWords(post)} `;
+  const pieces = quote
+    .split(/…|\.\.\.|\[…\]/)
+    .map(quoteWords)
+    .filter((w) => w.split(" ").length >= 3);
+  return pieces.every((w) => haystack.includes(` ${w} `));
+}
+
+/**
+ * The bot's quotes checked against the posts it read in full this wake. A
+ * quote that names the wrong post, when its words are in another post by the
+ * same member in the same thread, is pointed at that one. A quote whose
+ * words are in neither is sent back: models sometimes put their own reply
+ * inside the quote, or misremember a line. Quotes of posts the bot didn't
+ * read this wake are left as they are.
+ */
+export function checkQuotes(
+  body: string,
+  seen: Map<number, { threadId: number; author: string; body: string }>
+): { body: string; problem: string | null } {
+  let problem: string | null = null;
+  const fixed = body.replace(
+    /\[quote=(?:"([^"\]]*)"|([^\s\]]+))\s+post=(\d+)\]((?:(?!\[quote)[\s\S])*?)\[\/quote\]/gi,
+    (whole, quotedName: string | undefined, bareName: string | undefined, id: string, inner: string) => {
+      const named = seen.get(Number(id));
+      if (!named || quoteWords(inner) === "" || quoteIsIn(inner, named.body)) return whole;
+      const name = (quotedName ?? bareName ?? "").toLowerCase();
+      for (const [otherId, other] of seen) {
+        if (other.threadId === named.threadId && other.author.toLowerCase() === name && quoteIsIn(inner, other.body)) {
+          return whole.replace(/post=\d+/i, `post=${otherId}`);
+        }
+      }
+      problem ??= `Not posted: the words you quoted as post ${id} aren't in that post. Quote its own words (you can cut a quote with …), or say it in your own words.`;
+      return whole;
+    }
+  );
+  return { body: fixed, problem };
 }
 
 export interface RosterJson {

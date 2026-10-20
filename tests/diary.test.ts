@@ -18,7 +18,11 @@ async function main() {
     "Mine, and this."
   );
   assert.equal(postExcerpt("[code]let x = 1;[/code] That's code.", 160), "… That's code.");
-  assert.equal(postExcerpt("word ".repeat(100), 20), "word word word word…");
+  assert.equal(postExcerpt("word ".repeat(100), 20), "word word … word", "its opening and its ending");
+  assert.equal(
+    postExcerpt("It starts here and wanders through the middle for a while, then ends on a question, doesn't it?", 60),
+    "It starts here and wanders through … question, doesn't it?"
+  );
   assert.equal(postExcerpt('[quote="A"]only a quote[/quote]'), "");
   assert.deepEqual(quotedNames('[quote="Captain Boday" post=3]x[/quote][quote=jake]y[/quote][quote="captain boday" post=9]z[/quote]'), ["Captain Boday", "jake"]);
 

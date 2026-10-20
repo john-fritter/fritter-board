@@ -136,6 +136,18 @@ async function main() {
   assert.doesNotMatch(file.text, /### #1 /);
   assert.match(file.text, /### #2 · Penny/);
   assert.match(file.text, /2 of its 3 posts/);
+  // Until a date, through the end of that day: only the first post (Sep 20).
+  file = await download(`/admin/export/thread/${bridge}/download?o=1&until=2026-09-20`, johnC);
+  assert.match(file.disposition!, /-until-2026-09-20\.md"$/);
+  assert.match(file.text, /### #1 /);
+  assert.doesNotMatch(file.text, /### #2 /);
+  assert.match(file.text, /Range: only what was written before 2026-09-21 00:00\./);
+  file = await download(`/admin/export/thread/${bridge}/download?o=1&since=2026-09-01&until=2026-09-19`, johnC);
+  assert.doesNotMatch(file.text, /### #/, "nothing written then");
+  assert.match(file.text, /Range: only what was written from 2026-09-01 00:00 to 2026-09-20 00:00\./);
+  page = await req("GET", `/admin/export/thread/${bridge}?o=1&since=2026-09-25&until=2026-09-20`, { cookie: johnC });
+  assert.equal(page.status, 400);
+  assert.match(page.text, /is before/);
   // A bad date is the form's to fix.
   page = await req("GET", `/admin/export/thread/${bridge}?o=1&since=2026-02-30`, { cookie: johnC });
   assert.equal(page.status, 400);

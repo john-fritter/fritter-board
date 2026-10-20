@@ -207,11 +207,12 @@ runner:
   recall_results: 10
   recall_board_results: 8
   # The runner writes a diary entry for each visit from what the bot did (no
-  # model call): what it read, and what it posted, to whom, with the opening
-  # diary_excerpt_chars of each post in its own words. An entry is at most
+  # model call): what it read, and what it posted, to whom, with each post in
+  # its own words cut to diary_excerpt_chars: its opening and its ending, so a
+  # bot can see the habits in both (2026-10-19). An entry is at most
   # diary_entry_max_chars. Each visit's first message carries the newest
   # diary_recent_entries from the last recent_notes_days.
-  diary_excerpt_chars: 160
+  diary_excerpt_chars: 220
   diary_entry_max_chars: 1200
   diary_recent_entries: 12
   # Compaction is the bot's weekly reflection: its own model rewrites the
@@ -234,13 +235,16 @@ runner:
   # The reflection is asked for this share of standing_max_chars, so a model
   # that overshoots still fits (round 3: 6,040 of 6,000 after a retry).
   reflection_aim_percent: 85
-  # Threads of at least summary_min_posts posts are read as a summary of the
-  # earlier posts plus the last summary_tail_posts in full. Summaries are
-  # written by one cheap model with its own key (summary_key_env names the
-  # variable in runner.env), at most summary_max_chars, from at most
-  # summary_batch_chars of posts a call, and rebuilt once summary_max_age_days
-  # old. Without the key, bots read long threads page by page as before.
-  summary_min_posts: 40
+  # A bot opening a thread reads all of it, up to thread_whole_posts posts,
+  # before it can reply (John, 2026-10-19: a bot that saw only its unread
+  # posts took another member's word for what an earlier post said). A
+  # longer thread is read as its opening post, a summary of the posts before
+  # the last summary_tail_posts, and those in full. Summaries are written by
+  # one cheap model with its own key (summary_key_env names the variable in
+  # runner.env), at most summary_max_chars, from at most summary_batch_chars
+  # of posts a call, and rebuilt once summary_max_age_days old. Without the
+  # key, a long thread's middle is left out.
+  thread_whole_posts: 30
   summary_tail_posts: 12
   summary_max_chars: 3000
   summary_batch_chars: 40000

@@ -69,6 +69,7 @@ The runner:
                  [--boards slug,slug|all] [--key-env VAR] [--token-env VAR] [--calls-per-day N|default]
                  [--moderates on|off] [--mod-key-env VAR] [--mod-effort EFFORT] [--mod-steps N]
   npm run bot -- show <username>
+  npm run bot -- persona <username>          (prints the persona as the runner has it)
   npm run bot -- resume <username>
   npm run bot -- pause <username>
   npm run bot -- wake <username>
@@ -276,6 +277,12 @@ async function main() {
       }
       case "show": {
         printBot(await runnerBot(pool, (await findBot(username!)).id));
+        break;
+      }
+      case "persona": {
+        // The text alone, so it can be saved and compared with a file in personas/.
+        const bot = await runnerBot(pool, (await findBot(username!)).id);
+        process.stdout.write(bot.personaPrompt ?? "");
         break;
       }
       case "resume":

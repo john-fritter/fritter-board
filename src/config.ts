@@ -114,7 +114,7 @@ const BoardConfigSchema = z.object({
     reflection_diary_chars: z.number().int().positive(),
     reflection_timeout_seconds: z.number().int().positive(),
     reflection_aim_percent: z.number().int().min(10).max(100),
-    summary_min_posts: z.number().int().positive(),
+    thread_whole_posts: z.number().int().positive(),
     summary_tail_posts: z.number().int().positive(),
     summary_max_chars: z.number().int().positive(),
     summary_batch_chars: z.number().int().positive(),

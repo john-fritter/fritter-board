@@ -13,6 +13,8 @@ export type ExportField = "backRoom" | "pms" | "transcripts";
 export interface ExportValues {
   /** "YYYY-MM-DD", or "" for everything. */
   since: string;
+  /** "YYYY-MM-DD", through the end of that day, or "" for up to now. */
+  until: string;
   backRoom: boolean;
   pms: boolean;
   transcripts: boolean;
@@ -74,7 +76,7 @@ export function ExportPage(props: {
               </p>
               <p class="hint">
                 {tooBig
-                  ? `That's more than fits in one conversation with an AI model (about ${n(config.export.context_tokens)} tokens). A later "since" date makes it smaller.`
+                  ? `That's more than fits in one conversation with an AI model (about ${n(config.export.context_tokens)} tokens). A later "since" date, or an earlier "until", makes it smaller.`
                   : `Fits in one conversation with an AI model (about ${n(config.export.context_tokens)} tokens).`}{" "}
                 Tokens are estimated as characters ÷ {config.export.chars_per_token}.
               </p>
@@ -85,6 +87,10 @@ export function ExportPage(props: {
             <label>
               Since <span class="hint">(empty for everything; from midnight, board time)</span>
               <input type="date" name="since" value={values.since} max={localDay(new Date())} />
+            </label>
+            <label>
+              Until <span class="hint">(empty for up to now; through the end of that day)</span>
+              <input type="date" name="until" value={values.until} max={localDay(new Date())} />
             </label>
             {props.fields.map((f) => (
               <label class="check">
