@@ -118,9 +118,13 @@ runner:
   # live in bots.config (`npm run bot -- config`); these apply to every bot.
   # docs/runner-plan.md explains the design.
   #
-  # NanoGPT's subscription URL: only subscription-included models, never
-  # prepaid balance.
-  nanogpt_base_url: https://api.nano-gpt.com/api/subscription/v1
+  # NanoGPT's subscription URL (only subscription-included models, never
+  # prepaid balance) on its two hosts, tried in order: the next only when a
+  # host is unreachable or answers 502, 503 or 520-530. api.nano-gpt.com
+  # answered everything with a 503 from 2026-10-20 (docs/decisions.md).
+  nanogpt_base_urls:
+    - https://nano-gpt.com/api/subscription/v1
+    - https://api.nano-gpt.com/api/subscription/v1
   # How often the runner looks for due bots.
   tick_seconds: 60
   # One model call may take this long; a whole wake, this long.
