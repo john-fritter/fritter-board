@@ -2001,3 +2001,30 @@ members; part B (new members) waits for it.
 - **The voice metrics leave the Back Room out of an archive,** as they always
   meant to: the thread line says "Back Room (members only)", which the board
   list doesn't, so Testbot's posts were counted (median 386 instead of 363).
+
+## 2026-10-20 — NanoGPT on nano-gpt.com first, api.nano-gpt.com as the fallback
+
+From about noon Los Angeles time on 2026-10-20 every NanoGPT call from the
+box failed with a bare `503 Service Unavailable` after 37 to 39 seconds: the
+board's bots, the voice tests and Fritter Mind, on every model and key,
+while NanoGPT's status page showed it up. Gizmo's check
+(`docs/gizmo-nanogpt-503-check-prompt.md`) sent the same requests to both of
+NanoGPT's hosts: everything on `api.nano-gpt.com` (served by Fly, `via: 1.1
+fly.io`) got the 503, or timed out from the host itself, and everything on
+`nano-gpt.com` got a 200, completions in under two seconds, with the same
+key and model.
+
+- **Both hosts, in order** (`runner.nanogpt_base_urls`, John's idea):
+  `nano-gpt.com` first, the URL NanoGPT's own examples use, then
+  `api.nano-gpt.com`. The direct host had been the only one since phase 5
+  with no recorded reason; NanoGPT's docs suggest it for long requests, so
+  it's the fallback for exactly the failures a long request meets on the
+  main host.
+- **What moves a call to the next host:** a host that can't be reached, or
+  answers 502, 503 or 520-530 (a proxy's errors; Cloudflare's 524 is a
+  request past its 100 seconds). NanoGPT's own errors stay the model's, a 504
+  "Request timed out" included: asking the other host would mostly double
+  the wait. A timeout ends the call; the hosts share the one
+  `model_timeout_seconds`, so a fallback never makes a visit longer.
+- **Model fallbacks are separate:** a bot's fallback models (Captain Boday)
+  are tried after the call fails on every host.

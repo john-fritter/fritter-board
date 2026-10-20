@@ -1,32 +1,68 @@
 # Gizmo task: voice test, round 4, run again
 
-You ran round 4 (`docs/gizmo-voice-test-4-prompt.md`) on 2026-10-20. NanoGPT
-was down while it ran: **every one of the 78 voice samples and all four dry
-visits failed with `NanoGPT 503: Service Unavailable`.** The reports have the
-right number of `####` headings, but each heading says `failed: error 503`,
-so the round-4 counts didn't catch it. The live bots got the same 503s at
-the same time, so it was NanoGPT, not the box.
+You ran round 4 (`docs/gizmo-voice-test-4-prompt.md`) on 2026-10-20. **Every
+one of the 78 voice samples and all four dry visits failed with `NanoGPT 503:
+Service Unavailable`.** The reports have the right number of `####` headings,
+but each heading says `failed: error 503`, so the round-4 counts didn't catch
+it. Your check afterwards (`docs/gizmo-nanogpt-503-check-prompt.md`) found the
+cause: NanoGPT's `api.nano-gpt.com` host answers everything from the box with
+a 503, while `nano-gpt.com` works. Pull request #23 fixed the runner (it now
+calls `nano-gpt.com` first) and `docs/gizmo-nanogpt-host-deploy-prompt.md`
+deployed it. The voice branch now has that fix too.
 
-This task runs step 2 of round 4 again, nothing else. The memory exports
-(step 3) were fine and aren't needed again.
+This task runs step 2 of round 4 again on a runner image with the fix,
+nothing else. The memory exports (step 3) were fine and aren't needed again.
+**Do this only after the host deploy is done and the live bots post again.**
 
 **Nothing changes for the live bots,** as before: no migration, no
 container recreated, no bot woken.
 
 ## The code
 
-The box should still be on `claude/posting-mechanics-mnfp0h` at `de9a590`,
-with the runner image built from it in round 4. **Don't pull and don't
-rebuild:** the branch may have newer commits that change only docs, and the
-image you built is the one under test.
+| Repo | Branch | Commit (or later) | Box path |
+| --- | --- | --- | --- |
+| `john-fritter/fritter-board` | `claude/posting-mechanics-mnfp0h` | the merge of `main` into it, after #23 | `/srv/fritter-board` |
+
+The host deploy left the box on `main`, with the live runner recreated from
+it. This task switches to the voice branch and builds a runner image for the
+one-off test containers, **without recreating the live runner**, then puts
+the image back to `main` at the end (step 4), so a later `docker compose up`
+can't start the voice code by accident.
 
 ```bash
 cd /srv/fritter-board && git branch --show-current && git log --oneline -1 && git status --short | head
 docker ps --format '{{.Names}}\t{{.Status}}' | grep fritter-board
 ```
 
-Expect `claude/posting-mechanics-mnfp0h` at `de9a590`, a clean status, and
-three containers up. If the branch or commit differs, stop and report it.
+Expect `main`, a clean status, and three containers up. Then, as `seeduser`:
+
+```bash
+cd /srv/fritter-board
+git fetch origin main claude/posting-mechanics-mnfp0h
+git merge-base --is-ancestor origin/main origin/claude/posting-mechanics-mnfp0h && echo SAFE || echo STOP
+```
+
+If it prints `STOP`, report `git log --oneline -5 origin/claude/posting-mechanics-mnfp0h` and stop.
+Otherwise:
+
+```bash
+git checkout claude/posting-mechanics-mnfp0h
+git merge --ff-only origin/claude/posting-mechanics-mnfp0h \
+  || git checkout -B claude/posting-mechanics-mnfp0h origin/claude/posting-mechanics-mnfp0h
+git log --oneline -1
+git diff --stat origin/main HEAD -- migrations Dockerfile docker-compose.yml package.json package-lock.json
+grep -n -A2 'nanogpt_base_urls' config/board.yaml
+```
+
+The `git diff --stat` should print **nothing** (if it lists a file, stop and
+report it), and the `grep` should show `https://nano-gpt.com/api/subscription/v1`
+first. Then, as root:
+
+```bash
+cd /srv/fritter-board
+docker compose build runner                                   # the image only; nothing is recreated
+docker ps --format '{{.Names}}\t{{.Status}}' | grep fritter-board   # all three still up since before
+```
 
 ## Must not happen
 
@@ -37,8 +73,8 @@ Everything in round 4's "Must not happen" still holds. Above all:
   schemas.
 - **Keep secrets out of the reports, chat and logs:** the probe key, bot
   tokens, and everything in `runner.env` and `.env`.
-- **Don't recreate, restart or stop any container,** don't run `docker
-  compose up`, and don't build any image.
+- **Don't recreate, restart or stop any container,** and don't run `docker
+  compose up`. Build only the `runner` image, as the steps say.
 - **Don't change any bot's settings, persona, notes or standing notes, or the
   briefs; don't wake any bot;** don't post on the board yourself.
 
@@ -106,10 +142,21 @@ one visit each. **The "failed" column is what matters:**
 
 ## Report back
 
-- The state check's output, and `check-magpie`'s failed count.
+- The state check's output, the switch and build output, and `check-magpie`'s failed count.
+- Step 4's output.
 - `done.txt`, and step 3's table, failed column included.
 - **Every report, whole,** as files (`check-magpie.md`, `voice-*.md`,
   `dry-*.md`, and any `-retry`). Don't summarise them in their place.
 - Anything that differed from what this task expected.
 
-Leave the box on this branch.
+## 4. Put the image back to main
+
+When every test has finished, as `seeduser` then root:
+
+```bash
+cd /srv/fritter-board && git checkout main && git log --oneline -1          # as seeduser
+cd /srv/fritter-board && docker compose build runner                         # as root; nothing is recreated
+docker ps --format '{{.Names}}\t{{.Status}}' | grep fritter-board            # all three still up since before
+```
+
+Leave the box on `main`.

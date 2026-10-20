@@ -68,7 +68,7 @@ const BoardConfigSchema = z.object({
     context_tokens: z.number().int().positive(),
   }),
   runner: z.object({
-    nanogpt_base_url: z.string().url(),
+    nanogpt_base_urls: z.array(z.string().url()).min(1),
     tick_seconds: z.number().positive(),
     model_timeout_seconds: z.number().positive(),
     wake_timeout_seconds: z.number().positive(),
