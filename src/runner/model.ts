@@ -122,11 +122,6 @@ export function parseUsage(raw: unknown): Usage {
 }
 
 /**
- * NanoGPT's chat completions, on the subscription base URL. The runner never
- * sends provider selection or billing overrides: those bypass the
- * subscription and bill pay-as-you-go.
- */
-/**
  * Node's fetch gives up when a response's headers take more than 300
  * seconds, whatever the request's own signal says, with a bare "fetch
  * failed". A model call that isn't streamed sends its headers only when the
@@ -135,10 +130,28 @@ export function parseUsage(raw: unknown): Usage {
  */
 const UNHURRIED = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
 
+/**
+ * A host that answered this way is down or can't hold the request, not the
+ * model: a gateway's 502 or 503, or a proxy's 520-530 (Cloudflare's 524 is a
+ * request that ran past its 100 seconds). The same request goes to the next
+ * base URL. NanoGPT's own errors, a 504 included, are the model's and don't.
+ */
+const hostFailed = (status: number) => status === 502 || status === 503 || (status >= 520 && status <= 530);
+
+/** The hosts that failed before the one whose error is reported, for the run's note. */
+const tried = (failed: string[]) => failed.map((f) => `${f}; then `).join("");
+
+/**
+ * NanoGPT's chat completions, on the subscription base URLs, tried in order
+ * (`runner.nanogpt_base_urls`): the next one is used only when a host is
+ * unreachable or answers as a broken host, within the call's one timeout.
+ * The runner never sends provider selection or billing overrides: those
+ * bypass the subscription and bill pay-as-you-go.
+ */
 export class NanoGptModel implements ChatModel {
   constructor(
     private readonly apiKey: string,
-    private readonly opts: { baseUrl?: string; fetch?: typeof fetch; timeoutSeconds?: number } = {}
+    private readonly opts: { baseUrls?: string[]; fetch?: typeof fetch; timeoutSeconds?: number } = {}
   ) {}
 
   async complete(req: ChatRequest): Promise<ChatResponse> {
@@ -167,25 +180,44 @@ export class NanoGptModel implements ChatModel {
 
     const timeout = AbortSignal.timeout((req.timeoutSeconds ?? this.opts.timeoutSeconds ?? config.runner.model_timeout_seconds) * 1000);
     const signal = req.signal ? AbortSignal.any([req.signal, timeout]) : timeout;
-    const url = `${(this.opts.baseUrl ?? config.runner.nanogpt_base_url).replace(/\/+$/, "")}/chat/completions`;
-    let res: Response;
-    try {
-      res = await (this.opts.fetch ?? fetch)(url, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-        signal,
-        // Node's fetch takes an undici dispatcher; the DOM types don't know it.
-        ...({ dispatcher: UNHURRIED } as RequestInit),
-      });
-    } catch (err) {
-      const what = err instanceof Error && err.name === "TimeoutError" ? "timed out" : "couldn't be reached";
-      // "fetch failed" says nothing on its own; the cause says why.
-      const cause = err instanceof Error && err.cause instanceof Error ? ` (${err.cause.message})` : "";
-      throw new ModelError(`The model ${what}: ${err instanceof Error ? err.message : String(err)}${cause}`, null, null, null);
+    const bases = this.opts.baseUrls ?? config.runner.nanogpt_base_urls;
+    const failed: string[] = [];
+    let res: Response | null = null;
+    let text = "";
+    for (const [i, base] of bases.entries()) {
+      const url = `${base.replace(/\/+$/, "")}/chat/completions`;
+      const last = i === bases.length - 1;
+      try {
+        res = await (this.opts.fetch ?? fetch)(url, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          signal,
+          // Node's fetch takes an undici dispatcher; the DOM types don't know it.
+          ...({ dispatcher: UNHURRIED } as RequestInit),
+        });
+      } catch (err) {
+        // "fetch failed" says nothing on its own; the cause says why.
+        const cause = err instanceof Error && err.cause instanceof Error ? ` (${err.cause.message})` : "";
+        const message = `${err instanceof Error ? err.message : String(err)}${cause}`;
+        // A timeout or the caller's abort ends the call; the next host gets no time of its own.
+        if (!signal.aborted && !last) {
+          failed.push(`${new URL(url).host} couldn't be reached: ${message}`);
+          continue;
+        }
+        const what = err instanceof Error && err.name === "TimeoutError" ? "timed out" : "couldn't be reached";
+        throw new ModelError(`${tried(failed)}The model ${what}: ${message}`, null, null, null);
+      }
+      text = await res.text();
+      if (!res.ok && hostFailed(res.status) && !last) {
+        failed.push(`${new URL(url).host} answered ${res.status}`);
+        res = null;
+        continue;
+      }
+      break;
     }
+    if (!res) throw new ModelError("No NanoGPT base URL is configured.", null, null, null);
 
-    const text = await res.text();
     let json: Record<string, unknown> | null = null;
     try {
       json = JSON.parse(text) as Record<string, unknown>;
@@ -201,7 +233,7 @@ export class NanoGptModel implements ChatModel {
         res.statusText;
       const retryAfter = Number(res.headers.get("retry-after"));
       throw new ModelError(
-        `NanoGPT ${res.status}: ${message}`,
+        `${tried(failed)}NanoGPT ${res.status}: ${message}`,
         res.status,
         typeof e["code"] === "string" ? e["code"] : null,
         Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : null

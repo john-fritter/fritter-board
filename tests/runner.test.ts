@@ -100,7 +100,7 @@ async function main() {
     tools: [{ type: "function", function: { name: "read_thread", parameters: { type: "object" } } }],
   });
   const req = sent!;
-  assert.equal(req.url, "https://api.nano-gpt.com/api/subscription/v1/chat/completions", "the subscription URL");
+  assert.equal(req.url, "https://nano-gpt.com/api/subscription/v1/chat/completions", "the subscription URL");
   assert.equal(req.auth, "Bearer sk-test");
   assert.equal(req.body["reasoning_effort"], "low");
   assert.equal(req.body["include_usage"], true, "usage must be asked for");
@@ -157,6 +157,7 @@ async function main() {
   const offline = new NanoGptModel("k", { fetch: (async () => { throw new TypeError("fetch failed"); }) as typeof fetch });
   await assert.rejects(offline.complete({ model: "m", messages: [], reasoningEffort: "low" }), (e: unknown) => e instanceof ModelError && e.isTransient);
   const headersLate = new NanoGptModel("k", {
+    baseUrls: ["https://one.example/v1"],
     fetch: (async (_url: unknown, init?: RequestInit) => {
       // Node's own 300-second wait for headers is turned off; the call's timeout decides.
       const dispatcher = (init as { dispatcher?: { [k: symbol]: unknown } } | undefined)?.dispatcher;
@@ -167,6 +168,55 @@ async function main() {
   await assert.rejects(headersLate.complete({ model: "m", messages: [], reasoningEffort: "low" }), (e: unknown) =>
     e instanceof ModelError && e.message === "The model couldn't be reached: fetch failed (Headers Timeout Error)"
   );
+
+  // The base URLs, in order: the next host only when one is down, never for the model's own errors.
+  const hosts = (answers: (number | "offline")[]) => {
+    const urls: string[] = [];
+    const model = new NanoGptModel("k", {
+      baseUrls: ["https://main.example/api/subscription/v1", "https://direct.example/api/subscription/v1/"],
+      fetch: (async (url: string | URL | Request) => {
+        urls.push(String(url));
+        const answer = answers[urls.length - 1]!;
+        if (answer === "offline") throw new TypeError("fetch failed", { cause: new Error("ECONNREFUSED") });
+        return answer === 200
+          ? new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), { status: 200 })
+          : new Response(answer === 504 ? JSON.stringify({ error: { message: "Request timed out." } }) : "Service Unavailable", { status: answer });
+      }) as typeof fetch,
+    });
+    return { urls, call: () => model.complete({ model: "m", messages: [], reasoningEffort: "low" }) };
+  };
+  let h = hosts([503, 200]);
+  assert.equal((await h.call()).content, "ok", "a 503 from the first host goes to the second");
+  assert.deepEqual(h.urls, ["https://main.example/api/subscription/v1/chat/completions", "https://direct.example/api/subscription/v1/chat/completions"]);
+  h = hosts(["offline", 200]);
+  assert.equal((await h.call()).content, "ok", "so does a host that can't be reached");
+  for (const status of [524, 502]) {
+    h = hosts([status, 200]);
+    assert.equal((await h.call()).content, "ok", `and a ${status}`);
+  }
+  h = hosts([200]);
+  await h.call();
+  assert.equal(h.urls.length, 1, "a working first host is the only one asked");
+  h = hosts([504, 200]);
+  await assert.rejects(h.call(), (e: unknown) => e instanceof ModelError && e.status === 504 && e.message === "NanoGPT 504: Request timed out.");
+  assert.equal(h.urls.length, 1, "NanoGPT's own 504 is the model's, not the host's");
+  h = hosts([503, 503]);
+  await assert.rejects(h.call(), (e: unknown) =>
+    e instanceof ModelError && e.status === 503 && e.isTransient && e.message === "main.example answered 503; then NanoGPT 503: Service Unavailable"
+  );
+  const asked: string[] = [];
+  const slow = new NanoGptModel("k", {
+    baseUrls: ["https://main.example/v1", "https://direct.example/v1"],
+    timeoutSeconds: 0.05,
+    fetch: ((url: string | URL | Request, init?: RequestInit) => {
+      asked.push(String(url));
+      return new Promise((_, reject) => init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason)));
+    }) as typeof fetch,
+  });
+  const awake = setTimeout(() => {}, 5000); // AbortSignal.timeout's timer doesn't keep the process alive
+  await assert.rejects(slow.complete({ model: "m", messages: [], reasoningEffort: "low" }), (e: unknown) => e instanceof ModelError && e.message.startsWith("The model timed out"));
+  clearTimeout(awake);
+  assert.equal(asked.length, 1, "a timeout ends the call: the hosts share one timeout");
 
   assert.equal(modelIdProblem("vendor/model-a"), null);
   assert.equal(modelIdProblem("vendor/model:thinking"), null, "thinking variants are models of their own");
