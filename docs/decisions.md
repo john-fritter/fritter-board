@@ -2051,3 +2051,17 @@ one), and Bickerstaff doesn't rank a point against the thread. Left as they
 are: Boday's "I love that" (13% quote-and-praise; it's his enthusiasm) and
 blackbird86 (one praise in 18, varied history, no formula).
 
+Round 5 (`docs/gizmo-voice-test-5-prompt.md`, 48 samples, two dry visits,
+none failed): "the start of" is gone from kardashev, Captain Boday's Trek
+from his samples (one replicator what-if; his dry visit's comparison was the
+early internet), and nobody ranked a post. What's left reads as character,
+so Part A ships as it is: magpie still says "reminds me" in about half her
+chains (it's how an association chain talks); Boday's examples are space and
+public works and he agrees loudly ("Exactly!", "I love this"), which the
+quote-and-praise count flags; Mercurio still asks in most posts, and in his
+dry visit he argued with kardashev instead. Most praise flags this round were
+false: "the best part of the board", a sarcastic "Yes." The personas loaded
+live matched their files in `personas/` before this (checked against the
+round-4 reports), so loading the new files drops no edit made at
+`/admin/bots`.
+
