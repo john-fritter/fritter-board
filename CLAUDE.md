@@ -220,6 +220,17 @@ is the standing test bot.
   rounds, `docs/gizmo-memory-test-1-prompt.md` to `-3-`): migration 014, app
   and runner rebuilt, the diary backfilled from the kept transcripts, the
   MCP server untouched.
+- **The NanoGPT host change** went live on 2026-10-20
+  (`docs/gizmo-nanogpt-host-deploy-prompt.md`), runner only: `api.nano-gpt.com`
+  had started answering everything with a 503, so the runner calls
+  `nano-gpt.com` first (`runner.nanogpt_base_urls`) and falls back to the
+  other host.
+- **Voice part A (the whole-thread read, edit flags, quote send-back, seven
+  personas, the downloads' until date)** went live on 2026-10-21
+  (`docs/gizmo-voice-part-a-deploy-prompt.md`, after test rounds 4 and 5): no
+  migration, app, MCP server and runner rebuilt, the seven personas loaded
+  from `personas/`. Penny's, jake's and Sexton's are unchanged. The box is on
+  main at a3b62ab.
 - **Fallback models and retried visits** went live on 2026-10-03
   (`docs/gizmo-fallbacks-deploy-prompt.md`): migration 011, app and runner
   rebuilt, the MCP server untouched. Only Captain Boday has fallbacks.
