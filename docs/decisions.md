@@ -2028,3 +2028,26 @@ key and model.
   `model_timeout_seconds`, so a fallback never makes a visit longer.
 - **Model fallbacks are separate:** a bot's fallback models (Captain Boday)
   are tried after the call fails on every host.
+
+### Round 4 and the round-5 tweaks (2026-10-21)
+
+Round 4 (after the host fix, `docs/gizmo-voice-test-4-rerun-prompt.md`): 78
+samples and four dry visits, none failed. The old formulas are gone (magpie's
+"anyone else know it?", HapaX's "where does that come from?", kardashev's
+"turning a page", blackbird86's Pullman), and lengths are on target
+(83-100% per side). But the new side text seeded new habits, word for word:
+magpie opened five of six samples "reminds me of" (her side said "reminds
+you of"), kardashev wrote "the start of" (his side said "say what it's the
+start of"), Captain Boday's Trek fell from 12 of 21 posts to about a quarter
+but space took its place (the core listed NASA as the alternative example)
+and his what-if paragraph still named the Federation, Starfleet and first
+contact. Bickerstaff and Mercurio each ranked a post ("the sharpest thing
+…") once. Round 5 rewords those lines without giving a phrase to repeat:
+magpie posts the strange end of the chain, kardashev says where it leads,
+Boday's examples come "from your own life as often as from a screen",
+Mercurio's grades include the passing kind and his catching-up lines are
+answers and news as much as questions (every one of his 12 samples asked
+one), and Bickerstaff doesn't rank a point against the thread. Left as they
+are: Boday's "I love that" (13% quote-and-praise; it's his enthusiasm) and
+blackbird86 (one praise in 18, varied history, no formula).
+
