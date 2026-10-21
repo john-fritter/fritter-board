@@ -27,6 +27,7 @@ const ARCHIVE = `# Fritter Board: the archive
 - News (The Paper): Discussion of Fritter Post articles. · 1 threads, 3 posts in all
 - General (The Commons): Anything worth talking about. · 1 threads, 1 posts in all
 - Off-Topic (The Commons): Anything not worth talking about. · 0 threads, 0 posts in all
+- Back Room (The Commons, members only): For members. · 1 threads, 1 posts in all
 
 ## Members (3)
 
@@ -66,6 +67,14 @@ Board: General · started by Penny on 2026-10-06 10:00 · thread 8 · 1 post
 
 Anyone else up?
 
+### "Members only"
+
+Board: Back Room (members only) · started by Testbot on 2026-10-06 12:00 · thread 9 · 1 post
+
+#### #1 · Testbot (bot) · 2026-10-06 12:00 · post 14
+
+Not counted: the Back Room isn't what a visitor sees.
+
 ## Private messages (1 conversations)
 
 ### "hi"
@@ -89,7 +98,7 @@ function testText() {
 function testArchive() {
   const { posts, boards } = parseArchive(ARCHIVE);
   assert.deepEqual(boards, ["News", "General", "Off-Topic"]);
-  assert.deepEqual(posts.map((p) => p.id), [10, 11, 12, 13], "private messages aren't posts");
+  assert.deepEqual(posts.map((p) => p.id), [10, 11, 12, 13], "private messages aren't posts, and the Back Room is left out");
   const [first, penny, jake, chat] = posts;
   assert.ok(first!.body.includes("## A heading inside a post") && first!.body.endsWith("Still John's post."));
   assert.equal(first!.isFirst, true);

@@ -51,15 +51,15 @@ export async function exportBot(forum: ForumContext, viewer: Viewer | null, name
   const db = forum.pool;
   const bot = (await botByUsername(db, name)) ?? null;
   if (!bot) throw notFound();
-  const since = opts.since;
-  const sinceSql = (col: string) => `($2::timestamptz IS NULL OR ${col} >= $2)`;
+  const { since, until } = opts;
+  const sinceSql = (col: string) => `($2::timestamptz IS NULL OR ${col} >= $2) AND ($3::timestamptz IS NULL OR ${col} < $3)`;
 
   const { rows: cfg } = await db.query("SELECT * FROM bots.config WHERE user_id = $1", [bot.userId]);
   const member = await exportMember(forum, viewer, bot.userId, opts);
 
   const { rows: log } = await db.query<{ changed_by: string; changes: ConfigChanges; created_at: Date }>(
     `SELECT changed_by, changes, created_at FROM bots.config_log WHERE user_id = $1 AND ${sinceSql("created_at")} ORDER BY id`,
-    [bot.userId, since]
+    [bot.userId, since, until]
   );
 
   const { rows: standing } = await db.query<{
@@ -74,7 +74,7 @@ export async function exportBot(forum: ForumContext, viewer: Viewer | null, name
       WHERE user_id = $1 AND (${sinceSql("created_at")}
             OR id = (SELECT MAX(id) FROM bots.standing_versions WHERE user_id = $1))
       ORDER BY id DESC`,
-    [bot.userId, since]
+    [bot.userId, since, until]
   );
 
   const { rows: notes } = await db.query<{
@@ -93,20 +93,20 @@ export async function exportBot(forum: ForumContext, viewer: Viewer | null, name
        LEFT JOIN boards b ON b.id = t.board_id
       WHERE n.user_id = $1 AND ${sinceSql("n.created_at")}
       ORDER BY n.created_at, n.id`,
-    [bot.userId, since]
+    [bot.userId, since, until]
   );
 
   const { rows: searches } = await db.query(
     `SELECT query, recency, service, results, research_model, summary, outcome, error, created_at, run_id
        FROM bots.searches WHERE user_id = $1 AND ${sinceSql("created_at")} ORDER BY id`,
-    [bot.userId, since]
+    [bot.userId, since, until]
   );
 
   const { rows: quiet } = await db.query<{ outcome: string; n: number }>(
     `SELECT outcome, COUNT(*)::int AS n FROM bots.runs
       WHERE user_id = $1 AND ${sinceSql("started_at")} AND outcome IN ('lurked', 'skipped')
       GROUP BY outcome`,
-    [bot.userId, since]
+    [bot.userId, since, until]
   );
 
   const { rows: runs } = await db.query(
@@ -116,7 +116,7 @@ export async function exportBot(forum: ForumContext, viewer: Viewer | null, name
        FROM bots.runs
       WHERE user_id = $1 AND ${sinceSql("started_at")} AND outcome NOT IN ('lurked', 'skipped')
       ORDER BY id`,
-    [bot.userId, since]
+    [bot.userId, since, until]
   );
 
   return {

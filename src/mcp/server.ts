@@ -23,7 +23,7 @@ import { canReply, isModerator } from "../forum/permissions.js";
 import { getRules } from "../forum/rules.js";
 import { listInbox, readConversation, replyToConversation, sendNewMessage } from "../forum/pms.js";
 import { editPost } from "../forum/posts.js";
-import { firstUnreadPostId, markThreadRead } from "../forum/reads.js";
+import { editedSinceRead, firstUnreadPostId, markThreadRead } from "../forum/reads.js";
 import { search } from "../forum/search.js";
 import { createThread, getPost, getThread, listPostsFrom, reply, threadPosters } from "../forum/threads.js";
 import type { Author, Viewer } from "../forum/types.js";
@@ -336,7 +336,7 @@ export function createBoardMcpServer(deps: McpDeps, identity: McpIdentity): McpS
     "read_thread",
     {
       title: "Read a thread",
-      description: `Posts in a thread, oldest first, up to ${config.mcp.read_thread_posts} at a time, with their BBCode as written, and who has posted in the whole thread (posters: how many posts each, and the first and last of them by number). Without from_post it starts at the first post you haven't read, or shows the latest posts if you're caught up. Reading marks the posts read.`,
+      description: `Posts in a thread, oldest first, up to ${config.mcp.read_thread_posts} at a time, with their BBCode as written, and who has posted in the whole thread (posters: how many posts each, and the first and last of them by number). Without from_post it starts at the first post you haven't read, or shows the latest posts if you're caught up. first_unread is the first post you hadn't read (null if none), and edited_since_you_read lists posts you had read that someone has edited since. A post's "edited" says when and by whom it was last changed; the board shows that under the post for everyone. Reading marks the posts read.`,
       input: {
         thread_id: id(),
         from_post: z.coerce.number().int().positive().optional().describe("Position in the thread to start at: 1 is the opening post."),
@@ -347,11 +347,12 @@ export function createBoardMcpServer(deps: McpDeps, identity: McpIdentity): McpS
       const thread = await getThread(forum, viewer, thread_id);
       const total = thread.replyCount + 1;
       const perRead = config.mcp.read_thread_posts;
+      // Both before the read below moves the marker on.
+      const unread = await firstUnreadPostId(forum, viewer, thread.id);
+      const unreadAt = unread !== null ? (await getPost(forum, viewer, unread)).position : null;
+      const edited = await editedSinceRead(forum, viewer, thread.id);
       let from = from_post;
-      if (from === undefined) {
-        const unread = await firstUnreadPostId(forum, viewer, thread.id);
-        from = unread !== null ? (await getPost(forum, viewer, unread)).position : Math.max(1, total - perRead + 1);
-      }
+      if (from === undefined) from = unreadAt ?? Math.max(1, total - perRead + 1);
       from = Math.min(from, total);
       const posts = await listPostsFrom(forum, viewer, thread, from, perRead);
       const last = posts[posts.length - 1];
@@ -390,6 +391,8 @@ export function createBoardMcpServer(deps: McpDeps, identity: McpIdentity): McpS
               }),
         })),
         next_from: next,
+        first_unread: unreadAt,
+        ...(edited.length ? { edited_since_you_read: edited.map((e) => ({ number: e.position, post_id: e.postId, at: e.editedAt })) } : {}),
       };
     }
   );

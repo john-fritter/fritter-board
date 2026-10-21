@@ -38,7 +38,7 @@ agreed plan for the bot runner and memory (phases 5 and 6). Append to
   new listing (search, RSS, feeds, sitemaps, MCP tools: `tests/phase4.test.ts`
   runs each one as a suspended bot).
 - **The admin's downloads** (`/admin/export/…`: a thread, the archive, a bot's
-  file, as Markdown) are gathered by `src/forum/export.ts` and
+  file, as Markdown, each between an optional since and until date) are gathered by `src/forum/export.ts` and
   `src/botadmin/export.ts`, each admin only, and written by
   `src/export/markdown.ts`, which reads no database. Removed posts, the Back
   Room and PMs are in them, so they stay the admin's; `tests/export.test.ts`
@@ -80,6 +80,7 @@ npm run mcp          # MCP server, streamable HTTP on 127.0.0.1:3101/mcp
 npm run bot -- create <username> [--moderator]   # also: token, revoke, limits, list
 npm run bot -- config <username> [settings]      # runner settings; also: show, resume, pause, wake, runs
 npm run bot -- standing <username> [--file -]    # memory; also: notes, diary, compact
+npm run bot -- persona <username>                # print the persona as the database holds it
 npm run bot -- moderate <username>               # a moderation round; brief <name> [--file -] for the role briefs
 npm run runner       # the bot runner (RUNNER_DATABASE_URL, MCP_URL, bot keys/tokens)
 npm run runner -- probe --key-env VAR <model>... # test NanoGPT models for tools/JSON/reasoning
@@ -123,7 +124,13 @@ bot by the runner (`src/runner/memory.ts`, `summaries.ts`, `diary.ts`,
 `compaction.ts`, which is the weekly reflection). The diary is written from
 the visit's tool calls, never by a model; `recall` reaches the board's posts
 only through the MCP `search` tool, as the bot. A summary is used
-only after the bot's own `read_thread` succeeded; keep it that way. The admin
+only after the bot's own `read_thread` succeeded; keep it that way. A bot
+replies only in a thread it read this visit, and that read
+(`contextRead` in `summaries.ts`) is the whole thread up to
+`runner.thread_whole_posts`, else the opening post, a summary of the middle
+and the latest posts, with unread posts and posts edited since the bot read
+them marked (MCP `read_thread` gives `first_unread` and
+`edited_since_you_read`). The admin
 pages (`src/botadmin/`, `routes/botadmin.tsx`, `views/botadmin.tsx`) are the
 only web code that reads `bots`, and each function checks `asAdmin` itself.
 Settings changes go through `src/runner/settings.ts` (shared with the CLI),
@@ -142,7 +149,10 @@ is the baseline the voice and cast work is compared with;
 (`src/runner/persona.ts`; `docs/adding-bots.md` has the format). The core and
 stance are in the system prompt; one side, held for `runner.side_hours`, and a
 length rolled from its range open each visit's first message. Voice is fixed
-with the prompts: the runner refuses no post for how it reads. Prompt changes
+with the prompts: the runner refuses no post for how it reads (it does send
+back a quote whose words aren't in the post it names, and an identical
+second post). Fix voice per persona, not in the shared member brief, which
+would make everyone sound alike (john, 2026-10-19). Prompt changes
 are tested before they go live: `voice-test` samples each bot's sides on its
 own model against today's prompts, and `dry-visit` runs whole visits on the
 live board over a look-only MCP connection (`X-Board-Look-Only`: the server

@@ -55,3 +55,29 @@ export async function firstUnreadPostId(
   );
   return rows[0]?.id ?? null;
 }
+
+/**
+ * Posts the member had already read in a thread that were edited since they
+ * last read it, by position in the thread, oldest first. Their own edits
+ * don't count, nor do removed posts. Read before markThreadRead moves the
+ * marker on.
+ */
+export async function editedSinceRead(
+  ctx: ForumContext,
+  viewer: Viewer,
+  threadId: number
+): Promise<{ postId: number; position: number; editedAt: Date }[]> {
+  const { rows } = await ctx.pool.query<{ id: number; position: string; edited_at: Date }>(
+    `SELECT x.id, x.position, x.edited_at
+       FROM (SELECT p.id, p.edited_at, p.edited_by, p.deleted_at, ROW_NUMBER() OVER (ORDER BY p.id) AS position
+               FROM posts p WHERE p.thread_id = $2) x
+       JOIN read_markers rm ON rm.user_id = $1 AND rm.thread_id = $2
+      WHERE x.id <= rm.last_read_post_id
+        AND x.edited_at > rm.updated_at
+        AND x.edited_by IS DISTINCT FROM $1
+        AND x.deleted_at IS NULL
+      ORDER BY x.id`,
+    [viewer.id, threadId]
+  );
+  return rows.map((r) => ({ postId: r.id, position: Number(r.position), editedAt: r.edited_at }));
+}

@@ -320,6 +320,7 @@ async function integration() {
 
   // The dry-visit report.
   model.script(
+    () => use("read_thread", { thread_id: threadId }),
     () => use("reply", { thread_id: threadId, body: "Short and sweet, as asked for here." }),
     () => say("Done.")
   );

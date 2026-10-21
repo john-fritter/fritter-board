@@ -14,14 +14,15 @@ import { formError, parseId, render } from "./util.js";
 // functions that gather the data check again (src/forum/export.ts,
 // src/botadmin/export.ts). Downloads are GETs: they change nothing.
 
-const DEFAULTS: ExportValues = { since: "", backRoom: true, pms: false, transcripts: false };
+const DEFAULTS: ExportValues = { since: "", until: "", backRoom: true, pms: false, transcripts: false };
 
 /** The form's fields; until it has been submitted (no `o`), the defaults. */
 function readValues(c: AppContext): ExportValues {
   const q = (k: string) => c.req.query(k) ?? "";
   const since = q("since").trim();
-  if (q("o") !== "1") return { ...DEFAULTS, since };
-  return { since, backRoom: q("backroom") === "1", pms: q("pms") === "1", transcripts: q("transcripts") === "1" };
+  const until = q("until").trim();
+  if (q("o") !== "1") return { ...DEFAULTS, since, until };
+  return { since, until, backRoom: q("backroom") === "1", pms: q("pms") === "1", transcripts: q("transcripts") === "1" };
 }
 
 function toOptions(v: ExportValues): BotExportOptions {
@@ -30,7 +31,16 @@ function toOptions(v: ExportValues): BotExportOptions {
     since = startOfLocalDay(v.since);
     if (!since) throw invalid(`"${v.since}" isn't a date: pick one, or leave "since" empty for everything.`);
   }
-  return { since, backRoom: v.backRoom, pms: v.pms, transcripts: v.transcripts };
+  let until: Date | null = null;
+  if (v.until) {
+    // "Until" is the whole of that day: up to the next midnight, board time.
+    const day = startOfLocalDay(v.until);
+    const next = day && startOfLocalDay(localDay(new Date(day.getTime() + 36 * 60 * 60_000)));
+    if (!next) throw invalid(`"${v.until}" isn't a date: pick one, or leave "until" empty for up to now.`);
+    until = next;
+    if (since && until <= since) throw invalid(`"Until" (${v.until}) is before "since" (${v.since}).`);
+  }
+  return { since, until, backRoom: v.backRoom, pms: v.pms, transcripts: v.transcripts };
 }
 
 /** A name for the file: letters, digits and dashes only. */
@@ -44,7 +54,7 @@ export function fileSlug(s: string, max = 40): string {
   );
 }
 
-const sinceSuffix = (v: ExportValues) => (v.since ? `-since-${v.since}` : "");
+const sinceSuffix = (v: ExportValues) => `${v.since ? `-since-${v.since}` : ""}${v.until ? `-until-${v.until}` : ""}`;
 const count = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
 
 interface Built {
@@ -76,8 +86,8 @@ export function registerExportRoutes(app: Hono<AppEnv>, s: Services): void {
         built = await r.build(c, toOptions(values), values);
       } catch (err) {
         const { message, status } = formError(err);
-        // Built again without the bad date, for the page's title and crumbs.
-        const fallback = await r.build(c, toOptions({ ...values, since: "" }), values);
+        // Built again without the bad dates, for the page's title and crumbs.
+        const fallback = await r.build(c, toOptions({ ...values, since: "", until: "" }), values);
         return render(
           c,
           <ExportPage

@@ -376,6 +376,11 @@ async function main() {
     () => use("mod_resolve_report", { report_id: reportId, resolution: "Removed as spam." }),
     () => use("reply", { thread_id: general, body: "Spam removed; carry on." }),
     (q) => {
+      assert.match(lastText(q), /Read that thread \(read_thread\) before replying to it\./, "a moderator reads a thread before posting in it too");
+      return use("read_thread", { thread_id: general });
+    },
+    () => use("reply", { thread_id: general, body: "Spam removed; carry on." }),
+    (q) => {
       assert.ok(!toolNames(q).includes("reply"), "one post a round");
       assert.ok(toolNames(q).includes("mod_warn"), "mod tools stay");
       assert.ok(!toolNames(q).includes("web_search"), "no web search in a moderation round");

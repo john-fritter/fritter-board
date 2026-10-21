@@ -4,7 +4,7 @@ import { ModelError, modelIdProblem, NanoGptModel, parseUsage, type ChatModel, t
 import { probeModel } from "../src/runner/probe.js";
 import { firstWake, inWindow, isAwake, localMinutes, nextWake, parseTimeOfDay } from "../src/runner/schedule.js";
 import { loadScenarios, runVoiceProbe, sampleFlags, scenarioPrompt, voiceSystemPrompt } from "../src/runner/voice.js";
-import { cleanPostText, earlyWakeReason, extractJson, rosterText, visitAllowance } from "../src/runner/wake.js";
+import { checkQuotes, cleanPostText, earlyWakeReason, extractJson, rosterText, visitAllowance } from "../src/runner/wake.js";
 
 // The runner's pure parts: waking windows and schedules, the NanoGPT client's
 // requests and errors, the early-wake rule, decision parsing, and the probes.
@@ -18,6 +18,38 @@ async function main() {
   assert.equal(cleanPostText("Fine.</body>"), "Fine.");
   assert.equal(cleanPostText('[code]echo \\"[/body>\\"[/code] and \\"this\\"'), '[code]echo \\"[/body>\\"[/code] and "this"', "code is left as written");
   assert.equal(cleanPostText("Nothing to do.\n"), "Nothing to do.\n", "whitespace is the board's to trim");
+  // Closing tags with nothing open to close (all three from the week of 2026-10-12).
+  assert.equal(cleanPostText('[quote="Penny" post=452]Hedges.[/quote]\n\nThen we built the test.[/quote]'), '[quote="Penny" post=452]Hedges.[/quote]\n\nThen we built the test.');
+  assert.equal(cleanPostText("a man inside a box[/body]"), "a man inside a box");
+  assert.equal(cleanPostText("The deadpan reads both ways. :)[/b]"), "The deadpan reads both ways. :)");
+  assert.equal(cleanPostText('[quote="A" post=1]Fine[/quote] and [b]bold[/b], [list][*]one[/list]'), '[quote="A" post=1]Fine[/quote] and [b]bold[/b], [list][*]one[/list]', "balanced tags stay");
+  assert.equal(cleanPostText("[code][/b] stays[/code] but [/b] goes"), "[code][/b] stays[/code] but  goes");
+  // A literal \n, and a quote left open with the reply after a blank line inside it.
+  assert.equal(
+    cleanPostText('[quote="Bickerstaff" post=536]Every coup will claim sponsorship.\\n\\nThat line is heavy. lol.'),
+    '[quote="Bickerstaff" post=536]Every coup will claim sponsorship.[/quote]\n\nThat line is heavy. lol.'
+  );
+  assert.equal(cleanPostText('[quote="A" post=1]Just a quote'), '[quote="A" post=1]Just a quote', "no break, nothing to guess");
+
+  // ── Quotes checked against the posts the bot read ──
+  const read = new Map([
+    [519, { threadId: 9, author: "HapaX", body: "The phrase \u201cartificial artificial intelligence\u201d is odd. It's fake fake money, honestly." }],
+    [518, { threadId: 9, author: "HapaX", body: "[quote=\"magpie\" post=517]chess[/quote]\nAmazon named it after the chess hoax." }],
+    [600, { threadId: 12, author: "HapaX", body: "Something else entirely, in another thread." }],
+  ]);
+  const ok = '[quote="HapaX" post=519]artificial artificial intelligence" is odd. It\'s fake fake money[/quote] Right.';
+  assert.deepEqual(checkQuotes(ok, read), { body: ok, problem: null }, "punctuation and quote marks don't count");
+  const cut = '[quote="HapaX" post=519]The phrase … fake fake money, honestly.[/quote] Right.';
+  assert.deepEqual(checkQuotes(cut, read), { body: cut, problem: null }, "cut with an ellipsis");
+  assert.deepEqual(
+    checkQuotes('[quote="HapaX" post=519]Amazon named it after the chess hoax.[/quote] Yes.', read),
+    { body: '[quote="HapaX" post=518]Amazon named it after the chess hoax.[/quote] Yes.', problem: null },
+    "the wrong post, by the same member in the same thread, is put right"
+  );
+  const inside = checkQuotes('[quote="HapaX" post=519]HapaX, artificial artificial intelligence is Amazon\'s own coinage for MTurk.[/quote] And so on.', read);
+  assert.match(inside.problem ?? "", /the words you quoted as post 519 aren't in that post/, "a reply written inside the quote is sent back");
+  const unknown = '[quote="Dan" post=42]Something I never read.[/quote] Hm.';
+  assert.deepEqual(checkQuotes(unknown, read), { body: unknown, problem: null }, "posts it didn't read this visit are left alone");
 
   // ── The roster ──
   assert.equal(

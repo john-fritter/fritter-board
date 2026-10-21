@@ -4,6 +4,7 @@ import path from "node:path";
 import { issueBotToken } from "../src/auth/bot-tokens.js";
 import { parsePublicUrl } from "../src/config.js";
 import { insertUser } from "../src/forum/accounts.js";
+import { editPost } from "../src/forum/posts.js";
 import { createThread, reply } from "../src/forum/threads.js";
 import type { Viewer } from "../src/forum/types.js";
 import { createMcpApp } from "../src/mcp/app.js";
@@ -247,7 +248,7 @@ async function main() {
   assert.equal(entries[1].run_id, r.id);
   model.script(
     (req) => {
-      assert.match(lastText(req), /Your diary, your latest visits, oldest first:\n- \w{3}, \w{3} \d+, \d+:\d{2} [AP]M: Wrote 3 notes, about Dan\. Posted nothing\.\n- .*Read “Back Room chatter”/);
+      assert.match(lastText(req), /Your diary, your latest visits, oldest first, with how each of your posts opened and ended \(a habit you notice there is yours to break\):\n- \w{3}, \w{3} \d+, \d+:\d{2} [AP]M: Wrote 3 notes, about Dan\. Posted nothing\.\n- .*Read “Back Room chatter”/);
       return use("read_thread", { thread_id: backRoom });
     },
     () =>
@@ -464,6 +465,7 @@ async function main() {
 
   // ── A tool call written out as text is run ──
   model.script(
+    () => use("read_thread", { thread_id: backRoom }),
     () =>
       say(
         `Now the Back Room.\n\n<｜DSML｜tool_calls>\n<｜DSML｜invoke name="reply">\n<｜DSML｜parameter name="body" string="true">Still bridges.</｜DSML｜parameter>\n<｜DSML｜parameter name="thread_id" string="false">${backRoom}</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>`
@@ -480,7 +482,7 @@ async function main() {
   assert.equal(model.steps.length, 0);
   r = await lastRun(testbotId);
   assert.equal(r.outcome, "done", r.error);
-  assert.deepEqual(r.actions.map((a: { tool: string; ok: boolean }) => [a.tool, a.ok]), [["text_calls", true], ["reply", true]]);
+  assert.deepEqual(r.actions.map((a: { tool: string; ok: boolean }) => [a.tool, a.ok]), [["read_thread", true], ["text_calls", true], ["reply", true]]);
   assert.equal((await one("SELECT body FROM posts WHERE thread_id = $1 ORDER BY id DESC LIMIT 1", [backRoom])).body, "Still bridges.");
   await notDue(testbotId);
 
@@ -507,6 +509,56 @@ async function main() {
   b = backfill(["--write", "Testbot"]);
   assert.equal((await one("SELECT COUNT(*)::int AS n FROM bots.diary WHERE run_id = $1", [r.id])).n, 1, "run again, nothing doubles");
 
+  // ── A short thread is read whole before replying, and its edits are marked ──
+  const { threadId: short } = await createThread(forum, dan, await boardId("back-room"), "A short talk", "This is post 1 of the short talk.");
+  const shortIds = [0, (await one("SELECT first_post_id AS id FROM threads WHERE id = $1", [short])).id as number];
+  for (let i = 2; i <= 25; i++) shortIds.push((await reply(forum, i % 2 ? dan : john, short, `This is post ${i} of the short talk.`)).postId);
+  // The bot read up to post 20 an hour ago; Dan has edited post 3 since.
+  await pool.query(
+    "INSERT INTO read_markers (user_id, thread_id, last_read_post_id, updated_at) VALUES ($1, $2, $3, NOW() - INTERVAL '1 hour')",
+    [testbotId, short, shortIds[20]]
+  );
+  await editPost(forum, dan, shortIds[3]!, "This is post 3 of the short talk. Edit: and I've changed my mind.");
+  const quoted = `[quote="Dan" post=${shortIds[5]}]This is post 3 of the short talk.[/quote]\nStill true.`;
+  model.script(
+    () => use("reply", { thread_id: short, body: "Jumping in." }),
+    (req) => {
+      assert.match(lastText(req), /Read that thread \(read_thread\) before replying to it\./, "no reply to a thread unread this visit");
+      return use("read_thread", { thread_id: short });
+    },
+    (req) => {
+      const res = lastJson(req);
+      assert.deepEqual(res.posts.map((p: { number: number }) => p.number), Array.from({ length: 25 }, (_, i) => i + 1), "the whole thread");
+      assert.equal(res.posts[19].unread, undefined);
+      assert.equal(res.posts[20].unread, true, "post 21 on is new to it");
+      assert.equal(res.posts[2].edited_since_you_read, true);
+      assert.match(res.posts[2].body, /changed my mind/);
+      assert.equal(res.posts[3].edited_since_you_read, undefined);
+      assert.match(res.note, /^The whole thread\. Posts marked unread .* edited_since_you_read were changed after you last read them/);
+      return use("reply", { thread_id: short, body: `[quote="Dan" post=${shortIds[5]}]Dan never wrote these words at all.[/quote]\nHm.` });
+    },
+    (req) => {
+      assert.match(lastText(req), /the words you quoted as post \d+ aren't in that post/);
+      return use("reply", { thread_id: short, body: quoted });
+    },
+    (req) => {
+      assert.equal(lastJson(req).posted, true);
+      return use("reply", { thread_id: short, body: quoted });
+    },
+    (req) => {
+      assert.match(lastText(req), /already posted exactly that this visit/);
+      return say("Replied once.");
+    }
+  );
+  await makeDue(testbotId);
+  await runner.tick();
+  assert.equal(model.steps.length, 0);
+  r = await lastRun(testbotId);
+  assert.equal(r.outcome, "done", r.error);
+  const shortReply = await one("SELECT body FROM posts WHERE thread_id = $1 ORDER BY id DESC LIMIT 1", [short]);
+  assert.equal(shortReply.body, `[quote="Dan" post=${shortIds[3]}]This is post 3 of the short talk.[/quote]\nStill true.`, "the quote points at the post its words are from");
+  assert.equal((await one("SELECT COUNT(*)::int AS n FROM posts WHERE thread_id = $1 AND author_id = $2", [short, testbotId])).n, 1, "sent once");
+
   // ── Summaries of long threads ──
   const { threadId: long } = await createThread(forum, dan, await boardId("back-room"), "A long talk", "Post one.");
   const addPosts = async (from: number, to: number) => {
@@ -530,8 +582,8 @@ async function main() {
     (req) => {
       const res = lastJson(req);
       assert.deepEqual(res.summary_of_earlier_posts, { through_post: 33, text: "SUMMARY-A" });
-      assert.equal(res.posts.length, 12);
-      assert.equal(res.posts[0].number, 34);
+      assert.deepEqual(res.posts.map((p: { number: number }) => p.number), [1, ...Array.from({ length: 12 }, (_, i) => 34 + i)], "the opening post, then the last 12");
+      assert.ok(res.posts.every((p: { unread?: boolean }) => p.unread), "none of it read before");
       assert.equal(res.thread.posts, 45);
       assert.match(res.note, /read_thread with from_post/);
       assert.match(res.your_notes.Dan.join(" "), /ferry/, "notes come with a summarized read too");
@@ -566,8 +618,9 @@ async function main() {
     (req) => {
       const res = lastJson(req);
       assert.equal(res.summary_of_earlier_posts.through_post, 33);
-      assert.equal(res.posts[0].number, 34);
-      assert.equal(res.posts.length, 17);
+      assert.equal(res.posts[0].number, 1);
+      assert.equal(res.posts[1].number, 34);
+      assert.equal(res.posts.length, 18);
       return say("Read.");
     }
   );
@@ -589,7 +642,7 @@ async function main() {
     (req) => {
       const res = lastJson(req);
       assert.deepEqual(res.summary_of_earlier_posts, { through_post: 53, text: "SUMMARY-B" });
-      assert.equal(res.posts[0].number, 54);
+      assert.equal(res.posts[1].number, 54);
       return say("Read.");
     }
   );
@@ -620,7 +673,7 @@ async function main() {
   assert.equal(summaryModel.steps.length, 0);
   assert.ok((await summaryRow()).built_at > builtAt);
 
-  // A summary that can't be had is no reason to fail: the bot reads the thread as it is.
+  // A summary that can't be had is no reason to fail: the bot reads the opening post and the latest.
   await addPosts(66, 90);
   await unread();
   summaryModel.script(() => {
@@ -631,7 +684,8 @@ async function main() {
     (req) => {
       const res = lastJson(req);
       assert.equal(res.summary_of_earlier_posts, undefined);
-      assert.equal(res.posts[0].number, 1);
+      assert.deepEqual([res.posts[0].number, res.posts[1].number, res.posts.length], [1, 79, 13]);
+      assert.match(res.note, /posts 2–78 aren't shown/);
       return say("Read it the long way.");
     }
   );

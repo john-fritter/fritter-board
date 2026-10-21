@@ -285,7 +285,7 @@ export function memoryText(standing: string | null, recent: Note[], diary: strin
       ? `\nYour standing notes, what you've come to think so far:\n${standing.trim()}`
       : "\nYou have no standing notes yet; they grow out of your notes over time."
   );
-  if (diary.length) lines.push(`\nYour diary, your latest visits, oldest first:\n${diary.map((d) => `- ${d}`).join("\n")}`);
+  if (diary.length) lines.push(`\nYour diary, your latest visits, oldest first, with how each of your posts opened and ended (a habit you notice there is yours to break):\n${diary.map((d) => `- ${d}`).join("\n")}`);
   lines.push(
     recent.length
       ? `\nYour notes from the last ${config.runner.recent_notes_days} days:\n${recent.map((n) => `- ${noteLine(n)}`).join("\n")}`

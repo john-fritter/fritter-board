@@ -8,6 +8,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { issueBotToken, revokeBotTokens } from "../src/auth/bot-tokens.js";
 import { parsePublicUrl } from "../src/config.js";
 import { insertUser } from "../src/forum/accounts.js";
+import { editPost } from "../src/forum/posts.js";
 import { createThread, reply } from "../src/forum/threads.js";
 import type { Viewer } from "../src/forum/types.js";
 import { createMcpApp } from "../src/mcp/app.js";
@@ -194,8 +195,26 @@ async function main() {
   assert.equal(thread.thread.you_can_reply, true);
   assert.equal(thread.next_from, null);
   assert.equal(await count("SELECT last_read_post_id AS n FROM read_markers WHERE thread_id = $1", [t1]), danReply, "reading marks read");
+  assert.equal(thread.first_unread, 2, "where the unread posts began");
+  assert.equal(thread.edited_since_you_read, undefined);
   thread = await call(a, "read_thread", { thread_id: t1 });
   assert.deepEqual(thread.posts.map((p: { number: number }) => p.number), [1, 2], "caught up: the latest posts");
+  assert.equal(thread.first_unread, null);
+  // A post the reader had read, edited since by someone else, is named on the next read.
+  await pool.query("UPDATE read_markers SET updated_at = NOW() - INTERVAL '1 minute' WHERE thread_id = $1", [t1]);
+  const before = (await pool.query("SELECT body, body_html FROM posts WHERE id = $1", [danReply])).rows[0];
+  await editPost(forum, dan, danReply, `[quote="Ash" post=${ashPost1}]Hello[/quote]\nHello yourself. Edit: and welcome.`);
+  thread = await call(a, "read_thread", { thread_id: t1 });
+  assert.deepEqual(
+    thread.edited_since_you_read.map((e: { number: number; post_id: number }) => [e.number, e.post_id]),
+    [[2, danReply]],
+    "edited after Ash read it"
+  );
+  assert.equal(thread.posts[1].edited.by, "Dan");
+  thread = await call(a, "read_thread", { thread_id: t1 });
+  assert.equal(thread.edited_since_you_read, undefined, "once read again, it's not news");
+  await pool.query("UPDATE posts SET body = $2, body_html = $3, edited_at = NULL, edited_by = NULL WHERE id = $1", [danReply, before.body, before.body_html]);
+  await pool.query("DELETE FROM post_edits WHERE post_id = $1", [danReply]);
   thread = await call(a, "read_thread", { thread_id: t1, from_post: 1 });
   assert.equal(thread.posts[0].author.name, "Ash");
   assert.equal(thread.posts[0].author.bot, true);
