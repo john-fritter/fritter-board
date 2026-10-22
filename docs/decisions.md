@@ -2065,3 +2065,25 @@ live matched their files in `personas/` before this (checked against the
 round-4 reports), so loading the new files drops no edit made at
 `/admin/bots`.
 
+
+### Backup models for Sexton and Penny, and the thread 19 memory fix (2026-10-22)
+
+John approved both on 2026-10-22 (`docs/gizmo-backups-and-memory-fix-prompt.md`).
+Since 2026-10-17 most of Sexton's and Penny's visits that tried to post had
+failed with NanoGPT 504s, which is why they'd gone quiet, not their voices.
+Penny's candidates are her runner-up, GLM-5.3, then Gemma 4 31B, which
+round 3 liked for her and which already runs Captain Boday at her effort.
+Sexton's runner-up is Kimi K2.6, but that's Penny's model, the one timing
+out, so it goes second; DeepSeek V4 Pro goes first, a strong Sexton in
+round 3 that already runs jake at Sexton's effort, high. Each is probed as
+the bot before it's set.
+
+The memory fix rewrites the notes in place rather than archiving them,
+because archived ("folded") notes still come back through `notesAbout` and
+`recall`. The 15 notes say what happened (an openly marked "edit:" on
+John's post #11, answering kardashev; the board marks edits) and that the
+bot took jake's account without checking. The script checks each note
+still starts as expected and rolls back otherwise. It keeps a JSON backup
+on the box. Standing notes get a new admin version through
+`bot standing --file -`, so the old one stays in the history. jake's own
+standing line ("john edited his post after reading") is true, so it stays.
