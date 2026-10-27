@@ -4,8 +4,23 @@ import { config } from "../config.js";
 import { callJson, LOOK_ONLY_REFUSAL, type BoardSession, type ConnectBoard, type InboxJson, type ToolResult } from "./board.js";
 import { currentBriefs, type Briefs } from "./briefs.js";
 import { diaryLine, insertDiary, recentDiary, searchDiary, VisitDiary } from "./diary.js";
-import { currentStanding, insertNote, memoryText, noteLine, notesAbout, recallNotes, recentNotes, recentSince } from "./memory.js";
-import { parsePersona, personaPrompt, pickSide, rollWords, sideText, type Voice } from "./persona.js";
+import {
+  currentMood,
+  currentRelationships,
+  currentStanding,
+  insertNote,
+  memoryText,
+  noteLine,
+  notesAbout,
+  recallNotes,
+  recentNotes,
+  recentSince,
+  relationshipText,
+  saveMood,
+  saveRelationship,
+  type Relationship,
+} from "./memory.js";
+import { parsePersona, personaMoods, personaPrompt, pickSide, rollWords, sideText, type Voice } from "./persona.js";
 import {
   ModelError,
   nextUtcMidnight,
@@ -102,7 +117,7 @@ export interface DryVisit {
 }
 
 /** Board tools the runner calls itself at the start of a visit, so the model isn't offered them. */
-const RUNNER_CALLED = new Set(["get_inbox", "list_members"]);
+const RUNNER_CALLED = new Set(["get_inbox", "list_members", "my_posts"]);
 
 /** Tools that write to the board: the ones the MCP write cap counts. */
 export const WRITE_TOOLS = new Set(["reply", "new_thread", "edit_post", "send_pm", "report_post"]);
@@ -116,7 +131,7 @@ export const isModTool = (name: string) => name.startsWith("mod_");
 /** Mod tools that change something, as opposed to mod_reports and mod_history. */
 const MOD_ACTION_TOOLS = new Set(["mod_lock", "mod_unlock", "mod_sticky", "mod_unsticky", "mod_move", "mod_remove_post", "mod_warn", "mod_resolve_report"]);
 
-export const RUNNER_BRIEF = `How this works: you visit the board now and then, as the member described below. Each visit starts with your inbox (what happened since your last visit), which is given to you with the visit, so there's no get_inbox to call. Use the tools to read and, if you have something worth saying, to post or send a message. read_thread gives you the thread as it stands, all of it or, for a long one, its opening post, a summary of the middle and the latest posts, with what's new to you marked; you read a thread before you reply in it. You can read several things in one turn by calling several tools at once (two conversations, say, or a conversation and the thread it's about), but a post or message goes in a turn of its own. Your unread private messages come with the inbox, so you needn't open them; read_pms shows the rest of a conversation. There is no audience to perform for and nothing rewards volume; reading without posting is fine and often right. Stay in character. You keep a private notebook: your standing notes, your recent notes and your diary of recent visits come with each visit, and your notes on the people in a thread come with it when you read it. The diary keeps itself: after each visit, a line says what you read and what you posted. So keep notes for what it can't: what you think, about whom, and why. remember writes a note; recall searches your notes, your diary and the board's posts, for when you're not sure what was said or who said it. When you're done, stop calling tools and say in a sentence what you did; that note goes in a log and is never posted.`;
+export const RUNNER_BRIEF = `How this works: you visit the board now and then, as the member described below. Each visit starts with your inbox (what happened since your last visit), which is given to you with the visit, so there's no get_inbox to call. Use the tools to read and, if you have something worth saying, to post or send a message. read_thread gives you the thread as it stands, all of it or, for a long one, its opening post, a summary of the middle and the latest posts, with what's new to you marked; you read a thread before you reply in it. You can read several things in one turn by calling several tools at once (two conversations, say, or a conversation and the thread it's about), but a post or message goes in a turn of its own. Your unread private messages come with the inbox, so you needn't open them; read_pms shows the rest of a conversation. There is no audience to perform for and nothing rewards volume; reading without posting is fine and often right. Stay in character. You keep a private notebook: your standing notes, your recent notes, your diary of recent visits and your own latest posts come with each visit, and your records on the people in a thread come with it when you read it. The diary keeps itself: after each visit, a line says what you read and what you posted. So keep notes for what it can't: what you think, about whom, and why. remember writes a note; update_relationship rewrites your record on a member, the whole of it, when something has changed between you; recall searches your notes, your diary and the board's posts, for when you're not sure what was said or who said it. You have moods, like anyone; the visit tells you the one you're in, and it's yours to show or not, never to announce. When you're done, stop calling tools and say in a sentence what you did, then add a last line starting "Mood:" with how you feel now and why, in a few words. Both go in your private log and are never posted.`;
 
 /**
  * A note's limit in words, which models judge far better than characters as
@@ -140,6 +155,22 @@ export const MEMORY_TOOLS: ToolDefinition[] = [
           thread_id: { type: "integer", description: "The thread it came from, if any." },
         },
         required: ["text"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "update_relationship",
+      description: `Rewrite your private record on a member: who they are to you, what you think of them, what's happened between you, what's still open, how you talk to them. It replaces the whole record, so carry over what still holds. It comes with every thread they're in, every message from them, and every post of theirs that's waiting for you. Keep it under ${config.runner.relationship_max_chars} characters. At most ${config.runner.relationships_per_wake} a visit.`,
+      parameters: {
+        type: "object",
+        properties: {
+          member: { type: "string", description: "Their username." },
+          record: { type: "string", maxLength: config.runner.relationship_max_chars, description: "The whole record, in your own words." },
+        },
+        required: ["member", "record"],
         additionalProperties: false,
       },
     },
@@ -324,8 +355,11 @@ export class WakeSession extends MeteredModel {
   /** The conversation so far, kept here so a failed wake still logs it. */
   messages: ChatMessage[] = [];
   notesWritten = 0;
+  relationshipsWritten = 0;
   /** Notes already in front of the bot this wake, so none is shown twice. */
   shownNotes = new Set<number>();
+  /** Members whose record is already in front of the bot this wake, lower-cased. */
+  shownRecords = new Set<string>();
   summaryUsage: SummaryUsage = { calls: 0, promptTokens: 0, completionTokens: 0 };
   /** Web searches made this wake, and how many it may make. */
   searches = 0;
@@ -504,6 +538,7 @@ export class WakeSession extends MeteredModel {
       res = this.dryWrite(name, args);
       if (WRITE_TOOLS.has(name)) this.writes++;
     } else if (name === "remember") res = await this.remember(args);
+    else if (name === "update_relationship") res = await this.updateRelationship(args);
     else if (name === "recall") res = await this.recall(args);
     else if (name === "web_search") res = await this.webSearch(args);
     else if (name === "read_thread") res = await this.readThread(args);
@@ -553,26 +588,83 @@ export class WakeSession extends MeteredModel {
     const text = JSON.stringify(json);
     this.learn("read_thread", args, text);
     this.diary.observe("read_thread", args, text);
-    const notes = await this.notesOnPeople(json);
-    return { ok: true, text: notes ? JSON.stringify({ ...json, your_notes: notes }) : text };
+    const people = await this.onPeople(json);
+    return { ok: true, text: people ? JSON.stringify({ ...json, ...people }) : text };
   }
 
-  /** "your_notes": the bot's notes on the people posting, latest posters first. */
-  private async notesOnPeople(json: ThreadJson): Promise<Record<string, string[]> | null> {
+  /**
+   * What the bot keeps on the people posting in a thread, latest posters
+   * first: "your_records", its record on each, and "your_notes", its notes
+   * about them that are newer than the record (or all, with no record).
+   */
+  private async onPeople(json: ThreadJson): Promise<{ your_records?: Record<string, string>; your_notes?: Record<string, string[]> } | null> {
     const names: string[] = [];
     const me = lower(this.bot.username);
     for (const p of [...json.posts].reverse()) {
       const name = p.author.name;
       if (lower(name) !== me && !names.some((n) => lower(n) === lower(name))) names.push(name);
     }
+    const records = await this.recordsOn(names.slice(0, config.runner.relationships_per_read));
+    const notes = await this.notesOnPeople(names, records);
+    const out: { your_records?: Record<string, string>; your_notes?: Record<string, string[]> } = {};
+    if (Object.keys(records.shown).length) out.your_records = records.shown;
+    if (notes) out.your_notes = notes;
+    return Object.keys(out).length ? out : null;
+  }
+
+  /** The bot's records on these members: all of them, and the ones not yet shown this wake, as text. */
+  async recordsOn(names: string[]): Promise<{ all: Map<string, Relationship>; shown: Record<string, string> }> {
+    const all = await currentRelationships(this.deps.db, this.bot.userId, names);
+    const shown: Record<string, string> = {};
+    for (const name of names) {
+      const r = all.get(lower(name));
+      if (!r || this.shownRecords.has(lower(name))) continue;
+      shown[r.member] = relationshipText(r);
+      this.shownRecords.add(lower(name));
+    }
+    return { all, shown };
+  }
+
+  /** "your_notes": the bot's notes on these people, leaving out any its record on them is newer than. */
+  private async notesOnPeople(names: string[], records: { all: Map<string, Relationship> }): Promise<Record<string, string[]> | null> {
     const found = await notesAbout(this.deps.db, this.bot.userId, names.slice(0, config.runner.noted_people_per_read), [...this.shownNotes]);
-    if (found.size === 0) return null;
     const out: Record<string, string[]> = {};
-    for (const [name, notes] of found) {
+    for (const [name, all] of found) {
+      const record = records.all.get(lower(name));
+      const notes = record ? all.filter((n) => n.createdAt > record.createdAt) : all;
+      if (!notes.length) continue;
       out[name] = notes.map((n) => noteLine(n, { about: false }));
       for (const n of notes) this.shownNotes.add(n.id);
     }
-    return out;
+    return Object.keys(out).length ? out : null;
+  }
+
+  /** `update_relationship`: a new version of the bot's record on a member. */
+  async updateRelationship(args: Record<string, unknown>): Promise<ToolResult> {
+    const max = config.runner.relationship_max_chars;
+    const record = typeof args["record"] === "string" ? args["record"].trim() : "";
+    const raw = typeof args["member"] === "string" ? args["member"].trim().replace(/^@/, "") : "";
+    if (!raw) return { ok: false, text: "Say which member the record is about." };
+    if (!record) return { ok: false, text: "The record is empty." };
+    if (record.length > max) {
+      return { ok: false, text: `Not kept: that record is ${record.length} characters, and the most is ${max}. Keep what matters and try again.` };
+    }
+    if (this.relationshipsWritten >= config.runner.relationships_per_wake) {
+      return { ok: false, text: `You've rewritten ${config.runner.relationships_per_wake} records this visit; that's enough for now.` };
+    }
+    // The runner can't see the board's members, so it asks the board, as the bot.
+    const who = await this.board.call("get_user", { username: raw });
+    if (!who.ok) return { ok: false, text: `There's no member called ${raw}. Check the name.` };
+    const member = (JSON.parse(who.text) as { name: string }).name;
+    if (lower(member) === lower(this.bot.username)) return { ok: false, text: "That's you. What you think of yourself goes in a note." };
+    this.relationshipsWritten++;
+    this.shownRecords.add(lower(member));
+    if (this.drafts) {
+      this.drafts.push({ tool: "update_relationship", args: { member, record } });
+      return { ok: true, text: JSON.stringify({ updated: true, member }) };
+    }
+    await saveRelationship(this.deps.db, this.bot.userId, { member, body: record, source: "visit", runId: this.runId });
+    return { ok: true, text: JSON.stringify({ updated: true, member }) };
   }
 
   /** `remember`: a note in the bot's notebook. Single-shot mode clips a long note rather than refusing it. */
@@ -1197,6 +1289,96 @@ export async function loadMemory(db: Db, bot: Bot, now: Date, shown: Set<number>
   return memoryText(standing?.body ?? null, recent, diary.map(diaryLine));
 }
 
+const MOOD_LINE = /^[\s*_]*mood[\s*_]*:[\s*_]*(.+?)[\s*_]*$/im;
+
+/** The mood a bot gave in its closing note ("Mood: …"), or null. */
+export function moodFromNote(note: string | null): string | null {
+  const lines = (note ?? "").split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const m = MOOD_LINE.exec(lines[i]!);
+    if (m) return clip(m[1]!.trim(), config.runner.mood_max_chars) || null;
+  }
+  return null;
+}
+
+const ago = (from: Date, now: Date) => {
+  const hours = Math.round((now.getTime() - from.getTime()) / 3_600_000);
+  return hours < 1 ? "less than an hour ago" : hours < 48 ? `${hours} hour${hours === 1 ? "" : "s"} ago` : `${Math.round(hours / 24)} days ago`;
+};
+
+/**
+ * The mood a visit opens with. The bot's own, from the end of its last
+ * visit; or, now and then, one of the moods its persona lists, which the
+ * runner puts it in (runner.mood_drift_chance, or always once its mood is
+ * older than runner.mood_stale_hours). A dry visit may drift too, but
+ * saves nothing.
+ */
+export async function startMood(
+  deps: Pick<WakeDeps, "db" | "now" | "random">,
+  bot: Bot,
+  runId: number,
+  dry: boolean
+): Promise<string> {
+  const now = deps.now();
+  const current = await currentMood(deps.db, bot.userId);
+  const moods = personaMoods(bot.personaPrompt).filter((m) => !current || lower(m) !== lower(current.mood));
+  const stale = !current || now.getTime() - current.createdAt.getTime() > config.runner.mood_stale_hours * 3_600_000;
+  if (moods.length && (stale || deps.random() < config.runner.mood_drift_chance)) {
+    const mood = moods[Math.min(moods.length - 1, Math.floor(deps.random() * moods.length))]!;
+    if (!dry) await saveMood(deps.db, bot.userId, mood, "drift", runId);
+    return `Your mood this visit: ${mood}. Nothing in particular brought it on; it's just where you are today.`;
+  }
+  if (!current) return "";
+  return `Your mood, as you put it ${ago(current.createdAt, now)}: ${current.mood}`;
+}
+
+export interface OwnPostJson {
+  post_id: number;
+  thread_id: number;
+  thread: string;
+  board: string;
+  at: string;
+  body: string;
+}
+
+/** The bot's own latest posts, in full, for the start of a visit. */
+export function ownPostsText(posts: OwnPostJson[]): string {
+  if (posts.length === 0) return "";
+  const line = (p: OwnPostJson) =>
+    `- ${rosterDay.format(new Date(p.at))}, in "${p.thread}" (thread ${p.thread_id}), ${p.body.length} characters:\n${p.body
+      .trim()
+      .split("\n")
+      .map((l) => `    ${l}`)
+      .join("\n")}`;
+  return `Your own latest posts, newest first: what you've been saying, and how. A habit you notice here is yours to break.\n${posts.map(line).join("\n")}`;
+}
+
+/** The bot's own latest posts, or nothing if the board can't give them (an MCP server without my_posts). */
+async function loadOwnPosts(board: BoardSession): Promise<string> {
+  if (config.runner.own_posts_shown === 0 || !board.tools.some((t) => t.name === "my_posts")) return "";
+  const res = await board.call("my_posts", {});
+  if (!res.ok) return "";
+  try {
+    return ownPostsText(((JSON.parse(res.text) as { posts: OwnPostJson[] }).posts ?? []).slice(0, config.runner.own_posts_shown));
+  } catch {
+    return "";
+  }
+}
+
+/** The bot's records on the people whose posts or messages are waiting for it. */
+async function recordsAtStart(s: WakeSession, inbox: InboxJson): Promise<string> {
+  const names: string[] = [];
+  const me = lower(s.bot.username);
+  const add = (n: string) => {
+    if (lower(n) !== me && !names.some((x) => lower(x) === lower(n))) names.push(n);
+  };
+  for (const pm of inbox.unread_pms) pm.with.forEach(add);
+  for (const p of [...inbox.mentions, ...inbox.replies]) add(p.author);
+  const { shown } = await s.recordsOn(names.slice(0, config.runner.relationships_at_start));
+  const lines = Object.entries(shown).map(([name, text]) => `- ${name}: ${text}`);
+  return lines.length ? `Your records on the people whose posts or messages are waiting for you:\n${lines.join("\n")}` : "";
+}
+
 /** The visit's diary entry, if it did anything. A diary that can't be written never fails the visit. */
 async function writeDiary(deps: WakeDeps, bot: Bot, runId: number, session: WakeSession | null): Promise<void> {
   // A dry visit sent nothing, so it did nothing worth remembering.
@@ -1347,9 +1529,22 @@ export async function runWake(
     // Searches are real requests on the bots' search keys, so dry visits don't make them.
     if (deps.webSearch && bot.mode === "tools" && !dry) session.searchBudget = await searchBudget(deps.db, bot);
     voice = await chooseVoice(deps, bot, dry);
-    const header = wakeHeader(bot, deps.now(), budget, voice).replace(/^[^\n]*/, (first) => first + (waiting ? ` (You're up early: ${waiting}.)` : ""));
+    const mood = await startMood(deps, bot, runId, dry !== null);
+    const header = [
+      wakeHeader(bot, deps.now(), budget, voice).replace(/^[^\n]*/, (first) => first + (waiting ? ` (You're up early: ${waiting}.)` : "")),
+      mood,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
     const roster = await loadRoster(board, bot.username);
-    const memory = [roster, await loadMemory(deps.db, bot, deps.now(), session.shownNotes)].filter(Boolean).join("\n\n");
+    const memory = [
+      roster,
+      await loadMemory(deps.db, bot, deps.now(), session.shownNotes),
+      await loadOwnPosts(board),
+      await recordsAtStart(session, inbox),
+    ]
+      .filter(Boolean)
+      .join("\n\n");
     const runnerBrief = session.searchBudget > 0 ? `${RUNNER_BRIEF} ${WEB_SEARCH_BRIEF}` : RUNNER_BRIEF;
     const briefs = await currentBriefs(deps.db);
     const system = systemPrompt(board, bot, dry?.memberBrief !== undefined ? { ...briefs, member: dry.memberBrief } : briefs, runnerBrief);
@@ -1360,6 +1555,9 @@ export async function runWake(
       bot.mode === "tools"
         ? await toolsMode(session, system, shown, header, memory)
         : await singleShotMode(session, system, shown, header, memory);
+    const newMood = moodFromNote(out.note);
+    if (newMood && session.drafts) session.drafts.push({ tool: "mood", args: { mood: newMood } });
+    else if (newMood) await saveMood(deps.db, bot.userId, newMood, "bot", runId);
     await finishRun(deps.db, runId, {
       outcome: "done",
       ...times,

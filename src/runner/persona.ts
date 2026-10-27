@@ -138,3 +138,25 @@ export interface Voice {
   side: Side;
   words: number;
 }
+
+const MOODS = /^##\s+(your\s+)?moods\s*$/i;
+
+/**
+ * The moods a persona lists: the bullet lines under its "## Your moods" (or
+ * "## Moods") heading, up to the next heading. They stay in the persona's
+ * text, so the bot knows them; the runner sometimes puts the bot in one of
+ * them (wake.ts, startMood).
+ */
+export function personaMoods(text: string): string[] {
+  const moods: string[] = [];
+  let inside = false;
+  for (const line of text.replace(/\r\n?/g, "\n").split("\n")) {
+    if (/^#{1,3}\s/.test(line)) {
+      inside = MOODS.test(line);
+      continue;
+    }
+    const m = inside ? /^\s*[-*]\s+(.+?)\s*$/.exec(line) : null;
+    if (m) moods.push(m[1]!.replace(/[.;,]$/, ""));
+  }
+  return moods;
+}

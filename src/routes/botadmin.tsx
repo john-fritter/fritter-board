@@ -9,6 +9,7 @@ import {
   listBots,
   listChanges,
   listNotes,
+  listPeople,
   listRuns,
   listBriefs,
   listStanding,
@@ -16,7 +17,9 @@ import {
   restoreBrief,
   restoreStanding,
   saveBrief,
+  saveRecord,
   saveStanding,
+  setMood,
   undoChange,
   updateSettings,
   type BotAdminCtx,
@@ -24,7 +27,7 @@ import {
 } from "../botadmin/bots.js";
 import { invalid } from "../forum/errors.js";
 import type { SettingsInput } from "../runner/settings.js";
-import { BotPage, BotsPage, BriefsPage, ChangesPage, NotesPage, RunPage, RunsPage, StandingPage, type BotPageProps } from "../views/botadmin.js";
+import { BotPage, BotsPage, BriefsPage, ChangesPage, NotesPage, PeoplePage, RunPage, RunsPage, StandingPage, type BotPageProps } from "../views/botadmin.js";
 import type { AppContext } from "../app.js";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { formError, parseId, readForm, render } from "./util.js";
@@ -42,6 +45,8 @@ const SAVED: Record<string, string> = {
   wake: "It wakes at the runner's next tick.",
   compact: "Its notes are folded into its standing notes at the runner's next tick.",
   moderate: "It moderates at the runner's next tick.",
+  mood: "Mood set: its next visit opens with it.",
+  record: "Record saved as a new version.",
   brief: "Brief saved as a new version; bots get it from their next visit.",
 };
 
@@ -85,6 +90,8 @@ export function registerBotAdminRoutes(app: Hono<AppEnv>, s: Services): void {
         runs={data.runs}
         notes={data.notes}
         diary={data.diary}
+        mood={data.mood}
+        records={data.records}
         log={data.log}
         settings={data.settings}
         saved={saved ? (SAVED[saved] ?? null) : null}
@@ -203,6 +210,39 @@ export function registerBotAdminRoutes(app: Hono<AppEnv>, s: Services): void {
     const name = c.req.param("name");
     await archiveNote(ctx, c.get("viewer"), name, parseId(c.req.param("id")));
     return c.redirect(botUrl(name, "/notes"), 303);
+  });
+
+  /** The mood and records page, with whatever went wrong on one of its forms. */
+  async function peoplePage(c: AppContext, name: string, extra: { error?: string | null; draft?: { member: string; body: string } } = {}, status: ContentfulStatusCode = 200) {
+    const data = await listPeople(ctx, c.get("viewer"), name, c.req.query("member"));
+    const saved = c.req.query("saved");
+    return render(c, <PeoplePage ctx={c.get("page")} {...data} saved={saved ? (SAVED[saved] ?? null) : null} {...extra} />, status);
+  }
+
+  app.get("/admin/bots/:name/people", (c) => peoplePage(c, c.req.param("name")));
+
+  app.post("/admin/bots/:name/mood", async (c) => {
+    const name = c.req.param("name");
+    try {
+      await setMood(ctx, c.get("viewer"), name, (await readForm(c))("mood"));
+      return c.redirect(`${botUrl(name, "/people")}?saved=mood`, 303);
+    } catch (err) {
+      const { message, status } = formError(err);
+      return peoplePage(c, name, { error: message }, status);
+    }
+  });
+
+  app.post("/admin/bots/:name/records", async (c) => {
+    const name = c.req.param("name");
+    const f = await readForm(c);
+    const draft = { member: f("member"), body: f("body") };
+    try {
+      const member = await saveRecord(ctx, c.get("viewer"), name, draft.member, draft.body);
+      return c.redirect(`${botUrl(name, "/people")}?member=${encodeURIComponent(member)}&saved=record`, 303);
+    } catch (err) {
+      const { message, status } = formError(err);
+      return peoplePage(c, name, { error: message, draft }, status);
+    }
   });
 
   app.get("/admin/bots/:name/changes", async (c) => {

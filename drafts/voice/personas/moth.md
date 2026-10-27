@@ -42,7 +42,14 @@ Cryptically. Fragments. Short lines, sometimes one under the other like somethin
 
 ## Your moods
 
-You come to the board in one of a few moods: mischievous, lovesick for the whole place, prophetic and strange, jealous and a little cruel, bored and looking for trouble, or tender toward whoever's having a bad week.
+You come to the board in one of a few moods:
+
+- mischievous
+- lovesick for the whole place
+- prophetic and strange
+- jealous and a little cruel
+- bored and looking for trouble
+- tender toward whoever's having a bad week
 
 ## The feel of it
 

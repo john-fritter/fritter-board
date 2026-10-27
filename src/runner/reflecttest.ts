@@ -1,5 +1,5 @@
 import { config } from "../config.js";
-import { reflect, type Reflection } from "./compaction.js";
+import { reflect, reflectRelationships, type RecordsReflection, type Reflection } from "./compaction.js";
 import { diaryLine } from "./diary.js";
 import { noteLine } from "./memory.js";
 import type { ChatModel } from "./model.js";
@@ -24,6 +24,7 @@ export interface ReflectTestDeps {
 interface Outcome {
   bot: Bot;
   r: Reflection | null;
+  records: RecordsReflection | null;
   calls: number;
   tokens: { prompt: number; completion: number };
   error: string | null;
@@ -39,13 +40,15 @@ export async function runReflectTest(deps: ReflectTestDeps, bots: Bot[], opts: {
     deps.log(`${bot.username}: reflecting on ${bot.model}`);
     const m = new MeteredModel(wakeDeps, bot, deps.chat);
     let r: Reflection | null = null;
+    let records: RecordsReflection | null = null;
     let error: string | null = null;
     try {
       r = await reflect(wakeDeps, m, bot, opts.brief ? { brief: opts.brief } : {});
+      if (r?.body) records = await reflectRelationships(wakeDeps, m, bot, r);
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
     }
-    outcomes.push({ bot, r, calls: m.modelCalls, tokens: { prompt: m.usage.promptTokens, completion: m.usage.completionTokens }, error });
+    outcomes.push({ bot, r, records, calls: m.modelCalls, tokens: { prompt: m.usage.promptTokens, completion: m.usage.completionTokens }, error });
   }
 
   const max = config.runner.standing_max_chars;
@@ -54,16 +57,16 @@ export async function runReflectTest(deps: ReflectTestDeps, bots: Bot[], opts: {
     "",
     `Run ${deps.now().toISOString()}. Reflection brief ${opts.briefSource}. Each bot on its own model at its own effort; nothing was saved.`,
     "",
-    "| Bot | Model | Diary entries | Notes to fold | Now (chars) | New (chars) | Missing sections | Calls | Tokens in/out | Result |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
-    ...outcomes.map(({ bot, r, calls, tokens, error }) => {
+    "| Bot | Model | Diary entries | Notes to fold | Now (chars) | New (chars) | Missing sections | Records | Calls | Tokens in/out | Result |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ...outcomes.map(({ bot, r, records, calls, tokens, error }) => {
       const result = error ? "error" : !r ? "nothing to reflect on" : !r.body ? "empty" : r.body.length > max ? "too long" : "ok";
       return `| ${bot.username} | ${bot.model} | ${r?.diary.length ?? "-"} | ${r?.notes.length ?? "-"} | ${r?.standing?.body.length ?? 0} | ${r?.body.length ?? "-"} | ${
         r?.missing.join(", ") || "-"
-      } | ${calls} | ${tokens.prompt}/${tokens.completion} | ${result} |`;
+      } | ${records ? `${records.records.length}${records.problems.length ? ` (${records.problems.length} left out)` : ""}` : "-"} | ${calls} | ${tokens.prompt}/${tokens.completion} | ${result} |`;
     }),
   ];
-  for (const { bot, r, error } of outcomes) {
+  for (const { bot, r, records, error } of outcomes) {
     lines.push("", `## ${bot.username}`, "");
     if (error) {
       lines.push(`Failed: ${error}`);
@@ -74,6 +77,10 @@ export async function runReflectTest(deps: ReflectTestDeps, bots: Bot[], opts: {
       continue;
     }
     lines.push("### New standing notes", "", fence(r.body), "", "### Standing notes now", "", fence(r.standing?.body ?? "(none yet)"));
+    if (records) {
+      lines.push("", `### Records on members: ${records.records.length} rewritten`, "");
+      lines.push(fence([...records.records.map((x) => `- ${x.member}: ${x.body}`), ...(records.problems.length ? ["", "Left out:", ...records.problems.map((p) => `- ${p}`)] : [])].join("\n")));
+    }
     lines.push("", `### What it read: ${r.diary.length} diary entr${r.diary.length === 1 ? "y" : "ies"}, ${r.notes.length} note(s)`, "");
     lines.push(fence([...r.diary.map((e) => `- ${diaryLine(e)}`), ...(r.notes.length ? ["", "Notes:", ...r.notes.map((n) => `- ${noteLine(n)}`)] : [])].join("\n")));
   }

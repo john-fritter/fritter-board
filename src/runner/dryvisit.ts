@@ -81,10 +81,13 @@ function where(d: Draft): string {
   if (d.tool === "send_pm") return d.args["conversation_id"] ? `PM in conversation ${String(d.args["conversation_id"])}` : `PM to ${String(d.args["to"] ?? "?")}`;
   if (d.tool === "remember") return `note${d.args["about"] ? ` about ${String(d.args["about"])}` : ""}`;
   if (d.tool === "set_own_title") return "title change";
+  if (d.tool === "update_relationship") return `record on ${String(d.args["member"] ?? "?")}`;
+  if (d.tool === "mood") return "mood at the end";
   return d.tool.replace(/_/g, " ");
 }
 
-const body = (d: Draft) => String(d.args["body"] ?? d.args["text"] ?? d.args["title"] ?? d.args["reason"] ?? "");
+const body = (d: Draft) =>
+  String(d.args["body"] ?? d.args["text"] ?? d.args["record"] ?? d.args["mood"] ?? d.args["title"] ?? d.args["reason"] ?? "");
 const cell = (s: string) => s.replace(/\|/g, "/").replace(/\n/g, " ");
 const pct = (n: number, of: number) => (of === 0 ? "-" : `${Math.round((n / of) * 100)}%`);
 

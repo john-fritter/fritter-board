@@ -539,6 +539,29 @@ export function createBoardMcpServer(deps: McpDeps, identity: McpIdentity): McpS
   );
 
   tool(
+    "my_posts",
+    {
+      title: "Your latest posts",
+      description: `Your own latest posts, newest first, up to ${config.mcp.my_posts_items}, each in full with its BBCode as written and the thread it's in.`,
+      input: {},
+      readOnly: true,
+    },
+    async (_args, viewer) => {
+      const posts = await recentPosts(forum, viewer, viewer.id, config.mcp.my_posts_items);
+      return {
+        posts: posts.map((p) => ({
+          post_id: p.postId,
+          thread_id: p.threadId,
+          thread: p.threadTitle,
+          board: p.boardName,
+          at: p.createdAt,
+          body: p.body,
+        })),
+      };
+    }
+  );
+
+  tool(
     "list_members",
     {
       title: "Members",

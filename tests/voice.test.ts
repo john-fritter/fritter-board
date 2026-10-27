@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { issueBotToken } from "../src/auth/bot-tokens.js";
-import { parsePublicUrl } from "../src/config.js";
+import { config, parsePublicUrl } from "../src/config.js";
 import { insertUser } from "../src/forum/accounts.js";
 import { sendNewMessage } from "../src/forum/pms.js";
 import { createThread, reply } from "../src/forum/threads.js";
@@ -14,11 +14,11 @@ import { httpBoard } from "../src/runner/board.js";
 import { runDryVisits } from "../src/runner/dryvisit.js";
 import { loadPatterns, measurePost } from "../src/runner/measure.js";
 import type { ChatModel, ChatRequest, ChatResponse } from "../src/runner/model.js";
-import { parsePersona, personaPrompt, pickSide, rollWords, sideText, SIDE_WAY_OUT } from "../src/runner/persona.js";
+import { parsePersona, personaMoods, personaPrompt, pickSide, rollWords, sideText, SIDE_WAY_OUT } from "../src/runner/persona.js";
 import { botByUsername, modelCallsLastDay, writesLastDay } from "../src/runner/store.js";
 import { loadScenarios } from "../src/runner/voice.js";
 import { runVoiceTest } from "../src/runner/voicetest.js";
-import { runWake, type WakeDeps } from "../src/runner/wake.js";
+import { moodFromNote, ownPostsText, runWake, type WakeDeps } from "../src/runner/wake.js";
 import { ORIGIN, setup, testDatabaseUrl } from "./support.js";
 
 // The voice plan's chunk 1: personas with a stance and sides, the side and
@@ -397,8 +397,40 @@ async function integration() {
   await pool.end();
 }
 
+// The agents rework (2026-10-27): moods listed in a persona, the mood a bot
+// names at the end of a visit, and its own posts as it's shown them.
+function agents() {
+  assert.deepEqual(personaMoods("Core.\n\n## Your moods\n\nYou come in one of a few moods:\n\n- cheerful,\n* sulking.\n\n## The feel of it\n\n- not a mood"), [
+    "cheerful",
+    "sulking",
+  ]);
+  assert.deepEqual(personaMoods("## Moods\n- calm"), ["calm"]);
+  assert.deepEqual(personaMoods(PERSONA), [], "no moods heading, no moods");
+  // Every drafted brief lists its moods in the form the runner reads.
+  const dir = path.join(ROOT, "drafts/voice/personas");
+  for (const file of readdirSync(dir).filter((f) => f.endsWith(".md"))) {
+    const moods = personaMoods(readFileSync(path.join(dir, file), "utf8"));
+    assert.ok(moods.length >= 3, `${file} lists its moods`);
+  }
+
+  assert.equal(moodFromNote("Read two threads, replied to Dan.\nMood: smug, Dan walked into it"), "smug, Dan walked into it");
+  assert.equal(moodFromNote("Did things.\n**Mood:** tired"), "tired");
+  assert.equal(moodFromNote("mood: first\nmore\nMood: second"), "second", "the last one");
+  assert.equal(moodFromNote("Read a thread and left."), null);
+  assert.equal(moodFromNote(null), null);
+  assert.equal(moodFromNote(`Mood: ${"x".repeat(500)}`)!.length <= config.runner.mood_max_chars, true, "clipped");
+
+  assert.equal(ownPostsText([]), "");
+  const text = ownPostsText([
+    { post_id: 9, thread_id: 3, thread: "Bridges", board: "general", at: "2026-10-20T12:00:00Z", body: "First line.\nSecond line." },
+  ]);
+  assert.match(text, /^Your own latest posts, newest first/);
+  assert.match(text, /in "Bridges" \(thread 3\), 24 characters:\n {4}First line\.\n {4}Second line\./);
+}
+
 async function main() {
   unit();
+  agents();
   await integration();
 }
 

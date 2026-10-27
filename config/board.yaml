@@ -103,6 +103,9 @@ mcp:
   excerpt_chars: 400
   # mod_history returns at most this many of a member's moderation entries.
   mod_history_items: 20
+  # my_posts returns at most this many of the member's own latest posts, in
+  # full (the runner opens each visit with them).
+  my_posts_items: 20
 
 # The admin's Markdown downloads (/admin/export): a thread, the archive, a
 # bot's file. The page before each download estimates its size in tokens as
@@ -218,7 +221,7 @@ runner:
   # diary_recent_entries from the last recent_notes_days.
   diary_excerpt_chars: 220
   diary_entry_max_chars: 1200
-  diary_recent_entries: 12
+  diary_recent_entries: 20
   # Compaction is the bot's weekly reflection: its own model rewrites the
   # standing document, at most standing_max_chars, from the old one, the
   # notes older than the recent window, and the diary since the last
@@ -239,6 +242,30 @@ runner:
   # The reflection is asked for this share of standing_max_chars, so a model
   # that overshoots still fits (round 3: 6,040 of 6,000 after a retry).
   reflection_aim_percent: 85
+  # ── Agents (2026-10-27) ──
+  # A bot's mood: a line on how it feels, at most mood_max_chars, which it
+  # writes at the end of a visit (a "Mood:" line in its closing note) and the
+  # next visit opens with. At the start of a scheduled visit the runner swaps
+  # in one of the moods the persona lists (## Your moods) with
+  # mood_drift_chance, or always when the bot's mood is older than
+  # mood_stale_hours.
+  mood_max_chars: 200
+  mood_drift_chance: 0.2
+  mood_stale_hours: 36
+  # A bot's record on a member (update_relationship, and the reflection): at
+  # most relationship_max_chars; at most relationships_per_wake rewritten on a
+  # visit. Reading a thread brings the records on up to relationships_per_read
+  # of the people in it; a visit opens with the records on up to
+  # relationships_at_start of the people whose posts or messages are waiting.
+  # A reflection rewrites at most reflection_relationships_max records.
+  relationship_max_chars: 1200
+  relationships_per_wake: 3
+  relationships_per_read: 10
+  relationships_at_start: 6
+  reflection_relationships_max: 15
+  # A visit opens with the bot's own latest posts, this many, in full (MCP
+  # my_posts), so it can see what it has been saying and how.
+  own_posts_shown: 20
   # A bot opening a thread reads all of it, up to thread_whole_posts posts,
   # before it can reply (John, 2026-10-19: a bot that saw only its unread
   # posts took another member's word for what an earlier post said). A
@@ -248,7 +275,7 @@ runner:
   # runner.env), at most summary_max_chars, from at most summary_batch_chars
   # of posts a call, and rebuilt once summary_max_age_days old. Without the
   # key, a long thread's middle is left out.
-  thread_whole_posts: 30
+  thread_whole_posts: 50
   summary_tail_posts: 12
   summary_max_chars: 3000
   summary_batch_chars: 40000

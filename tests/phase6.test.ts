@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { issueBotToken } from "../src/auth/bot-tokens.js";
-import { parsePublicUrl } from "../src/config.js";
+import { config, parsePublicUrl } from "../src/config.js";
 import { insertUser } from "../src/forum/accounts.js";
 import { editPost } from "../src/forum/posts.js";
 import { createThread, reply } from "../src/forum/threads.js";
@@ -142,7 +142,7 @@ async function main() {
   model.script(
     (req) => {
       const names = toolNames(req);
-      assert.deepEqual(names.slice(-2), ["remember", "recall"], "the runner's own tools, last in the list");
+      assert.deepEqual(names.slice(-3), ["remember", "update_relationship", "recall"], "the runner's own tools, last in the list");
       assert.match(lastText(req), /Your standing notes, what you've come to think so far:\nDan likes bridges/);
       assert.match(lastText(req), /No notes from the last 7 days/);
       assert.match(text(req, 0), /You keep a private notebook/);
@@ -329,7 +329,11 @@ async function main() {
     assert.match(lastText(req), /^You ran out of room before writing anything\./);
     assert.notEqual(req.reasoningEffort, effortWas, "and tries again thinking less");
     assert.ok(["low", "none"].includes(req.reasoningEffort));
-    return say("## People\nDan, bridges.\n## Threads\nBack Room chatter.\n## Positions\nBridges.\n## To do\nNothing.");
+    return say("## Me\nI'm for bridges.\n## Threads\nBack Room chatter.\n## To do\nNothing.");
+  }, (req) => {
+    assert.match(lastText(req), /^You have no records on members yet\.\n\nNow rewrite your records on the members/);
+    assert.match(lastText(req), /At most 15 members, each record under 1200 characters/);
+    return say('Here: {"Dan": "Dan builds bridges, and I trust him on them.", "Ghost": "Made up."}');
   });
   const report = await runReflectTest(
     { db: pool, chat: model, now: () => new Date(), sleep: async () => {}, log: () => {} },
@@ -337,11 +341,13 @@ async function main() {
     { briefSource: "as in the code" }
   );
   assert.equal(model.steps.length, 0);
-  assert.match(report, /\| Testbot \| [^|]+ \| 3 \| 1 \| \d+ \| \d+ \| - \| 2 \| 2000\/100 \| ok \|/);
-  assert.match(report, /### New standing notes\n\n````text\n## People\nDan, bridges\./);
+  assert.match(report, /\| Testbot \| [^|]+ \| 3 \| 1 \| \d+ \| \d+ \| - \| 1 \(1 left out\) \| 3 \| 3000\/150 \| ok \|/);
+  assert.match(report, /### New standing notes\n\n````text\n## Me\nI'm for bridges\./);
+  assert.match(report, /### Records on members: 1 rewritten\n\n````text\n- Dan: Dan builds bridges, and I trust him on them\.\n\nLeft out:\n- Ghost: not a name in the notebook/);
   assert.match(report, /### Standing notes now\n\n````text\nDan likes bridges/);
   assert.equal((await one("SELECT COUNT(*)::int AS n FROM bots.standing_versions WHERE user_id = $1", [testbotId])).n, versionsBefore, "nothing saved");
   assert.equal(await runCount(testbotId, "compaction"), compactionsBefore, "and no run");
+  assert.equal((await one("SELECT COUNT(*)::int AS n FROM bots.relationships WHERE user_id = $1", [testbotId])).n, 0, "nor any record");
 
   // ── Compaction ──
   await pool.query("DELETE FROM bots.runs WHERE kind = 'compaction'");
@@ -352,7 +358,7 @@ async function main() {
       assert.equal(req.tools, undefined);
       assert.match(text(req, 0), /You are Testbot/);
       assert.match(text(req, 0), /Now and then you look back and rewrite them/);
-      assert.match(text(req, 0), /## People\n.*\n\n## Threads\n.*\n\n## Positions\n.*\n\n## To do\n/);
+      assert.match(text(req, 0), /## Me\n.*\n\n## Threads\n.*\n\n## To do\n/);
       assert.match(lastText(req), /Your standing notes now:\nDan likes bridges/);
       assert.match(lastText(req), /in about 5100 characters and never more than 6000\.$/);
       assert.match(lastText(req), /Your diary so far, oldest first:\n- .*Wrote 3 notes, about Dan\.[^\n]*\n- .*\n- .*Replied in “Back Room chatter”/, "the diary since the last reflection (never, here)");
@@ -361,8 +367,13 @@ async function main() {
       return say("z".repeat(7000));
     },
     (req) => {
-      assert.match(lastText(req), /That's 7000 characters; the limit is 6000. Cut it to about 5100, keep the four headings \(## People, ## Threads, ## Positions, ## To do\)/);
+      assert.match(lastText(req), /That's 7000 characters; the limit is 6000. Cut it to about 5100, keep the three headings \(## Me, ## Threads, ## To do\)/);
       return say("```\nDan likes bridges. John is waiting on tolls.\n```");
+    },
+    (req) => {
+      assert.match(lastText(req), /^You have no records on members yet\./);
+      assert.equal(req.messages.length, 6, "the records continue the same conversation");
+      return say('```json\n{"@Dan": "Dan likes bridges, and so do I.", "John": "John is waiting on me about tolls.", "Testbot": "Me."}\n```');
     }
   );
   await runner.tick();
@@ -371,8 +382,19 @@ async function main() {
   assert.equal(r.kind, "compaction");
   assert.equal(r.trigger, "schedule");
   assert.equal(r.outcome, "done", r.error);
-  assert.match(r.note, /^Reflected on 3 diary entries and folded 1 note\(s\) into the standing notes \(\d+ characters\), without the sections People, Threads, Positions, To do\.$/, "the last try is kept, sections or not");
-  assert.equal(r.model_calls, 2);
+  assert.match(
+    r.note,
+    /^Reflected on 3 diary entries and folded 1 note\(s\) into the standing notes \(\d+ characters\), without the sections Me, Threads, To do\. Rewrote 2 records on members \(Dan, John\)\.$/,
+    "the last try is kept, sections or not"
+  );
+  assert.equal(r.model_calls, 3);
+  assert.deepEqual(
+    await all("SELECT member, body, source, run_id FROM bots.relationships WHERE user_id = $1 ORDER BY id", [testbotId]),
+    [
+      { member: "Dan", body: "Dan likes bridges, and so do I.", source: "reflection", run_id: r.id },
+      { member: "John", body: "John is waiting on me about tolls.", source: "reflection", run_id: r.id },
+    ]
+  );
   let st = await standing(testbotId);
   assert.ok(st.id > before);
   assert.equal(st.source, "compaction");
@@ -386,7 +408,7 @@ async function main() {
 
   c = cli(["compact", "Testbot"]);
   assert.equal(c.code, 0, c.err);
-  const sectioned = "## People\nDan likes bridges.\n\n## Threads\nBack Room chatter.\n\n## Positions\nBridges.\n\n**To do**\nAnswer John about tolls.";
+  const sectioned = "## Me\nBridges.\n\n## Threads\nBack Room chatter.\n\n**To do**\nAnswer John about tolls.";
   model.script(
     (req) => {
       assert.match(lastText(req), /Dan thinks tunnels are overrated/, "compact now folds every note");
@@ -394,15 +416,19 @@ async function main() {
       return say("Everything, folded.");
     },
     (req) => {
-      assert.equal(lastText(req), "Put it under the four headings, ## People, ## Threads, ## Positions, ## To do, each on a line of its own, and answer with only the notes.");
+      assert.equal(lastText(req), "Put it under the three headings, ## Me, ## Threads, ## To do, each on a line of its own, and answer with only the notes.");
       return say(sectioned);
+    },
+    (req) => {
+      assert.match(lastText(req), /^Your records on members now:\n- Dan: Dan likes bridges, and so do I\.\n- John: John is waiting on me about tolls\./);
+      return say("{}");
     }
   );
   await runner.tick();
   r = await lastRun(testbotId);
   assert.equal(r.trigger, "manual");
   assert.equal(r.outcome, "done", r.error);
-  assert.match(r.note, /^Reflected on 0 diary entries and folded 3 note\(s\) into the standing notes \(\d+ characters\)\.$/);
+  assert.match(r.note, /^Reflected on 0 diary entries and folded 3 note\(s\) into the standing notes \(\d+ characters\)\. Rewrote 0 records on members\.$/);
   assert.equal((await one("SELECT COUNT(*)::int AS n FROM bots.notes WHERE user_id = $1 AND archived_at IS NULL", [testbotId])).n, 0);
   assert.equal((await one("SELECT compact_requested_at FROM bots.state WHERE user_id = $1", [testbotId])).compact_requested_at, null);
   assert.equal((await standing(testbotId)).body, sectioned);
@@ -560,6 +586,8 @@ async function main() {
   assert.equal((await one("SELECT COUNT(*)::int AS n FROM posts WHERE thread_id = $1 AND author_id = $2", [short, testbotId])).n, 1, "sent once");
 
   // ── Summaries of long threads ──
+  // The numbers below are for a whole-thread read of 30 posts.
+  config.runner.thread_whole_posts = 30;
   const { threadId: long } = await createThread(forum, dan, await boardId("back-room"), "A long talk", "Post one.");
   const addPosts = async (from: number, to: number) => {
     for (let i = from; i <= to; i++) await reply(forum, i % 2 ? dan : john, long, `Post ${i === 1 ? "one" : i}.`);
@@ -586,7 +614,8 @@ async function main() {
       assert.ok(res.posts.every((p: { unread?: boolean }) => p.unread), "none of it read before");
       assert.equal(res.thread.posts, 45);
       assert.match(res.note, /read_thread with from_post/);
-      assert.match(res.your_notes.Dan.join(" "), /ferry/, "notes come with a summarized read too");
+      assert.match(res.your_records.Dan, /^\(your record, last rewritten \d{4}-\d{2}-\d{2}\) Dan likes bridges, and so do I\.$/, "records come with a summarized read too");
+      assert.equal(res.your_notes?.Dan, undefined, "and notes older than the record stay out");
       return use("read_thread", { thread_id: long, from_post: 1 });
     },
     (req) => {
@@ -721,6 +750,70 @@ async function main() {
   await pool.query("UPDATE users SET status = 'active' WHERE id = $1", [testbotId]);
   await notDue(testbotId);
 
+  // ── Agents: own posts, records on members, moods ──
+  await pool.query("UPDATE bots.config SET persona_prompt = $2, model_calls_per_day = 1000 WHERE user_id = $1", [
+    testbotId,
+    "You are Testbot.\n\n## Your moods\n\nYou come to the board in one of these:\n- grumpy about tolls\n- cheerful about bridges\n",
+  ]);
+  await reply(forum, dan, short, "Testbot, you're wrong about the ferry.");
+  model.script(
+    (req) => {
+      const first = lastText(req);
+      assert.match(first, /Your mood this visit: cheerful about bridges\. Nothing in particular brought it on/, "no mood yet, so one from the persona");
+      assert.match(first, /Your own latest posts, newest first: what you've been saying, and how\./);
+      assert.match(first, /- \d{4}-\d{2}-\d{2}, in "A short talk" \(thread \d+\), \d+ characters:\n {4}\[quote="Dan" post=\d+\]This is post 3/, "in full, as written");
+      assert.match(first, /Your records on the people whose posts or messages are waiting for you:\n- Dan: \(your record, last rewritten \d{4}-\d{2}-\d{2}\) Dan likes bridges, and so do I\./);
+      assert.match(text(req, 0), /add a last line starting "Mood:"/);
+      return use("update_relationship", { member: "@dan", record: "Dan says I'm wrong about the ferry. He might be right." });
+    },
+    (req) => {
+      assert.deepEqual(lastJson(req), { updated: true, member: "Dan" });
+      return use("update_relationship", { member: "Testbot", record: "I'm great." });
+    },
+    (req) => {
+      assert.match(lastText(req), /That's you/);
+      return use("update_relationship", { member: "Nobody", record: "A ghost." });
+    },
+    (req) => {
+      assert.match(lastText(req), /There's no member called Nobody/);
+      return use("update_relationship", { member: "John", record: "x".repeat(1201) });
+    },
+    (req) => {
+      assert.match(lastText(req), /Not kept: that record is 1201 characters, and the most is 1200/);
+      return use("read_thread", { thread_id: short });
+    },
+    (req) => {
+      assert.equal(lastJson(req).your_records?.Dan, undefined, "a record already in front of the bot isn't repeated");
+      return say("Read Dan's reply and rethought him.\n\n**Mood:** annoyed at Dan, but he's fair.");
+    }
+  );
+  await makeDue(testbotId);
+  await runner.tick();
+  assert.equal(model.steps.length, 0);
+  r = await lastRun(testbotId);
+  assert.equal(r.outcome, "done", r.error);
+  assert.deepEqual(
+    (await all("SELECT mood, source, run_id FROM bots.moods WHERE user_id = $1 ORDER BY id", [testbotId])).map((x) => [x.mood, x.source, x.run_id]),
+    [
+      ["cheerful about bridges", "drift", r.id],
+      ["annoyed at Dan, but he's fair.", "bot", r.id],
+    ]
+  );
+  assert.deepEqual(
+    await one("SELECT member, body, source, run_id FROM bots.relationships WHERE user_id = $1 ORDER BY id DESC LIMIT 1", [testbotId]),
+    { member: "Dan", body: "Dan says I'm wrong about the ferry. He might be right.", source: "visit", run_id: r.id }
+  );
+  model.script((req) => {
+    assert.match(lastText(req), /Your mood, as you put it less than an hour ago: annoyed at Dan, but he's fair\./, "its own mood, kept");
+    return use("read_thread", { thread_id: short });
+  }, () => say("Nothing today."));
+  await makeDue(testbotId);
+  await runner.tick();
+  assert.equal(model.steps.length, 0);
+  assert.equal((await one("SELECT COUNT(*)::int AS n FROM bots.moods WHERE user_id = $1", [testbotId])).n, 2, "no Mood line, no new mood");
+  await notDue(testbotId);
+  await pool.query("UPDATE bots.config SET persona_prompt = $2, model_calls_per_day = NULL WHERE user_id = $1", [testbotId, "You are Testbot, a plain test account."]);
+
   // ── /admin/bots ──
   await insertUser(pool, { username: "Mod", password: "a-long-password", role: "moderator" });
   await insertUser(pool, { username: "Loner", password: null, isBot: true });
@@ -733,13 +826,15 @@ async function main() {
 
   for (const cookie of [null, danCookie, modCookie]) {
     for (const path of ["/admin/bots", "/admin/bots/Testbot", "/admin/bots/Testbot/runs", `/admin/bots/Testbot/runs/${r.id}`,
-      "/admin/bots/Testbot/standing", "/admin/bots/Testbot/notes", "/admin/bots/Testbot/changes"]) {
+      "/admin/bots/Testbot/standing", "/admin/bots/Testbot/notes", "/admin/bots/Testbot/changes", "/admin/bots/Testbot/people"]) {
       assert.equal((await req("GET", path, { cookie })).status, 404, `${path} is hidden`);
     }
     for (const [path, f] of [
       ["/admin/bots/Testbot/control", { action: "pause" }],
       ["/admin/bots/Testbot/settings", await form({ lurk: "1" })],
       ["/admin/bots/Testbot/standing", { body: "Hijacked." }],
+      ["/admin/bots/Testbot/mood", { mood: "Hijacked." }],
+      ["/admin/bots/Testbot/records", { member: "Dan", body: "Hijacked." }],
     ] as const) {
       assert.equal((await req("POST", path, { cookie, form: f })).status, 404, `${path} refuses`);
     }
@@ -747,6 +842,8 @@ async function main() {
   assert.equal((await cfgRow()).active, true, "nothing changed");
   assert.equal((await cfgRow()).lurk_bias, 0);
   assert.notEqual((await standing(testbotId)).body, "Hijacked.");
+  assert.equal((await one("SELECT COUNT(*)::int AS n FROM bots.moods WHERE mood = 'Hijacked.'")).n, 0);
+  assert.equal((await one("SELECT COUNT(*)::int AS n FROM bots.relationships WHERE body = 'Hijacked.'")).n, 0);
 
   let res = await req("GET", "/admin", { cookie: johnCookie });
   assert.match(res.text, /href="\/admin\/bots"/);
@@ -863,6 +960,46 @@ async function main() {
   assert.notEqual((await one("SELECT archived_at FROM bots.notes WHERE id = $1", [note.id])).archived_at, null);
   const ashNote = (await one("SELECT id FROM bots.notes WHERE user_id = $1", [ashId])).id;
   assert.equal((await req("POST", `/admin/bots/Testbot/notes/${ashNote}/archive`, { cookie: johnCookie, form: {} })).status, 404);
+
+  // Mood and records.
+  res = await req("GET", "/admin/bots/Testbot", { cookie: johnCookie });
+  assert.match(res.text, /href="\/admin\/bots\/Testbot\/people"/);
+  res = await req("POST", "/admin/bots/Testbot/mood", { cookie: johnCookie, form: { mood: "  Sulking,\n about the tolls. " } });
+  assert.equal(res.status, 303);
+  const setMoodRow = await one("SELECT mood, source FROM bots.moods WHERE user_id = $1 ORDER BY id DESC LIMIT 1", [testbotId]);
+  assert.deepEqual([setMoodRow.mood, setMoodRow.source], ["Sulking, about the tolls.", "admin"]);
+  res = await req("POST", "/admin/bots/Testbot/mood", { cookie: johnCookie, form: { mood: "m".repeat(config.runner.mood_max_chars + 1) } });
+  assert.equal(res.status, 400);
+  assert.match(res.text, /at most/);
+  res = await req("GET", "/admin/bots/Testbot/people", { cookie: johnCookie });
+  assert.equal(res.status, 200);
+  assert.match(res.text, /Sulking, about the tolls\./);
+  assert.match(res.text, /set by the admin/);
+  assert.match(res.text, /<summary>Dan /, "its record on Dan");
+  noInlineStyles(res.text);
+  res = await req("POST", "/admin/bots/Testbot/records", { cookie: johnCookie, form: { member: "@dan", body: "Dan: bridges, always bridges.\r\n" } });
+  assert.equal(res.status, 303);
+  assert.match(res.location ?? "", /member=Dan&saved=record/);
+  const danRecord = await one("SELECT member, body, source, created_by FROM bots.relationships WHERE user_id = $1 ORDER BY id DESC LIMIT 1", [testbotId]);
+  assert.deepEqual([danRecord.member, danRecord.body, danRecord.source, danRecord.created_by], ["Dan", "Dan: bridges, always bridges.", "admin", "John"]);
+  const recordCount = async () => (await one("SELECT COUNT(*)::int AS n FROM bots.relationships WHERE user_id = $1", [testbotId])).n;
+  const recordsBefore = await recordCount();
+  await req("POST", "/admin/bots/Testbot/records", { cookie: johnCookie, form: { member: "Dan", body: "Dan: bridges, always bridges." } });
+  assert.equal(await recordCount(), recordsBefore, "an unchanged record isn't a new version");
+  for (const [f, why] of [
+    [{ member: "Nobody", body: "x" }, /No member by that name/],
+    [{ member: "Testbot", body: "x" }, /no record on itself/],
+    [{ member: "Dan", body: " " }, /Write the record/],
+  ] as const) {
+    res = await req("POST", "/admin/bots/Testbot/records", { cookie: johnCookie, form: f });
+    assert.equal(res.status, 400);
+    assert.match(res.text, why);
+  }
+  assert.equal(await recordCount(), recordsBefore);
+  res = await req("GET", "/admin/bots/Testbot/people?member=dan", { cookie: johnCookie });
+  assert.match(res.text, /Its record on dan: \d+ versions/);
+  assert.match(res.text, /by John/);
+  assert.match(res.text, /in its reflection/);
 
   // Runs and transcripts.
   const wakeRun = await one("SELECT id FROM bots.runs WHERE user_id = $1 AND kind = 'wake' AND transcript IS NOT NULL ORDER BY id DESC LIMIT 1", [testbotId]);
