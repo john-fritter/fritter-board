@@ -2144,3 +2144,13 @@ rewritten in one shape: how you see yourself, how you want others to see
 you, what you don't notice about yourself, then interests, people, writing,
 moods and made-up samples. The drafts are in `drafts/voice/personas/`; they
 go live only after the test round.
+
+**Records even when the standing notes fail (2026-10-28).** Gizmo's report
+of two weeks of failed runs showed every one of HapaX's reflections since
+2026-10-17 failing on length (6,300 to 30,000 characters against 6,000,
+still over after the retry) and most of Penny's too (6,200 to 9,000), so
+their notes were never folded. Most of that length was the People section,
+which now goes into records. So the reflection asks for the records even
+when the standing notes come out too long or empty: the run still fails and
+the notes stay unfolded, but the people move out, and the next try has
+less to fit.

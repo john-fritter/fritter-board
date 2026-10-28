@@ -437,12 +437,16 @@ async function main() {
   cli(["compact", "Testbot"]);
   model.script(
     () => say(""),
-    () => say("   ")
+    () => say("   "),
+    () => say('{"Dan": "Dan still likes bridges."}')
   );
   await runner.tick();
+  assert.equal(model.steps.length, 0);
   r = await lastRun(testbotId);
   assert.equal(r.outcome, "failed");
-  assert.match(r.error, /wrote no standing notes/);
+  assert.equal(r.error, "The model wrote no standing notes. Rewrote 1 record on members (Dan).", "the records are written anyway");
+  const danNow = await one("SELECT body, run_id FROM bots.relationships WHERE user_id = $1 ORDER BY id DESC LIMIT 1", [testbotId]);
+  assert.deepEqual([danNow.body, danNow.run_id], ["Dan still likes bridges.", r.id]);
   assert.equal((await standing(testbotId)).body, sectioned, "nothing saved");
   assert.equal((await one("SELECT archived_at FROM bots.notes WHERE body = 'A new thought.'")).archived_at, null, "nothing archived");
   assert.equal((await one("SELECT compact_requested_at FROM bots.state WHERE user_id = $1", [testbotId])).compact_requested_at, null);
@@ -614,7 +618,7 @@ async function main() {
       assert.ok(res.posts.every((p: { unread?: boolean }) => p.unread), "none of it read before");
       assert.equal(res.thread.posts, 45);
       assert.match(res.note, /read_thread with from_post/);
-      assert.match(res.your_records.Dan, /^\(your record, last rewritten \d{4}-\d{2}-\d{2}\) Dan likes bridges, and so do I\.$/, "records come with a summarized read too");
+      assert.match(res.your_records.Dan, /^\(your record, last rewritten \d{4}-\d{2}-\d{2}\) Dan still likes bridges\.$/, "records come with a summarized read too");
       assert.equal(res.your_notes?.Dan, undefined, "and notes older than the record stay out");
       return use("read_thread", { thread_id: long, from_post: 1 });
     },
@@ -762,7 +766,7 @@ async function main() {
       assert.match(first, /Your mood this visit: cheerful about bridges\. Nothing in particular brought it on/, "no mood yet, so one from the persona");
       assert.match(first, /Your own latest posts, newest first: what you've been saying, and how\./);
       assert.match(first, /- \d{4}-\d{2}-\d{2}, in "A short talk" \(thread \d+\), \d+ characters:\n {4}\[quote="Dan" post=\d+\]This is post 3/, "in full, as written");
-      assert.match(first, /Your records on the people whose posts or messages are waiting for you:\n- Dan: \(your record, last rewritten \d{4}-\d{2}-\d{2}\) Dan likes bridges, and so do I\./);
+      assert.match(first, /Your records on the people whose posts or messages are waiting for you:\n- Dan: \(your record, last rewritten \d{4}-\d{2}-\d{2}\) Dan still likes bridges\./);
       assert.match(text(req, 0), /add a last line starting "Mood:"/);
       return use("update_relationship", { member: "@dan", record: "Dan says I'm wrong about the ferry. He might be right." });
     },

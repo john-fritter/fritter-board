@@ -292,9 +292,24 @@ export async function runCompaction(deps: WakeDeps, bot: Bot, trigger: Trigger):
     }
     const { standing, notes, diary, body, missing } = r;
     const max = config.runner.standing_max_chars;
+    // The records come second, in the same conversation, and are written
+    // whether or not the standing notes were: they take the people out of
+    // the standing notes, which is what made them too long (2026-10-28).
+    const writeRecords = async (): Promise<string> => {
+      try {
+        const rr = await reflectRelationships(deps, m, bot, r);
+        for (const x of rr.records) await saveRelationship(deps.db, bot.userId, { member: x.member, body: x.body, source: "reflection", runId });
+        return ` Rewrote ${rr.records.length} record${rr.records.length === 1 ? "" : "s"} on members${rr.records.length ? ` (${rr.records.map((x) => x.member).join(", ")})` : ""}${
+          rr.problems.length ? `; left out ${rr.problems.join("; ")}` : ""
+        }.`;
+      } catch (err) {
+        if (err instanceof DailyCapReached) throw err;
+        return ` The records on members weren't rewritten: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    };
     if (!body || body.length > max) {
       const error = body ? `The new standing notes were ${body.length} characters, over the ${max} limit.` : "The model wrote no standing notes.";
-      await record("failed", { error });
+      await record("failed", { error: error + (await writeRecords()) });
       return { outcome: "failed", runId, pausedUntil: null };
     }
     const versionId = await saveCompaction(deps.db, bot.userId, body, runId, standing?.id ?? null, notes.map((n) => n.id));
@@ -302,18 +317,8 @@ export async function runCompaction(deps: WakeDeps, bot: Bot, trigger: Trigger):
       await record("failed", { error: "The standing notes were edited while this ran; nothing was saved." });
       return { outcome: "failed", runId, pausedUntil: null };
     }
-    // The records come second; standing notes already saved stand even if they fail.
-    let records = "";
-    try {
-      const rr = await reflectRelationships(deps, m, bot, r);
-      for (const x of rr.records) await saveRelationship(deps.db, bot.userId, { member: x.member, body: x.body, source: "reflection", runId });
-      records = ` Rewrote ${rr.records.length} record${rr.records.length === 1 ? "" : "s"} on members${rr.records.length ? ` (${rr.records.map((x) => x.member).join(", ")})` : ""}${
-        rr.problems.length ? `; left out ${rr.problems.join("; ")}` : ""
-      }.`;
-    } catch (err) {
-      if (err instanceof DailyCapReached) throw err;
-      records = ` The records on members weren't rewritten: ${err instanceof Error ? err.message : String(err)}`;
-    }
+    // Standing notes already saved stand even if the records fail.
+    const records = await writeRecords();
     // Sections are asked for, but a document that fits without all of them still beats keeping last week's.
     await record("done", {
       note:
