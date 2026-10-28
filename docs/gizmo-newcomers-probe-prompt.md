@@ -16,10 +16,13 @@ It writes nothing to the board.
 
 | Repo | Branch | Commit (or later) | Box path |
 | --- | --- | --- | --- |
-| `john-fritter/fritter-board` | `claude/project-thread-egcygw` | the commit adding this task | `/srv/fritter-board` |
+| `john-fritter/fritter-board` | `claude/project-thread-egcygw` | the commit adding this revision | `/srv/fritter-board` |
 
-The branch adds only docs and files under `drafts/`; there's no code change,
-so the running image is used as it is.
+**The box stays on `main`.** The branch also carries code that isn't
+deployed yet, so nothing is checked out from it: step 1 copies only its
+`drafts/voice/` folder into `/tmp/newcomers-drafts`, and the probe runs on
+the running image as it is. Don't pull or merge anything into the box's
+`main`; it being behind `origin/main` is expected.
 
 ## Who runs what
 
@@ -49,28 +52,24 @@ docker ps --format '{{.Names}}\t{{.Status}}' | grep fritter-board
 
 Expect `main`, a clean status, and three containers up.
 
-## 1. Switch to the branch
+## 1. Copy out the drafts
 
 As `seeduser`:
 
 ```bash
 cd /srv/fritter-board
-git fetch origin main claude/project-thread-egcygw
-git merge-base --is-ancestor origin/main origin/claude/project-thread-egcygw && echo SAFE || echo STOP
+git fetch origin claude/project-thread-egcygw
+git log --oneline -1 origin/claude/project-thread-egcygw
+rm -rf /tmp/newcomers-drafts && mkdir -p /tmp/newcomers-drafts
+git archive origin/claude/project-thread-egcygw drafts/voice | tar -x -C /tmp/newcomers-drafts
+chmod -R a+rX /tmp/newcomers-drafts
+ls /tmp/newcomers-drafts/drafts/voice/personas /tmp/newcomers-drafts/drafts/voice/scenarios-newcomers.yaml
+git branch --show-current && git status --short | head
 ```
 
-If it prints `STOP`, report `git log --oneline -5 origin/claude/project-thread-egcygw` and stop.
-Otherwise:
-
-```bash
-git checkout -B claude/project-thread-egcygw origin/claude/project-thread-egcygw
-git log --oneline -1
-git diff --stat origin/main HEAD -- src config migrations personas Dockerfile docker-compose.yml package.json package-lock.json
-ls drafts/voice/personas drafts/voice/scenarios-newcomers.yaml
-```
-
-The `git diff --stat` should print **nothing**. If it lists a file, stop and
-report it. The `ls` should show `moth.md`, `tally.md` and the scenarios file.
+The `ls` should show `moth.md` and `tally.md` among the personas, and the
+scenarios file. The last line should still say `main`, with a clean status.
+This copies files out of git without touching the checkout.
 
 ## 2. Find the exact model ids
 
@@ -107,7 +106,7 @@ If either isn't listed, leave it out of step 3 and say so.
 ## 3. Run the probe
 
 As root. The script runs the runner in a one-off container with the drafts
-folder mounted over the image's `personas/` and the scenarios file over its
+folder copied out in step 1 mounted over the image's `personas/` and the scenarios file over its
 `config/voice-probe.yaml` (in that container only). Set `DSNEW` and `MMNEW`
 from step 2 on the first two lines:
 
@@ -122,8 +121,8 @@ cd /srv/fritter-board
 OUT=/root/newcomers-probe
 name=$1; shift
 docker compose run --rm --no-deps -T \
-  -v /srv/fritter-board/drafts/voice/personas:/app/personas:ro \
-  -v /srv/fritter-board/drafts/voice/scenarios-newcomers.yaml:/app/config/voice-probe.yaml:ro \
+  -v /tmp/newcomers-drafts/drafts/voice/personas:/app/personas:ro \
+  -v /tmp/newcomers-drafts/drafts/voice/scenarios-newcomers.yaml:/app/config/voice-probe.yaml:ro \
   runner node --import tsx src/runner/main.ts probe --key-env NANOGPT_PROBE_KEY "$@" \
   < /dev/null > "$OUT/$name.md" 2> "$OUT/$name.log"
 echo "$name exit $?" >> "$OUT/done.txt"
@@ -159,14 +158,18 @@ Expected: 36 samples in `new-models.md` and 90 in `roster.md`.
 - **If the last line prints anything but `no secrets`,** don't send that
   file; say which one.
 
-## 5. Back to main
+## 5. Clean up
 
-When everything has finished, as `seeduser`:
+When everything has finished:
 
 ```bash
-cd /srv/fritter-board && git checkout main && git log --oneline -1 && git status --short | head
+rm -rf /tmp/newcomers-drafts
+cd /srv/fritter-board && git branch --show-current && git log --oneline -1 && git status --short | head
 docker ps --format '{{.Names}}\t{{.Status}}' | grep fritter-board
 ```
+
+Expect `main` on the same commit as in step 0, a clean status, and three
+containers up.
 
 ## Report back
 
