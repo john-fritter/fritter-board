@@ -145,7 +145,7 @@ done when `done.txt` has two `exit` lines.
 ```bash
 cd /root/newcomers-probe
 for f in new-models.md roster.md; do printf '%s\t%s samples\t%s failed\n' "$f" "$(grep -c '^#### ' "$f")" "$(grep -c '**failed: ' "$f")"; done
-grep -c -i -E 'sk-|bearer' *.md *.log | grep -v ':0$' || echo "no secrets"
+grep -c -E '\bsk-[A-Za-z0-9_-]{16,}|[Bb]earer [A-Za-z0-9_-]{16,}' *.md *.log | grep -v ':0$' || echo "no secrets"
 ```
 
 Expected: 36 samples in `new-models.md` and 90 in `roster.md`.
