@@ -334,6 +334,34 @@ async function integration() {
   assert.match(report, /Short and sweet, as asked for here\./);
   assert.match(report, /Its note: Done\./);
 
+  // As a newcomer: its draft, a stated length, and none of the bot's own memory.
+  await pool.query("INSERT INTO bots.notes (user_id, body) VALUES ($1, 'A private thought.')", [botId]);
+  model.script((req) => {
+    const all = JSON.stringify(req.messages);
+    assert.match(systemText(req), /You are moth\./);
+    assert.doesNotMatch(systemText(req), /20-60 words/, "the length stays out of the system prompt");
+    assert.match(all, /Keep each post or message this visit to about \d+ words, not counting what you quote\./);
+    assert.match(all, /Your mood this visit: (calm|restless)\./);
+    assert.doesNotMatch(all, /A private thought|Your own latest posts|standing notes now/);
+    return say("Looked around.\nMood: curious");
+  });
+  await pool.query("DELETE FROM read_markers");
+  const fresh = await runDryVisits(
+    { ...deps, log: () => {} },
+    {
+      bots: [dryBot],
+      apiKey: "sk-test",
+      sides: "pick",
+      personas: new Map([["Testbot", "You are moth.\n\n## Length\n20-60 words\n\n## Your moods\n- calm\n- restless"]]),
+      personaSource: "moth's draft",
+      briefSource: "as bots get it now",
+      fresh: true,
+    }
+  );
+  assert.equal(model.steps.length, 0);
+  assert.match(fresh, /Its note: Looked around\./);
+  assert.match(fresh, /\| Testbot \| length \| \d+ \|/, "the stated length shows where a side would");
+
   // ── The voice test ──
   const asked: number[] = [];
   const fake: ChatModel = {
@@ -412,6 +440,15 @@ function agents() {
     const moods = personaMoods(readFileSync(path.join(dir, file), "utf8"));
     assert.ok(moods.length >= 3, `${file} lists its moods`);
   }
+
+  // A stated length without sides: out of the system prompt, stated alone.
+  const lengthy = parsePersona("Core.\n\n## Length\n\nAbout 20-120 words.\n\n## Your moods\n\n- calm");
+  assert.deepEqual(lengthy.problems, []);
+  assert.deepEqual([lengthy.length?.minWords, lengthy.length?.maxWords], [20, 120]);
+  assert.equal(personaPrompt("Core.\n\n## Length\n\nAbout 20-120 words.\n\n## Your moods\n\n- calm"), "Core.\n\n## Your moods\n\n- calm");
+  assert.equal(sideText(lengthy.length!, 45), "Keep each post or message this visit to about 45 words, not counting what you quote.");
+  assert.deepEqual(parsePersona("Core.\n## Length\nshort").problems, ['"## Length" needs a range like "20-120 words".']);
+  assert.equal(parsePersona(PERSONA).length, null);
 
   assert.equal(moodFromNote("Read two threads, replied to Dan.\nMood: smug, Dan walked into it"), "smug, Dan walked into it");
   assert.equal(moodFromNote("Did things.\n**Mood:** tired"), "tired");

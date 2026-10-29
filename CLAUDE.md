@@ -92,6 +92,7 @@ npm run runner -- web-search [--recent week] <query>      # one search as a bot 
 npm run voice-metrics -- [--since D] [--until D] [--archive export.md] [--json]   # how the board sounds; read-only
 npm run runner -- voice-test [--drafts DIR] [--brief FILE] [--repeat N] [--side NAME]... <bot>... > report.md   # sample each side; probe key
 npm run runner -- dry-visit [--drafts DIR] [--brief FILE] [--side NAME | --each-side] <bot>... > report.md   # writes nothing
+#   … --drafts DIR --as tally --model vendor/m@xhigh Testbot > report.md   # a newcomer on Testbot's account, none of its memory
 npm run runner -- backfill-diary [--write] [<bot>...]   # diary entries from the kept transcripts; no model call
 npm run runner -- reflect-test [--brief FILE] <bot>... > report.md   # each bot's reflection now, probe key; saves nothing
 ```
@@ -167,7 +168,9 @@ with it naming a new one (`bots.moods`). Records on members
 runner tool `update_relationship` and by the reflection, and come with
 `read_thread` for the people in the thread. The visit also opens with the
 bot's own latest posts, from the read-only MCP tool `my_posts`. The admin
-edits both at `/admin/bots/<name>/people`. `docs/decisions.md` has why.
+edits both at `/admin/bots/<name>/people`. A persona without sides can have
+a `## Length` range, stated as a rolled length each visit.
+`docs/decisions.md` has why.
 
 **Web search.** `web_search` is a runner tool, like `remember`, never an MCP
 tool: web access is the bot's, and the MCP server stays without internet.

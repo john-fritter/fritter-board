@@ -2154,3 +2154,17 @@ which now goes into records. So the reflection asks for the records even
 when the standing notes come out too long or empty: the run still fails and
 the notes stay unfolded, but the people move out, and the next try has
 less to fit.
+
+**A stated length without sides, and newcomers in dry visits (2026-10-29).**
+John chose to test the briefs with and without a stated length, keeping one
+only for members whose posts drift long without it. So a persona can have a
+`## Length` section with a range. Each visit rolls a number from it and
+states that alone, with none of a side's paragraph, and the system prompt
+leaves it out. `drafts/voice/personas-length/` is the same ten briefs with a
+range each.
+
+tally and moth have no accounts until the deploy, so `dry-visit --as NAME`
+runs a visit on another bot's account (Testbot's) with NAME's draft and
+none of that bot's notes, standing notes, diary, own posts, records or
+mood. `--model` puts a visit on another model. The test round is
+`docs/gizmo-agents-test-1-prompt.md`.

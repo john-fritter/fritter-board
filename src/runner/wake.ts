@@ -114,6 +114,12 @@ export interface DryVisit {
   /** A persona or member brief to try instead of the bot's own (drafts). */
   persona?: string;
   memberBrief?: string;
+  /**
+   * A newcomer's first visit: none of the bot's own memory (notes, standing,
+   * diary, own posts, records, mood), for trying a member who has no account
+   * yet on another bot's (2026-10-29).
+   */
+  fresh?: boolean;
 }
 
 /** Board tools the runner calls itself at the start of a visit, so the model isn't offered them. */
@@ -368,6 +374,8 @@ export class WakeSession extends MeteredModel {
   readonly diary: VisitDiary;
   /** On a dry visit, what the bot would have written, kept here instead of sent. */
   drafts: Draft[] | null = null;
+  /** A dry visit as a newcomer (DryVisit.fresh): the bot's records stay out. */
+  fresh = false;
 
   constructor(
     deps: WakeDeps,
@@ -598,6 +606,7 @@ export class WakeSession extends MeteredModel {
    * about them that are newer than the record (or all, with no record).
    */
   private async onPeople(json: ThreadJson): Promise<{ your_records?: Record<string, string>; your_notes?: Record<string, string[]> } | null> {
+    if (this.fresh) return null;
     const names: string[] = [];
     const me = lower(this.bot.username);
     for (const p of [...json.posts].reverse()) {
@@ -1317,10 +1326,11 @@ export async function startMood(
   deps: Pick<WakeDeps, "db" | "now" | "random">,
   bot: Bot,
   runId: number,
-  dry: boolean
+  dry: boolean,
+  fresh = false
 ): Promise<string> {
   const now = deps.now();
-  const current = await currentMood(deps.db, bot.userId);
+  const current = fresh ? null : await currentMood(deps.db, bot.userId);
   const moods = personaMoods(bot.personaPrompt).filter((m) => !current || lower(m) !== lower(current.mood));
   const stale = !current || now.getTime() - current.createdAt.getTime() > config.runner.mood_stale_hours * 3_600_000;
   if (moods.length && (stale || deps.random() < config.runner.mood_drift_chance)) {
@@ -1402,11 +1412,12 @@ export async function searchBudget(db: Db, bot: Bot): Promise<number> {
  * side it's given, or picks one, and never changes the bot's.
  */
 export async function chooseVoice(deps: Pick<WakeDeps, "db" | "now" | "random">, bot: Bot, dry: DryVisit | null = null): Promise<Voice | null> {
-  const { sides } = parsePersona(bot.personaPrompt);
+  const { sides, length } = parsePersona(bot.personaPrompt);
   const random = () => deps.random();
   if (sides.length === 0) {
     if (dry?.side) throw new Error(`${bot.username}'s persona has no sides.`);
-    return null;
+    // No sides: just a stated length, rolled fresh each visit, if it has one.
+    return length ? { side: length, words: rollWords(length, random) } : null;
   }
   let side = null;
   if (dry) {
@@ -1525,11 +1536,13 @@ export async function runWake(
       maxSteps: Math.max(1, Math.min(allowed.steps, opts.maxCalls ?? allowed.steps)),
     });
     if (dry) session.drafts = [];
+    const fresh = dry?.fresh === true;
+    session.fresh = fresh;
     session.learnFromInbox(inbox);
     // Searches are real requests on the bots' search keys, so dry visits don't make them.
     if (deps.webSearch && bot.mode === "tools" && !dry) session.searchBudget = await searchBudget(deps.db, bot);
     voice = await chooseVoice(deps, bot, dry);
-    const mood = await startMood(deps, bot, runId, dry !== null);
+    const mood = await startMood(deps, bot, runId, dry !== null, fresh);
     const header = [
       wakeHeader(bot, deps.now(), budget, voice).replace(/^[^\n]*/, (first) => first + (waiting ? ` (You're up early: ${waiting}.)` : "")),
       mood,
@@ -1539,9 +1552,9 @@ export async function runWake(
     const roster = await loadRoster(board, bot.username);
     const memory = [
       roster,
-      await loadMemory(deps.db, bot, deps.now(), session.shownNotes),
-      await loadOwnPosts(board),
-      await recordsAtStart(session, inbox),
+      ...(fresh
+        ? []
+        : [await loadMemory(deps.db, bot, deps.now(), session.shownNotes), await loadOwnPosts(board), await recordsAtStart(session, inbox)]),
     ]
       .filter(Boolean)
       .join("\n\n");

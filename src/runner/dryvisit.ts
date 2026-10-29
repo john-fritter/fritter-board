@@ -24,6 +24,8 @@ export interface DryVisitInput {
   personaSource: string;
   memberBrief?: string;
   briefSource: string;
+  /** Visits as a newcomer, with none of the bots' own memory (DryVisit.fresh). */
+  fresh?: boolean;
 }
 
 interface Visit {
@@ -53,6 +55,7 @@ export async function runDryVisits(deps: WakeDeps & { log: (line: string) => voi
             ...(side ? { side } : {}),
             ...(input.personas.has(bot.username) ? { persona: persona } : {}),
             ...(input.memberBrief !== undefined ? { memberBrief: input.memberBrief } : {}),
+            ...(input.fresh ? { fresh: true } : {}),
           },
         });
         const { rows } = await deps.db.query<{ note: string | null; error: string | null; model_calls: number }>(

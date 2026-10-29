@@ -14,6 +14,11 @@
  * same from visit to visit and caches. Sides never do: a visit picks one, and
  * its paragraph and a length rolled from its range open the visit's first
  * message. A persona without the headings is all core, as before sides.
+ *
+ * A persona without sides can still have its posts' length stated: a
+ * `## Length` section with a range ("20-120 words") gives each visit a length
+ * rolled from it, stated alone at the start (2026-10-29, the agents rework,
+ * for bots that drift long). It never goes in the system prompt either.
  */
 
 export interface Side {
@@ -28,10 +33,16 @@ export interface PersonaParts {
   core: string;
   stance: string | null;
   sides: Side[];
+  /** The `## Length` range, as a side with no text; null without one. */
+  length: Side | null;
 }
 
 const STANCE = /^##\s+stance\s*$/i;
 const SIDES = /^##\s+sides\s*$/i;
+const LENGTH = /^##\s+length\s*$/i;
+const RANGE = /(\d+)\s*(?:-|–|—|to)\s*(\d+)\s*words?/i;
+/** Any other "## " heading ends a Length section; its lines go back to the core. */
+const H2 = /^##\s/;
 const SIDE = /^###\s+(.+?)\s*\(\s*weight\s+(\d+(?:\.\d+)?)\s*,\s*(\d+)\s*(?:-|–|—|to)\s*(\d+)\s*words?\s*\)\s*$/i;
 
 /**
@@ -40,17 +51,20 @@ const SIDE = /^###\s+(.+?)\s*\(\s*weight\s+(\d+(?:\.\d+)?)\s*,\s*(\d+)\s*(?:-|�
  */
 export function parsePersona(text: string): PersonaParts & { problems: string[] } {
   const problems: string[] = [];
-  const sections: Record<"core" | "stance" | "sides", string[]> = { core: [], stance: [], sides: [] };
+  const sections: Record<"core" | "stance" | "sides" | "length", string[]> = { core: [], stance: [], sides: [], length: [] };
   const seen = new Set<string>();
   let current: keyof typeof sections = "core";
+  const NAMES = { stance: "Stance", sides: "Sides", length: "Length" } as const;
   for (const line of text.replace(/\r\n?/g, "\n").split("\n")) {
-    const heading = STANCE.test(line) ? "stance" : SIDES.test(line) ? "sides" : null;
+    const heading = STANCE.test(line) ? "stance" : SIDES.test(line) ? "sides" : LENGTH.test(line) ? "length" : null;
     if (heading) {
-      if (seen.has(heading)) problems.push(`There are two "## ${heading === "stance" ? "Stance" : "Sides"}" headings.`);
+      if (seen.has(heading)) problems.push(`There are two "## ${NAMES[heading]}" headings.`);
       seen.add(heading);
       current = heading;
       continue;
     }
+    // Length is a short section: the next heading of any kind ends it.
+    if (current === "length" && H2.test(line)) current = "core";
     sections[current].push(line);
   }
 
@@ -91,8 +105,17 @@ export function parsePersona(text: string): PersonaParts & { problems: string[] 
   finish();
   if (seen.has("sides") && sides.length === 0 && problems.length === 0) problems.push(`"## Sides" has no sides under it.`);
 
+  let length: Side | null = null;
+  if (seen.has("length")) {
+    const m = RANGE.exec(sections.length.join(" "));
+    const min = m ? Number(m[1]) : 0;
+    const max = m ? Number(m[2]) : 0;
+    if (!m || min < 1 || min > max) problems.push(`"## Length" needs a range like "20-120 words".`);
+    else length = { name: "length", weight: 1, minWords: min, maxWords: max, text: "" };
+  }
+
   const stance = sections.stance.join("\n").trim();
-  return { core: sections.core.join("\n").trim(), stance: stance || null, sides, problems };
+  return { core: sections.core.join("\n").trim(), stance: stance || null, sides, length, problems };
 }
 
 /** What a persona puts in the system prompt: its core and its stance, never its sides. */
@@ -128,6 +151,7 @@ export function rollWords(side: Pick<Side, "minWords" | "maxWords">, random: () 
  * voice test, so every side is offered as a leaning, never a script.
  */
 export function sideText(side: Side, words: number): string {
+  if (!side.text) return `Keep each post or message this visit to about ${words} words, not counting what you quote.`;
   return `This visit: ${side.text}\n\nKeep each post or message this visit to about ${words} words, not counting what you quote.\n\n${SIDE_WAY_OUT}`;
 }
 
