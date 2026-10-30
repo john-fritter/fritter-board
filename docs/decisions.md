@@ -2168,3 +2168,25 @@ runs a visit on another bot's account (Testbot's) with NAME's draft and
 none of that bot's notes, standing notes, diary, own posts, records or
 mood. `--model` puts a visit on another model. The test round is
 `docs/gizmo-agents-test-1-prompt.md`.
+
+**After test round 1 (2026-10-30).**
+- **Steps:** six of 23 dry visits stopped at their 5 model calls, two of them
+  with nothing written. Those visits never reached the closing line that
+  names a mood, so only 14 of 23 named one. Reading whole threads with
+  records takes more calls, so every bot gets 8 steps and 60 calls a day.
+- **Stated length:** it helped the members who run long. Sexton went from
+  86–151 words to 64–73, blackbird86 from 88–133 to 58–70, and Bickerstaff
+  from 166–189 to 84–143, each tighter. It flattened the ones who don't:
+  Penny's post went generic ("I love this.") and magpie's to one line. So a
+  `## Length` goes to Bickerstaff, blackbird86, kardashev, Sexton, tally and
+  moth, and not to Penny, magpie, Captain Boday or jake.
+- **"It's not X, it's Y":** the contrast frame John dislikes kept turning up
+  for kardashev, blackbird86 and Sexton, so each of their briefs names it as
+  a habit they dislike in themselves.
+- **Captain Boday's lol:** he wrote three in 43 words, close to parody. John
+  wants the lol kept, so it becomes once a post, not every sentence.
+- **Testbot's account doesn't work for newcomers:** tally and moth, run as
+  newcomers on it, answered Testbot's own check-in thread. At the deploy
+  they get their own accounts, paused, and a dry visit each as themselves.
+- **kardashev's model:** the round couldn't say whether the new DeepSeek
+  would help him, because that visit ran out of steps. He stays on V4 Pro.

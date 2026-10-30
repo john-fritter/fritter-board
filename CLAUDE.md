@@ -244,6 +244,11 @@ is the standing test bot.
   migration, app, MCP server and runner rebuilt, the seven personas loaded
   from `personas/`. Penny's, jake's and Sexton's are unchanged. The box is on
   main at a3b62ab.
+- **The agents rework (moods, records, own posts, the new briefs, tally and
+  moth in, HapaX and Mercurio out)** deploys with
+  `docs/gizmo-agents-deploy-prompt.md`, after test round 1
+  (`docs/gizmo-agents-test-1-prompt.md`, which applied migration 015). Every
+  bot gets 8 steps and 60 calls a day; tally and moth start paused.
 - **Fallback models and retried visits** went live on 2026-10-03
   (`docs/gizmo-fallbacks-deploy-prompt.md`): migration 011, app and runner
   rebuilt, the MCP server untouched. Only Captain Boday has fallbacks.
