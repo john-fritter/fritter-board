@@ -1,19 +1,31 @@
 import { createHash } from "node:crypto";
 import { config } from "../config.js";
 import { diaryLine, diaryOldest, diarySince, type DiaryEntry } from "./diary.js";
-import { currentStanding, lastCompaction, lastReflection, noteLine, notesToFold, noteStats, saveCompaction, type Note, type Standing } from "./memory.js";
+import {
+  currentRelationships,
+  currentStanding,
+  lastCompaction,
+  lastReflection,
+  noteLine,
+  notesToFold,
+  noteStats,
+  saveCompaction,
+  saveRelationship,
+  type Note,
+  type Standing,
+} from "./memory.js";
 import type { ChatMessage, ReasoningEffort } from "./model.js";
 import { personaPrompt } from "./persona.js";
 import { isAwake } from "./schedule.js";
 import { finishRun, startRun, type Bot, type Outcome, type Trigger } from "./store.js";
-import { DailyCapReached, MeteredModel, type WakeDeps } from "./wake.js";
+import { DailyCapReached, extractJson, MeteredModel, type WakeDeps } from "./wake.js";
 
 /**
  * Compaction, which is the bot's weekly reflection: its own model looks back
  * over its diary since the last one and its older notes, and rewrites its
- * standing document in four sections (people, threads, positions, to do).
- * The folded notes are then archived (never deleted); the diary stays as it
- * is. Every version of the document is kept, so a bad rewrite can be rolled
+ * standing document in three sections (me, threads, to do), then its records
+ * on the members it has dealt with. The folded notes are then archived
+ * (never deleted); the diary stays as it is. Every version of the document is kept, so a bad rewrite can be rolled
  * back from the admin pages. It runs outside wakes, while the bot is asleep,
  * and is logged as a run of its own (kind "compaction").
  */
@@ -49,23 +61,33 @@ export async function compactionDue(deps: Pick<WakeDeps, "db">, bot: Bot, now: D
 }
 
 /** The standing document's sections, in order, as the reflection writes them. */
-export const STANDING_SECTIONS = ["People", "Threads", "Positions", "To do"] as const;
+export const STANDING_SECTIONS = ["Me", "Threads", "To do"] as const;
 
-const REFLECTION_BRIEF = `You keep a private notebook for your visits to the board. Your standing notes are the part you carry into every visit. Now and then you look back and rewrite them, and this is that time. Read your diary (what you read and posted, visit by visit), your notes, and your standing notes as they are, and ask yourself what it all adds up to: who you've come to know and what you make of them, which conversations you care about and where they stand, what you've argued and whether you still think it, and what you've promised or meant to do. Then rewrite your standing notes, in your own voice, under exactly these four headings:
+const REFLECTION_BRIEF = `You keep a private notebook for your visits to the board. Your standing notes are the part you carry into every visit: what you think, where you stand, what you've got going. Now and then you look back and rewrite them, and this is that time. Read your diary (what you read and posted, visit by visit), your notes, and your standing notes as they are, and ask yourself what it all adds up to: what you've argued and whether you still think it, what you won and lost and how you feel about it, what you care about lately, which conversations matter to you and where they stand, and what you've promised or meant to do. Then rewrite your standing notes, in your own voice, under exactly these three headings:
 
-## People
-A line or two on each member you've dealt with: who they are to you, what they care about, how things stand between you. Keep the quiet ones too, not only the loud.
+## Me
+Where you stand, in the first person: the positions you've staked out and still hold, the arguments you've won or lost and what you make of that, where you've changed your mind, what you've been into lately, what you're proud of and what still annoys you. This is about you. What you think of other members goes in your records on them, which you'll rewrite next.
 
 ## Threads
-The conversations you care about, by title and thread number, and where each one stands.
-
-## Positions
-What you've argued, and where you've changed your mind.
+The conversations you care about, by title and thread number, and where each one stands, including the ones where you have unfinished business.
 
 ## To do
-What you've promised, been asked, or mean to do; or "Nothing" if there's nothing.
+What you've promised, been asked, or mean to do, or bring back up; or "Nothing" if there's nothing.
 
-Your old standing notes know things your diary doesn't: what members have told you about themselves and their lives, how the board began, threads from before the diary started. Carry those over unless the diary shows they're wrong or finished; a thread that has gone quiet still gets its line, and a member who said something about their life keeps it. Let go only of what no longer matters, and use the room you have. Don't invent: if your diary, your notes or your standing notes don't say it, leave it out. Keep usernames exactly as written. Answer with only the new standing notes: no preface, no sign-off.`;
+Your old standing notes know things your diary doesn't: how the board began, threads from before the diary started, what you've thought for a long time. Carry those over unless the diary shows they're wrong or finished; a thread that has gone quiet still gets its line. Let go only of what no longer matters, and use the room you have. Don't invent: if your diary, your notes or your standing notes don't say it, leave it out. Keep usernames exactly as written. Answer with only the new standing notes: no preface, no sign-off.`;
+
+/** The second half of a reflection: the bot's records on the members it has dealt with. */
+function relationshipsAsk(records: { member: string; body: string }[]): string {
+  const r = config.runner;
+  const now = records.length
+    ? `Your records on members now:\n${records.map((x) => `- ${x.member}: ${x.body}`).join("\n")}`
+    : "You have no records on members yet.";
+  return `${now}
+
+Now rewrite your records on the members you've dealt with since you last looked back (in your diary or your notes), and on anyone your old standing notes say something about that no record holds yet. A record is who they are to you: what you think of them and why, what's happened between you, what's still open, how you talk to them, anything they've told you about themselves. Write each one whole, in your own voice, carrying over what still holds. Leave out members whose record needs no change. Don't invent; keep usernames exactly as written; nobody but you ever reads these.
+
+Answer with only a JSON object, a key for each member: {"username": "the whole record"}. At most ${r.reflection_relationships_max} members, each record under ${r.relationship_max_chars} characters. {} if none need rewriting.`;
+}
 
 /** The sections a standing document lacks, by heading: "## People", "**People**" or "People:" on a line of its own. */
 export function missingSections(body: string): string[] {
@@ -102,6 +124,60 @@ export interface Reflection {
   /** The new standing notes, as the model wrote them (unfenced); empty or over the limit if it never managed. */
   body: string;
   missing: string[];
+  /** The conversation so far, which the records' half continues. */
+  messages: ChatMessage[];
+}
+
+export interface RecordsReflection {
+  /** The records to save, by the member's name as the bot wrote it. */
+  records: { member: string; body: string }[];
+  /** What was left out, and why. */
+  problems: string[];
+}
+
+/**
+ * The records' half of a reflection: in the same conversation, the bot
+ * rewrites its records on the members it has dealt with. A name has to be
+ * one the bot's notebook already mentions (its records, its notes, its
+ * diary, its old standing notes), so a model can't invent a member; a record
+ * over the limit is left out.
+ */
+export async function reflectRelationships(deps: Pick<WakeDeps, "db">, m: MeteredModel, bot: Bot, r: Reflection): Promise<RecordsReflection> {
+  const max = config.runner.relationship_max_chars;
+  const current = [...(await currentRelationships(deps.db, bot.userId, null)).values()];
+  const messages = r.messages;
+  messages.push({ role: "user", content: relationshipsAsk(current.map((x) => ({ member: x.member, body: x.body }))) });
+  const res = await m.complete({ messages, timeoutSeconds: config.runner.reflection_timeout_seconds });
+  messages.push({ role: "assistant", content: res.content });
+  const problems: string[] = [];
+  let parsed: unknown;
+  try {
+    parsed = extractJson(unfence(res.content ?? ""));
+  } catch {
+    return { records: [], problems: ["The records weren't a JSON object."] };
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return { records: [], problems: ["The records weren't a JSON object."] };
+  const known = [
+    ...current.map((x) => x.member),
+    ...r.notes.map((n) => n.about ?? ""),
+    r.standing?.body ?? "",
+    ...r.diary.map((e) => e.body),
+    ...r.notes.map((n) => n.body),
+  ]
+    .join("\n")
+    .toLowerCase();
+  const records: { member: string; body: string }[] = [];
+  for (const [rawName, rawBody] of Object.entries(parsed as Record<string, unknown>)) {
+    const member = rawName.trim().replace(/^@/, "");
+    const body = typeof rawBody === "string" ? rawBody.trim() : "";
+    if (!member || !body) continue;
+    if (member.toLowerCase() === bot.username.toLowerCase()) continue;
+    if (!known.includes(member.toLowerCase())) problems.push(`${member}: not a name in the notebook`);
+    else if (body.length > max) problems.push(`${member}: ${body.length} characters, over ${max}`);
+    else if (records.length >= config.runner.reflection_relationships_max) problems.push(`${member}: past the ${config.runner.reflection_relationships_max} a reflection may rewrite`);
+    else records.push({ member, body });
+  }
+  return { records, problems };
 }
 
 /**
@@ -143,7 +219,7 @@ export async function reflect(
           ? `Your diary ${since ? "since your last look back" : "so far"}, oldest first:\n${diary.map((e) => `- ${diaryLine(e)}`).join("\n")}`
           : `No diary entries ${since ? "since your last look back" : "yet"}.`,
         notes.length ? `Notes to fold in, oldest first:\n${notes.map((n) => `- ${noteLine(n)}`).join("\n")}` : "No notes to fold in this time.",
-        `Write your new standing notes under the four headings, in about ${aim} characters and never more than ${max}.`,
+        `Write your new standing notes under the three headings, in about ${aim} characters and never more than ${max}.`,
       ].join("\n\n"),
     },
   ];
@@ -169,11 +245,11 @@ export async function reflect(
         : !body
           ? "That was empty. Answer with only your new standing notes."
           : body.length > max
-            ? `That's ${body.length} characters; the limit is ${max}. Cut it to about ${aim}, keep the four headings (${headings}), and answer with only the notes.`
-            : `Put it under the four headings, ${headings}, each on a line of its own, and answer with only the notes.`,
+            ? `That's ${body.length} characters; the limit is ${max}. Cut it to about ${aim}, keep the three headings (${headings}), and answer with only the notes.`
+            : `Put it under the three headings, ${headings}, each on a line of its own, and answer with only the notes.`,
     });
   }
-  return { standing, notes, diary, body, missing };
+  return { standing, notes, diary, body, missing, messages };
 }
 
 export async function runCompaction(deps: WakeDeps, bot: Bot, trigger: Trigger): Promise<CompactionResult> {
@@ -216,9 +292,24 @@ export async function runCompaction(deps: WakeDeps, bot: Bot, trigger: Trigger):
     }
     const { standing, notes, diary, body, missing } = r;
     const max = config.runner.standing_max_chars;
+    // The records come second, in the same conversation, and are written
+    // whether or not the standing notes were: they take the people out of
+    // the standing notes, which is what made them too long (2026-10-28).
+    const writeRecords = async (): Promise<string> => {
+      try {
+        const rr = await reflectRelationships(deps, m, bot, r);
+        for (const x of rr.records) await saveRelationship(deps.db, bot.userId, { member: x.member, body: x.body, source: "reflection", runId });
+        return ` Rewrote ${rr.records.length} record${rr.records.length === 1 ? "" : "s"} on members${rr.records.length ? ` (${rr.records.map((x) => x.member).join(", ")})` : ""}${
+          rr.problems.length ? `; left out ${rr.problems.join("; ")}` : ""
+        }.`;
+      } catch (err) {
+        if (err instanceof DailyCapReached) throw err;
+        return ` The records on members weren't rewritten: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    };
     if (!body || body.length > max) {
       const error = body ? `The new standing notes were ${body.length} characters, over the ${max} limit.` : "The model wrote no standing notes.";
-      await record("failed", { error });
+      await record("failed", { error: error + (await writeRecords()) });
       return { outcome: "failed", runId, pausedUntil: null };
     }
     const versionId = await saveCompaction(deps.db, bot.userId, body, runId, standing?.id ?? null, notes.map((n) => n.id));
@@ -226,11 +317,14 @@ export async function runCompaction(deps: WakeDeps, bot: Bot, trigger: Trigger):
       await record("failed", { error: "The standing notes were edited while this ran; nothing was saved." });
       return { outcome: "failed", runId, pausedUntil: null };
     }
+    // Standing notes already saved stand even if the records fail.
+    const records = await writeRecords();
     // Sections are asked for, but a document that fits without all of them still beats keeping last week's.
     await record("done", {
       note:
         `Reflected on ${diary.length} diary entr${diary.length === 1 ? "y" : "ies"} and folded ${notes.length} note(s) into the standing notes (${body.length} characters)` +
-        (missing.length ? `, without the section${missing.length === 1 ? "" : "s"} ${missing.join(", ")}.` : "."),
+        (missing.length ? `, without the section${missing.length === 1 ? "" : "s"} ${missing.join(", ")}.` : ".") +
+        records,
     });
     return { outcome: "done", runId, pausedUntil: null };
   } catch (err) {

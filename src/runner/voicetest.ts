@@ -81,7 +81,7 @@ export async function runVoiceTest(deps: VoiceTestDeps, input: VoiceTestInput): 
       const missing = input.sides!.filter((n) => !parts.sides.some((s) => s.name.toLowerCase() === n.toLowerCase()));
       throw new Error(`${bot.name} has no side called ${missing.map((n) => `"${n}"`).join(" or ")}. Its sides: ${parts.sides.map((s) => s.name).join(", ") || "none"}.`);
     }
-    const sides: (Side | null)[] = chosen.length ? chosen : [null];
+    const sides: (Side | null)[] = chosen.length ? chosen : [parts.length];
     for (const scenario of input.scenarios) {
       for (const side of sides) {
         for (let i = 0; i < input.repeat; i++) {
@@ -182,10 +182,10 @@ function row(bot: string, label: string, these: Sample[], tolerance: number): st
   )} | ${ok.filter((s) => s.flags.length).length} |`;
 }
 
-/** The everyday side: the one with the most weight. */
+/** The everyday side: the one with the most weight, or the persona's stated length. */
 function everyday(persona: string): Side | null {
-  const { sides } = parsePersona(persona);
-  return sides.length ? sides.reduce((a, b) => (b.weight > a.weight ? b : a)) : null;
+  const { sides, length } = parsePersona(persona);
+  return sides.length ? sides.reduce((a, b) => (b.weight > a.weight ? b : a)) : length;
 }
 
 function report(input: VoiceTestInput, samples: Sample[], stopped: string | null, at: Date): string {

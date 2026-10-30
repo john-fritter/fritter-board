@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { issueBotToken } from "../src/auth/bot-tokens.js";
-import { parsePublicUrl } from "../src/config.js";
+import { config, parsePublicUrl } from "../src/config.js";
 import { insertUser } from "../src/forum/accounts.js";
 import { sendNewMessage } from "../src/forum/pms.js";
 import { createThread, reply } from "../src/forum/threads.js";
@@ -14,11 +14,11 @@ import { httpBoard } from "../src/runner/board.js";
 import { runDryVisits } from "../src/runner/dryvisit.js";
 import { loadPatterns, measurePost } from "../src/runner/measure.js";
 import type { ChatModel, ChatRequest, ChatResponse } from "../src/runner/model.js";
-import { parsePersona, personaPrompt, pickSide, rollWords, sideText, SIDE_WAY_OUT } from "../src/runner/persona.js";
+import { parsePersona, personaMoods, personaPrompt, pickSide, rollWords, sideText, SIDE_WAY_OUT } from "../src/runner/persona.js";
 import { botByUsername, modelCallsLastDay, writesLastDay } from "../src/runner/store.js";
 import { loadScenarios } from "../src/runner/voice.js";
 import { runVoiceTest } from "../src/runner/voicetest.js";
-import { runWake, type WakeDeps } from "../src/runner/wake.js";
+import { moodFromNote, ownPostsText, runWake, type WakeDeps } from "../src/runner/wake.js";
 import { ORIGIN, setup, testDatabaseUrl } from "./support.js";
 
 // The voice plan's chunk 1: personas with a stance and sides, the side and
@@ -105,11 +105,13 @@ function unit() {
   assert.equal(r.members.find((m) => m.name === "Ann")!.quotePraise, 0.5);
   assert.equal(measure([post(2, "Ann", '[quote="John"]a[/quote]\nThe sharpest.')], loadPhrases(), { source: "t", boards: ["News"] }).allBots.quotePraise, 0, "no praise list, no count");
 
-  // Every cast persona parses, and has a stance and sides.
-  for (const name of ["mercurio", "jake", "hapax", "magpie", "captain-boday", "penny", "blackbird86", "kardashev", "sexton", "bickerstaff"]) {
-    const d = parsePersona(readFileSync(path.join(ROOT, "personas", `${name}.md`), "utf-8"));
+  // Every cast persona parses, with moods and no sides (the agents rework, 2026-10-27).
+  for (const name of ["jake", "magpie", "captain-boday", "penny", "blackbird86", "kardashev", "sexton", "bickerstaff", "tally", "moth"]) {
+    const text = readFileSync(path.join(ROOT, "personas", `${name}.md`), "utf-8");
+    const d = parsePersona(text);
     assert.deepEqual(d.problems, [], name);
-    assert.ok(d.stance && d.sides.length >= 3, name);
+    assert.equal(d.sides.length, 0, name);
+    assert.ok(personaMoods(text).length >= 3, name);
   }
   assert.ok(loadScenarios().some((s) => s.name === "praise") && loadScenarios().some((s) => s.name === "games"), "the archive scenarios");
 }
@@ -334,6 +336,34 @@ async function integration() {
   assert.match(report, /Short and sweet, as asked for here\./);
   assert.match(report, /Its note: Done\./);
 
+  // As a newcomer: its draft, a stated length, and none of the bot's own memory.
+  await pool.query("INSERT INTO bots.notes (user_id, body) VALUES ($1, 'A private thought.')", [botId]);
+  model.script((req) => {
+    const all = JSON.stringify(req.messages);
+    assert.match(systemText(req), /You are moth\./);
+    assert.doesNotMatch(systemText(req), /20-60 words/, "the length stays out of the system prompt");
+    assert.match(all, /Keep each post or message this visit to about \d+ words, not counting what you quote\./);
+    assert.match(all, /Your mood this visit: (calm|restless)\./);
+    assert.doesNotMatch(all, /A private thought|Your own latest posts|standing notes now/);
+    return say("Looked around.\nMood: curious");
+  });
+  await pool.query("DELETE FROM read_markers");
+  const fresh = await runDryVisits(
+    { ...deps, log: () => {} },
+    {
+      bots: [dryBot],
+      apiKey: "sk-test",
+      sides: "pick",
+      personas: new Map([["Testbot", "You are moth.\n\n## Length\n20-60 words\n\n## Your moods\n- calm\n- restless"]]),
+      personaSource: "moth's draft",
+      briefSource: "as bots get it now",
+      fresh: true,
+    }
+  );
+  assert.equal(model.steps.length, 0);
+  assert.match(fresh, /Its note: Looked around\./);
+  assert.match(fresh, /\| Testbot \| length \| \d+ \|/, "the stated length shows where a side would");
+
   // ── The voice test ──
   const asked: number[] = [];
   const fake: ChatModel = {
@@ -397,8 +427,49 @@ async function integration() {
   await pool.end();
 }
 
+// The agents rework (2026-10-27): moods listed in a persona, the mood a bot
+// names at the end of a visit, and its own posts as it's shown them.
+function agents() {
+  assert.deepEqual(personaMoods("Core.\n\n## Your moods\n\nYou come in one of a few moods:\n\n- cheerful,\n* sulking.\n\n## The feel of it\n\n- not a mood"), [
+    "cheerful",
+    "sulking",
+  ]);
+  assert.deepEqual(personaMoods("## Moods\n- calm"), ["calm"]);
+  assert.deepEqual(personaMoods(PERSONA), [], "no moods heading, no moods");
+  // Every drafted brief lists its moods in the form the runner reads.
+  const dir = path.join(ROOT, "drafts/voice/personas");
+  for (const file of readdirSync(dir).filter((f) => f.endsWith(".md"))) {
+    const moods = personaMoods(readFileSync(path.join(dir, file), "utf8"));
+    assert.ok(moods.length >= 3, `${file} lists its moods`);
+  }
+
+  // A stated length without sides: out of the system prompt, stated alone.
+  const lengthy = parsePersona("Core.\n\n## Length\n\nAbout 20-120 words.\n\n## Your moods\n\n- calm");
+  assert.deepEqual(lengthy.problems, []);
+  assert.deepEqual([lengthy.length?.minWords, lengthy.length?.maxWords], [20, 120]);
+  assert.equal(personaPrompt("Core.\n\n## Length\n\nAbout 20-120 words.\n\n## Your moods\n\n- calm"), "Core.\n\n## Your moods\n\n- calm");
+  assert.equal(sideText(lengthy.length!, 45), "Keep each post or message this visit to about 45 words, not counting what you quote.");
+  assert.deepEqual(parsePersona("Core.\n## Length\nshort").problems, ['"## Length" needs a range like "20-120 words".']);
+  assert.equal(parsePersona(PERSONA).length, null);
+
+  assert.equal(moodFromNote("Read two threads, replied to Dan.\nMood: smug, Dan walked into it"), "smug, Dan walked into it");
+  assert.equal(moodFromNote("Did things.\n**Mood:** tired"), "tired");
+  assert.equal(moodFromNote("mood: first\nmore\nMood: second"), "second", "the last one");
+  assert.equal(moodFromNote("Read a thread and left."), null);
+  assert.equal(moodFromNote(null), null);
+  assert.equal(moodFromNote(`Mood: ${"x".repeat(500)}`)!.length <= config.runner.mood_max_chars, true, "clipped");
+
+  assert.equal(ownPostsText([]), "");
+  const text = ownPostsText([
+    { post_id: 9, thread_id: 3, thread: "Bridges", board: "general", at: "2026-10-20T12:00:00Z", body: "First line.\nSecond line." },
+  ]);
+  assert.match(text, /^Your own latest posts, newest first/);
+  assert.match(text, /in "Bridges" \(thread 3\), 24 characters:\n {4}First line\.\n {4}Second line\./);
+}
+
 async function main() {
   unit();
+  agents();
   await integration();
 }
 

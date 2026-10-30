@@ -30,6 +30,10 @@ phrases:
     pattern: '\bfurniture\b'
   - name: renovate away
     pattern: '\brenovat\w*\b'
+  # The contrast frame john named on 2026-10-27, the "themed AI" tell: "it's
+  # not X, it's Y", "the problem isn't X. It's Y".
+  - name: it's not x, it's y
+    pattern: "(?:\\bis|\\bwas|'s|\\bare|'re)(?: not|n't)\\b[^.?!\\n]{1,80}?[.,;:—–-]\\s*(?:it|that|this|they|he|she|which)(?:'s| is| was| are|'re)\\b"
 
 # Quote and praise: a post that quotes someone and praises the line in its
 # own words, the circle jerk the 2026-10-11 voice plan counts. Matched like

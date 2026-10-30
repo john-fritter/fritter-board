@@ -4,7 +4,7 @@ import { BRIEF_TITLES } from "../runner/briefs.js";
 import { config } from "../config.js";
 import type { Page } from "../lib/pagination.js";
 import type { DiaryEntry } from "../runner/diary.js";
-import type { Note, Standing } from "../runner/memory.js";
+import type { Mood, Note, Relationship, Standing } from "../runner/memory.js";
 import { EFFORTS, type SettingsInput } from "../runner/settings.js";
 import type { Bot } from "../runner/store.js";
 import { Crumbs, ErrorNote, Pagination, Time } from "./components.js";
@@ -246,6 +246,9 @@ export interface BotPageProps {
   notes: { notes: Note[]; total: number };
   /** The newest diary entries, newest first. */
   diary: DiaryEntry[];
+  mood: Mood | null;
+  /** How many members it keeps a record on. */
+  records: number;
   log: LogEntry[];
   settings: Required<SettingsInput>;
   settingsError?: string | null;
@@ -431,6 +434,26 @@ export function BotPage(props: BotPageProps) {
             </a>
           </div>
           <p class="hint">Wake, compact and moderate happen at the runner's next tick, within {config.runner.tick_seconds} seconds.</p>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2 class="panel-head">Mood and records</h2>
+        <div class="panel-body">
+          <p>
+            {props.mood ? (
+              <>
+                {props.mood.mood} <span class="meta">({moodSource(props.mood)}, <Time d={props.mood.createdAt} />)</span>
+              </>
+            ) : (
+              <span class="empty">No mood yet.</span>
+            )}
+          </p>
+          <p>
+            <a href={ctx.url(`${base(bot)}/people`)}>
+              Mood history and {props.records} {props.records === 1 ? "record" : "records"} on members
+            </a>
+          </p>
         </div>
       </section>
 
@@ -799,6 +822,148 @@ export function StandingPage(props: { ctx: PageCtx; bot: Bot; versions: Standing
               </li>
             ))}
           </ul>
+        </div>
+      </section>
+    </Layout>
+  );
+}
+
+// ── Mood and records ───────────────────────────────────────────────────────
+
+function moodSource(m: Mood): string {
+  return m.source === "bot" ? "its own" : m.source === "drift" ? "drifted" : "set by the admin";
+}
+
+function recordSource(r: Relationship): string {
+  return r.source === "visit" ? "on a visit" : r.source === "reflection" ? "in its reflection" : `by ${r.createdBy ?? "the admin"}`;
+}
+
+export interface PeoplePageProps {
+  ctx: PageCtx;
+  bot: Bot;
+  mood: Mood | null;
+  moods: Mood[];
+  records: Relationship[];
+  /** The member whose versions are shown, or "". */
+  member: string;
+  history: Relationship[];
+  saved?: string | null;
+  error?: string | null;
+  draft?: { member: string; body: string };
+}
+
+export function PeoplePage(props: PeoplePageProps) {
+  const { ctx, bot } = props;
+  const peopleUrl = `${base(bot)}/people`;
+  return (
+    <Layout ctx={ctx} title={`${bot.username}'s mood and records · Bots`}>
+      {trail(ctx, bot, "Mood and records")}
+      {props.saved && (
+        <p class="notice" role="status">
+          {props.saved}
+        </p>
+      )}
+      <ErrorNote message={props.error} />
+
+      <section class="panel">
+        <h1 class="panel-head">{bot.username}'s mood</h1>
+        <div class="panel-body">
+          <p>{props.mood ? props.mood.mood : <span class="empty">No mood yet.</span>}</p>
+          <form method="post" action={ctx.url(`${base(bot)}/mood`)} class="inline-fields">
+            <label>
+              Set its mood
+              <input type="text" name="mood" maxlength={config.runner.mood_max_chars} placeholder="how it feels, and why" />
+            </label>
+            <button type="submit">Set</button>
+          </form>
+          <p class="hint">
+            The bot names its mood at the end of each visit; now and then the runner swaps in one its persona lists. The next visit opens with
+            the newest.
+          </p>
+          {props.moods.length > 0 && (
+            <ul class="recent-posts">
+              {props.moods.map((m) => (
+                <li>
+                  <span class="meta">
+                    <Time d={m.createdAt} /> · {moodSource(m)}
+                  </span>
+                  <div>{m.mood}</div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </section>
+
+      {props.member && (
+        <section class="panel">
+          <h2 class="panel-head">
+            Its record on {props.member}: {props.history.length} {props.history.length === 1 ? "version" : "versions"}
+          </h2>
+          <div class="panel-body">
+            {props.history.length === 0 && <p class="empty">No record on {props.member}.</p>}
+            <ul class="recent-posts">
+              {props.history.map((r, i) => (
+                <li>
+                  <details open={i === 0}>
+                    <summary>
+                      Version {r.id}
+                      {i === 0 && " (current)"} · <Time d={r.createdAt} /> · {recordSource(r)} · {r.body.length} characters
+                    </summary>
+                    <div class="pre-text">{r.body}</div>
+                  </details>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
+      )}
+
+      <section class="panel">
+        <h2 class="panel-head">Its records on members ({props.records.length})</h2>
+        <div class="panel-body">
+          {props.records.length === 0 ? (
+            <p class="empty">No records yet.</p>
+          ) : (
+            <ul class="recent-posts">
+              {props.records.map((r) => (
+                <li>
+                  <details>
+                    <summary>
+                      {r.member} · <Time d={r.createdAt} /> · {recordSource(r)} · {r.body.length} characters
+                    </summary>
+                    <form method="post" action={ctx.url(`${base(bot)}/records`)} class="compose">
+                      <input type="hidden" name="member" value={r.member} />
+                      <textarea name="body" rows={6} maxlength={config.runner.relationship_max_chars} aria-label={`Record on ${r.member}`}>
+                        {r.body}
+                      </textarea>
+                      <div class="form-actions">
+                        <button type="submit">Save as a new version</button>{" "}
+                        <a href={ctx.url(`${peopleUrl}?member=${encodeURIComponent(r.member)}`)}>Versions</a>
+                      </div>
+                    </form>
+                  </details>
+                </li>
+              ))}
+            </ul>
+          )}
+          <h3>A record on someone else</h3>
+          <form method="post" action={ctx.url(`${base(bot)}/records`)} class="compose">
+            <label>
+              Member
+              <input type="text" name="member" value={props.draft?.member ?? ""} />
+            </label>
+            <textarea name="body" rows={6} maxlength={config.runner.relationship_max_chars} aria-label="Record">
+              {props.draft?.body ?? ""}
+            </textarea>
+            <div class="form-actions">
+              <button type="submit">Save</button>
+            </div>
+          </form>
+          <p class="hint">
+            A record is the bot's whole view of a member, at most {config.runner.relationship_max_chars} characters. It comes with any thread
+            the member is in. The bot rewrites it on a visit or in its weekly reflection.
+          </p>
         </div>
       </section>
     </Layout>

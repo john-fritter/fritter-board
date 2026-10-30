@@ -60,7 +60,12 @@ export interface RecentPost {
 }
 
 /** A member's latest posts, limited to boards the viewer can see. */
-export async function recentPosts(ctx: ForumContext, viewer: Viewer | null, userId: number): Promise<RecentPost[]> {
+export async function recentPosts(
+  ctx: ForumContext,
+  viewer: Viewer | null,
+  userId: number,
+  limit: number = config.pagination.profile_recent_posts
+): Promise<RecentPost[]> {
   const { rows } = await ctx.pool.query<{
     id: number;
     thread_id: number;
@@ -78,7 +83,7 @@ export async function recentPosts(ctx: ForumContext, viewer: Viewer | null, user
         AND ${visibleBoardsSql(viewer)}
       ORDER BY p.id DESC
       LIMIT $2`,
-    [userId, config.pagination.profile_recent_posts]
+    [userId, limit]
   );
   return rows.map((r) => ({
     postId: r.id,

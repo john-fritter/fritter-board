@@ -67,6 +67,9 @@ import {
  *                                           a whole visit by each bot on the live board, on VAR's key,
  *                                           over a look-only connection: what it would have posted, in a
  *                                           Markdown report on stdout; the board gets nothing
+ *       --as NAME                           each visit as NAME, a member with no account yet: its
+ *                                           draft DIR/NAME.md, and none of the bot's own memory
+ *       --model MODEL[@EFFORT]              on this model (and effort) instead of the bot's own
  *   npm run runner -- backfill-diary [--write] [<bot>...]
  *                                           the diary entries the past visits still in bots.runs would
  *                                           have written, printed; with --write, saved, dated at each
@@ -343,10 +346,12 @@ async function voiceTest(args: string[]): Promise<void> {
 }
 
 const DRY_VISIT_USAGE =
-  "Usage: npm run runner -- dry-visit [--key-env VAR] [--drafts DIR] [--brief FILE] [--side NAME | --each-side] <bot> [<bot>...]";
+  "Usage: npm run runner -- dry-visit [--key-env VAR] [--drafts DIR] [--brief FILE] [--side NAME | --each-side] [--as NAME] [--model MODEL[@EFFORT]] <bot> [<bot>...]";
 
 async function dryVisit(args: string[]): Promise<void> {
   let sides = "pick";
+  let as: string | null = null;
+  let model: { model: string; effort: (typeof EFFORTS)[number] | undefined } | null = null;
   const o = testOptions(args, DRY_VISIT_USAGE, {
     "--side": (v) => {
       sides = v!;
@@ -354,13 +359,32 @@ async function dryVisit(args: string[]): Promise<void> {
     "--each-side": () => {
       sides = "each";
     },
+    "--as": (v) => {
+      as = v!;
+    },
+    "--model": (v) => {
+      const [m, e] = v!.split("@");
+      if (!m || (e !== undefined && !(EFFORTS as readonly string[]).includes(e))) throw new Error(`--model is vendor/model or vendor/model@effort, an effort being one of ${EFFORTS.join(", ")}.`);
+      model = { model: m, effort: e as (typeof EFFORTS)[number] | undefined };
+    },
   });
+  // Set in the handlers above, which TypeScript can't see.
+  const newcomer = as as string | null;
+  const override = model as { model: string; effort: (typeof EFFORTS)[number] | undefined } | null;
+  if (newcomer && !o.drafts) throw new Error(`--as reads its persona from --drafts. ${DRY_VISIT_USAGE}`);
   const url = process.env["RUNNER_DATABASE_URL"] ?? fail("RUNNER_DATABASE_URL is required (the fritter_bots role).");
   const mcpUrl = process.env["MCP_URL"] ?? "http://127.0.0.1:3101/mcp";
   const pool = createRunnerPool(url);
   try {
-    const bots = await namedBots(pool, args);
-    const drafts = draftPersonas(o.drafts, bots);
+    let bots = await namedBots(pool, args);
+    if (override) bots = bots.map((b) => ({ ...b, model: override.model, reasoningEffort: override.effort ?? b.reasoningEffort, fallbackModels: [] }));
+    let drafts = draftPersonas(o.drafts, bots);
+    if (newcomer) {
+      const file = path.join(o.drafts!, `${personaSlug(newcomer)}.md`);
+      if (!existsSync(file)) throw new Error(`There's no ${file} for --as ${newcomer}.`);
+      const text = readFileSync(file, "utf-8").trim();
+      drafts = new Map(bots.map((b) => [b.username, text]));
+    }
     const brief = o.brief ? { text: readFileSync(o.brief, "utf-8").trim(), source: `from ${o.brief}` } : null;
     const summaryKey = process.env[config.runner.summary_key_env]?.trim();
     const report = await runDryVisits(
@@ -381,9 +405,12 @@ async function dryVisit(args: string[]): Promise<void> {
         apiKey: o.key,
         sides,
         personas: drafts,
-        personaSource: o.drafts ? `from ${o.drafts} where there's a draft (${[...drafts.keys()].join(", ") || "none"}), otherwise as set` : "as set",
+        personaSource: newcomer
+          ? `${newcomer}'s draft from ${o.drafts}, as a newcomer with none of the bot's memory${override ? `, on ${override.model}${override.effort ? ` at ${override.effort}` : ""}` : ""}`
+          : `${o.drafts ? `from ${o.drafts} where there's a draft (${[...drafts.keys()].join(", ") || "none"}), otherwise as set` : "as set"}${override ? `; on ${override.model}${override.effort ? ` at ${override.effort}` : ""}` : ""}`,
         ...(brief ? { memberBrief: brief.text } : {}),
         briefSource: brief?.source ?? "as bots get it now",
+        ...(newcomer ? { fresh: true } : {}),
       }
     );
     await printAll(report);

@@ -293,3 +293,123 @@ export function memoryText(standing: string | null, recent: Note[], diary: strin
   );
   return lines.join("\n");
 }
+
+// ── Moods ──────────────────────────────────────────────────────────────────
+
+export type MoodSource = "bot" | "drift" | "admin";
+
+export interface Mood {
+  id: number;
+  mood: string;
+  source: MoodSource;
+  createdAt: Date;
+}
+
+const toMood = (r: { id: number; mood: string; source: MoodSource; created_at: Date }): Mood => ({
+  id: r.id,
+  mood: r.mood,
+  source: r.source,
+  createdAt: r.created_at,
+});
+
+/** The bot's moods, newest first. */
+export async function moodHistory(db: Db, userId: number, limit = 1): Promise<Mood[]> {
+  const { rows } = await db.query<{ id: number; mood: string; source: MoodSource; created_at: Date }>(
+    "SELECT id, mood, source, created_at FROM bots.moods WHERE user_id = $1 ORDER BY id DESC LIMIT $2",
+    [userId, limit]
+  );
+  return rows.map(toMood);
+}
+
+export async function currentMood(db: Db, userId: number): Promise<Mood | null> {
+  return (await moodHistory(db, userId, 1))[0] ?? null;
+}
+
+export async function saveMood(db: Db, userId: number, mood: string, source: MoodSource, runId: number | null): Promise<void> {
+  await db.query("INSERT INTO bots.moods (user_id, mood, source, run_id) VALUES ($1, $2, $3, $4)", [userId, mood, source, runId]);
+}
+
+// ── Relationships ──────────────────────────────────────────────────────────
+
+export type RelationshipSource = "visit" | "reflection" | "admin";
+
+export interface Relationship {
+  id: number;
+  member: string;
+  body: string;
+  source: RelationshipSource;
+  createdBy: string | null;
+  createdAt: Date;
+}
+
+interface RelationshipRow {
+  id: number;
+  member: string;
+  body: string;
+  source: RelationshipSource;
+  created_by: string | null;
+  created_at: Date;
+}
+
+const toRelationship = (r: RelationshipRow): Relationship => ({
+  id: r.id,
+  member: r.member,
+  body: r.body,
+  source: r.source,
+  createdBy: r.created_by,
+  createdAt: r.created_at,
+});
+
+/**
+ * The bot's current record on each member, by lower-cased name: on these
+ * members only, or on everyone it has one on when `names` is null.
+ */
+export async function currentRelationships(db: Db, userId: number, names: string[] | null): Promise<Map<string, Relationship>> {
+  if (names !== null && names.length === 0) return new Map();
+  const { rows } = await db.query<RelationshipRow>(
+    `SELECT DISTINCT ON (LOWER(member)) id, member, body, source, created_by, created_at
+       FROM bots.relationships
+      WHERE user_id = $1 AND ($2::text[] IS NULL OR LOWER(member) = ANY($2::text[]))
+      ORDER BY LOWER(member), id DESC`,
+    [userId, names === null ? null : names.map((n) => n.toLowerCase())]
+  );
+  return new Map(rows.map((r) => [r.member.toLowerCase(), toRelationship(r)]));
+}
+
+/** Every version of the bot's record on a member, newest first. */
+export async function relationshipHistory(db: Db, userId: number, member: string): Promise<Relationship[]> {
+  const { rows } = await db.query<RelationshipRow>(
+    `SELECT id, member, body, source, created_by, created_at FROM bots.relationships
+      WHERE user_id = $1 AND LOWER(member) = LOWER($2) ORDER BY id DESC`,
+    [userId, member]
+  );
+  return rows.map(toRelationship);
+}
+
+export async function saveRelationship(
+  db: Db,
+  userId: number,
+  r: { member: string; body: string; source: RelationshipSource; runId: number | null; createdBy?: string | null }
+): Promise<number> {
+  const { rows } = await db.query<{ id: number }>(
+    "INSERT INTO bots.relationships (user_id, member, body, source, run_id, created_by) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
+    [userId, r.member, r.body, r.source, r.runId, r.createdBy ?? null]
+  );
+  return rows[0]!.id;
+}
+
+/** Notes about a member written since the bot's record on them, newest first: what the record doesn't hold yet. */
+export async function notesSince(db: Db, userId: number, member: string, since: Date | null, limit: number): Promise<Note[]> {
+  const { rows } = await db.query<NoteRow>(
+    `SELECT ${NOTE_COLUMNS} FROM bots.notes
+      WHERE user_id = $1 AND LOWER(about) = LOWER($2) AND ($3::timestamptz IS NULL OR created_at > $3)
+      ORDER BY created_at DESC, id DESC LIMIT $4`,
+    [userId, member, since, limit]
+  );
+  return rows.map(toNote);
+}
+
+/** A record as the bot reads it: "(your record, last rewritten 2026-10-20) …". */
+export function relationshipText(r: Relationship): string {
+  return `(your record, last rewritten ${dayFormat.format(r.createdAt)}) ${r.body}`;
+}

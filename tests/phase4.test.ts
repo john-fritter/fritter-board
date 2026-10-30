@@ -117,7 +117,7 @@ async function main() {
   // ── Tools on offer ──
   const ashTools = (await a.listTools()).tools.map((t) => t.name);
   const margTools = (await m.listTools()).tools.map((t) => t.name);
-  for (const t of ["get_inbox", "list_boards", "list_threads", "read_thread", "read_article", "search", "get_user", "reply", "new_thread", "edit_post", "send_pm", "read_pms", "set_title", "list_members"]) {
+  for (const t of ["get_inbox", "list_boards", "list_threads", "read_thread", "read_article", "search", "get_user", "reply", "new_thread", "edit_post", "send_pm", "read_pms", "set_title", "list_members", "my_posts"]) {
     assert.ok(ashTools.includes(t), `members have ${t}`);
   }
   assert.ok(!ashTools.some((t) => t.startsWith("mod_")), "members aren't offered moderation");
@@ -285,6 +285,10 @@ async function main() {
   assert.deepEqual(found.articles.map((x: { fp_article_id: number }) => x.fp_article_id), [201]);
   assert.equal(found.articles[0].thread_id, articleThread);
   assert.match(await refused(a, "search", {}), /query, an author/);
+  const mine = await call(a, "my_posts");
+  assert.equal(mine.posts.length, 3, "my_posts lists your own posts");
+  assert.ok(mine.posts[0].post_id > mine.posts[2].post_id, "newest first");
+  assert.ok(mine.posts.every((p: { body: string }) => typeof p.body === "string" && p.body.length > 0), "in full");
 
   // ── Members ──
   const profile = await call(a, "get_user", { username: "dan" });
@@ -397,6 +401,8 @@ async function main() {
   assert.ok(res.text.slice(res.text.indexOf('class="panel online"')).includes(">Ash<"), "bots show in Who's online");
 
   // ── A suspended bot loses the Back Room, everywhere ──
+  const backRoomWord = (await call(a, "reply", { thread_id: secret, body: "Ash's word in the back room." })).post_id as number;
+  assert.ok((await call(a, "my_posts")).posts.some((p: { post_id: number }) => p.post_id === backRoomWord));
   await pool.query("UPDATE users SET status = 'suspended' WHERE id = $1", [ash.id]);
   await call(m, "mod_move", { thread_id: articleThread, board: "back-room", reason: "Members only" });
   const slugsNow = (await call(a, "list_boards")).flatMap((c: { boards: { slug: string }[] }) => c.boards.map((b) => b.slug));
@@ -413,6 +419,7 @@ async function main() {
   assert.equal(found.total, 0, "nor in search");
   assert.equal((await call(a, "search", { query: "fares", scope: "articles" })).articles[0].thread_id, null);
   assert.equal((await call(a, "read_article", { fp_article_id: 201 })).thread_id, null);
+  assert.ok(!JSON.stringify(await call(a, "my_posts")).includes("back room"), "nor in my_posts");
   assert.match(await refused(a, "reply", { thread_id: t2, body: "hi" }), /Only members/, "suspended bots can't post");
   assert.match(await refused(a, "send_pm", { to: "Dan", body: "hi" }), /Only members/);
   assert.equal((await call(a, "read_thread", { thread_id: t2 })).thread.thread_id, t2, "but can still read");

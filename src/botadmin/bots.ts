@@ -4,7 +4,18 @@ import { asAdmin } from "../forum/permissions.js";
 import type { Viewer } from "../forum/types.js";
 import { paginate, type Page } from "../lib/pagination.js";
 import { searchDiary } from "../runner/diary.js";
-import { currentStanding, type Note, type Standing } from "../runner/memory.js";
+import {
+  currentRelationships,
+  currentStanding,
+  moodHistory,
+  relationshipHistory,
+  saveMood,
+  saveRelationship,
+  type Mood,
+  type Note,
+  type Relationship,
+  type Standing,
+} from "../runner/memory.js";
 import {
   applyColumns,
   parseSettings,
@@ -236,15 +247,17 @@ export async function getBot(ctx: BotAdminCtx, viewer: Viewer | null, name: stri
   const bot = await findBot(ctx, viewer, name);
   const recent = config.pagination.bot_page_recent;
   const { rows: cfg } = await ctx.pool.query("SELECT * FROM bots.config WHERE user_id = $1", [bot.userId]);
-  const [row, standing, runs, notes, log, diary] = await Promise.all([
+  const [row, standing, runs, notes, log, diary, moods, records] = await Promise.all([
     botRow(ctx.pool, bot),
     currentStanding(ctx.pool, bot.userId),
     recentRuns(ctx.pool, bot.userId, recent),
     notesPage(ctx.pool, bot.userId, { about: "", folded: "all" }, recent, 0),
     logEntries(ctx.pool, bot.userId, recent),
     searchDiary(ctx.pool, bot.userId, "", "", recent),
+    moodHistory(ctx.pool, bot.userId, 1),
+    currentRelationships(ctx.pool, bot.userId, null),
   ]);
-  return { row, standing, runs, notes, log, diary, settings: settingsText(cfg[0]!) };
+  return { row, standing, runs, notes, log, diary, mood: moods[0] ?? null, records: records.size, settings: settingsText(cfg[0]!) };
 }
 
 // ── Settings and controls ──────────────────────────────────────────────────
@@ -405,6 +418,60 @@ export async function archiveNote(ctx: BotAdminCtx, viewer: Viewer | null, name:
     [noteId, bot.userId]
   );
   if (!rowCount) throw notFound();
+}
+
+// ── Mood and records on members ────────────────────────────────────────────
+
+/**
+ * The bot's mood, its moods before, and its records on members: current ones,
+ * or every version of one member's record when `member` is given.
+ */
+export async function listPeople(ctx: BotAdminCtx, viewer: Viewer | null, name: string, member: string | undefined) {
+  const bot = await findBot(ctx, viewer, name);
+  const who = (member ?? "").replace(/^@/, "").trim();
+  const [moods, records, history] = await Promise.all([
+    moodHistory(ctx.pool, bot.userId, config.pagination.bot_notes_per_page),
+    currentRelationships(ctx.pool, bot.userId, null),
+    who ? relationshipHistory(ctx.pool, bot.userId, who) : Promise.resolve([] as Relationship[]),
+  ]);
+  return {
+    bot,
+    moods,
+    mood: (moods[0] ?? null) as Mood | null,
+    records: [...records.values()].sort((a, b) => a.member.localeCompare(b.member)),
+    member: who,
+    history,
+  };
+}
+
+/** Sets the bot's mood by hand; its next visit opens with it. */
+export async function setMood(ctx: BotAdminCtx, viewer: Viewer | null, name: string, mood: string): Promise<void> {
+  const bot = await findBot(ctx, viewer, name);
+  const text = mood.replace(/\s+/g, " ").trim();
+  if (!text) throw invalid("Write a mood.");
+  if (text.length > config.runner.mood_max_chars) throw invalid(`A mood is at most ${config.runner.mood_max_chars} characters.`);
+  await saveMood(ctx.pool, bot.userId, text, "admin", null);
+}
+
+/** Writes a new version of the bot's record on a member, as the admin. */
+export async function saveRecord(ctx: BotAdminCtx, viewer: Viewer | null, name: string, member: string, body: string): Promise<string> {
+  const bot = await findBot(ctx, viewer, name);
+  const text = body.replace(/\r\n/g, "\n").trim();
+  if (!text) throw invalid("Write the record.");
+  if (text.length > config.runner.relationship_max_chars) {
+    throw invalid(`A record is at most ${config.runner.relationship_max_chars} characters.`);
+  }
+  const { rows } = await ctx.pool.query<{ username: string }>("SELECT username FROM users WHERE LOWER(username) = LOWER($1)", [
+    member.replace(/^@/, "").trim(),
+  ]);
+  const username = rows[0]?.username ?? null;
+  if (!username) throw invalid("No member by that name.");
+  if (username.toLowerCase() === bot.username.toLowerCase()) throw invalid("A bot keeps no record on itself.");
+  const current = (await currentRelationships(ctx.pool, bot.userId, [username])).get(username.toLowerCase());
+  if (current?.body !== text) {
+    await saveRelationship(ctx.pool, bot.userId, { member: username, body: text, source: "admin", runId: null, createdBy: viewer!.username });
+  }
+  return username;
 }
 
 // ── Role briefs ────────────────────────────────────────────────────────────

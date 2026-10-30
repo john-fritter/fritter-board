@@ -172,7 +172,7 @@ docker compose exec -T app node - 14 < /root/token-check/tokens.cjs > /root/toke
 docker compose exec -T runner node - < /root/token-check/usage.cjs > /root/token-check/usage.md
 docker compose exec -T app npx tsx scripts/bot.ts list > /root/token-check/bots.txt
 wc -l /root/token-check/*.md /root/token-check/bots.txt
-grep -c -i -E 'sk-|bearer' /root/token-check/*.md /root/token-check/bots.txt
+grep -c -E '\bsk-[A-Za-z0-9_-]{16,}|[Bb]earer [A-Za-z0-9_-]{16,}' /root/token-check/*.md /root/token-check/bots.txt
 ```
 
 The last line should print `0` for every file. If any count isn't 0, don't

@@ -80,7 +80,7 @@ EOF
 cd /srv/fritter-board
 docker compose exec -T app node - 14 < /root/token-check/failures.cjs > /root/token-check/failures.md
 wc -l /root/token-check/failures.md
-grep -c -i -E 'sk-|bearer' /root/token-check/failures.md
+grep -c -E '\bsk-[A-Za-z0-9_-]{16,}|[Bb]earer [A-Za-z0-9_-]{16,}' /root/token-check/failures.md
 ```
 
 The last line should print `0`. If it doesn't, don't send the file: say so

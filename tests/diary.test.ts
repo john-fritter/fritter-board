@@ -123,8 +123,9 @@ Two paragraphs.</｜DSML｜parameter>
   assert.equal(textToolCalls("<｜DSML｜tool_calls></｜DSML｜tool_calls>"), null, "markup with no call in it is left as text");
 
   // ── The reflection's sections ──
-  assert.deepEqual(missingSections("## People\nx\n**Threads**\ny\nPositions:\nz\n### To do\nNothing."), []);
-  assert.deepEqual(missingSections("## People\nDan.\n## Positions\nBridges."), ["Threads", "To do"]);
+  assert.deepEqual(missingSections("## Me\nx\n**Threads**\ny\n### To do\nNothing."), []);
+  assert.deepEqual(missingSections("Me:\nBridges.\n## Threads\nThe ferry."), ["To do"]);
+  assert.deepEqual(missingSections("## Memories\nBridges."), ["Me", "Threads", "To do"], "a heading that only starts with Me isn't Me");
 }
 
 main()
