@@ -765,7 +765,7 @@ async function main() {
       const first = lastText(req);
       assert.match(first, /Your mood this visit: cheerful about bridges\. Nothing in particular brought it on/, "no mood yet, so one from the persona");
       assert.match(first, /Your own latest posts, newest first: what you've been saying, and how\./);
-      assert.match(first, /- \d{4}-\d{2}-\d{2}, in "A short talk" \(thread \d+\), \d+ characters:\n {4}\[quote="Dan" post=\d+\]This is post 3/, "in full, as written");
+      assert.match(first, /- \d{4}-\d{2}-\d{2}, in "A short talk", \d+ characters:\n {4}\[quote="Dan" post=\d+\]This is post 3/, "in full, as written");
       assert.match(first, /Your records on the people whose posts or messages are waiting for you:\n- Dan: \(your record, last rewritten \d{4}-\d{2}-\d{2}\) Dan still likes bridges\./);
       assert.match(text(req, 0), /add a last line starting "Mood:"/);
       return use("update_relationship", { member: "@dan", record: "Dan says I'm wrong about the ferry. He might be right." });

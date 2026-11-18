@@ -124,6 +124,8 @@ const BoardConfigSchema = z.object({
     relationships_at_start: z.number().int().nonnegative(),
     reflection_relationships_max: z.number().int().nonnegative(),
     own_posts_shown: z.number().int().nonnegative(),
+    own_phrases_min_posts: z.number().int().min(2),
+    own_phrases_shown: z.number().int().nonnegative(),
     thread_whole_posts: z.number().int().positive(),
     summary_tail_posts: z.number().int().positive(),
     summary_max_chars: z.number().int().positive(),
