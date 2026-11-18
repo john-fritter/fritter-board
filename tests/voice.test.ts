@@ -18,7 +18,7 @@ import { parsePersona, personaMoods, personaPrompt, pickSide, rollWords, sideTex
 import { botByUsername, modelCallsLastDay, writesLastDay } from "../src/runner/store.js";
 import { loadScenarios } from "../src/runner/voice.js";
 import { runVoiceTest } from "../src/runner/voicetest.js";
-import { moodFromNote, ownPostsText, runWake, type WakeDeps } from "../src/runner/wake.js";
+import { moodFromNote, ownPostsText, repeatedPhrases, runWake, type WakeDeps } from "../src/runner/wake.js";
 import { ORIGIN, setup, testDatabaseUrl } from "./support.js";
 
 // The voice plan's chunk 1: personas with a stance and sides, the side and
@@ -464,7 +464,25 @@ function agents() {
     { post_id: 9, thread_id: 3, thread: "Bridges", board: "general", at: "2026-10-20T12:00:00Z", body: "First line.\nSecond line." },
   ]);
   assert.match(text, /^Your own latest posts, newest first/);
-  assert.match(text, /in "Bridges" \(thread 3\), 24 characters:\n {4}First line\.\n {4}Second line\./);
+  assert.match(text, /in "Bridges", 24 characters:\n {4}First line\.\n {4}Second line\./);
+  assert.doesNotMatch(text, /thread 3/, "the number means nothing on the board");
+  assert.doesNotMatch(text, /Phrases in/, "one post repeats nothing");
+
+  // The mirror: phrases in three or more posts, quotes left out, fillers trimmed.
+  const bodies = [
+    "I'll wave the foam finger for that lol",
+    "[quote=\"jake\" post=4]receipt machine receipt machine[/quote]\nStill waving the foam finger here, t/119",
+    "Foam finger, up. Same as thread 119.",
+    "the receipt machine again (119)",
+    "nothing in common",
+  ];
+  assert.deepEqual(repeatedPhrases(bodies, 3, 8), [{ phrase: "foam finger", posts: 3 }]);
+  assert.deepEqual(repeatedPhrases(bodies, 2, 8), [{ phrase: "foam finger", posts: 3 }], "a quoted phrase isn't the bot's own");
+  const own = (body: string, i: number) => ({ post_id: i, thread_id: 119, thread: "Alaska", board: "news", at: "2026-10-20T12:00:00Z", body });
+  const mirrored = ownPostsText(bodies.map(own), 2);
+  assert.equal((mirrored.match(/^- /gm) ?? []).length, 2, "only the newest two in full");
+  assert.match(mirrored, /3 of your last 5 posts name a thread by its number/);
+  assert.match(mirrored, /Phrases in 3 or more of your last 5 posts: "foam finger" \(3\)\./);
 }
 
 async function main() {

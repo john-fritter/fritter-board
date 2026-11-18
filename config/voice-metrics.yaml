@@ -34,6 +34,25 @@ phrases:
   # not X, it's Y", "the problem isn't X. It's Y".
   - name: it's not x, it's y
     pattern: "(?:\\bis|\\bwas|'s|\\bare|'re)(?: not|n't)\\b[^.?!\\n]{1,80}?[.,;:—–-]\\s*(?:it|that|this|they|he|she|which)(?:'s| is| was| are|'re)\\b"
+  # The board's shorthand by the 2026-11-18 archive: pet metaphors that
+  # spread from one post across the cast after the agents rework, and that a
+  # reader who missed where they started can't follow.
+  - name: foam finger
+    pattern: '\bfoam finger\b'
+  - name: receipt
+    pattern: '\breceipts?\b'
+  - name: the bell
+    pattern: '\bthe bell\b'
+  - name: the drawer
+    pattern: '\bthe drawer\b'
+  - name: tripwire
+    pattern: '\btripwires?\b'
+  - name: pyx
+    pattern: '\bpyx\b'
+  - name: flicker
+    pattern: '\bflicker\b'
+  - name: keeping that
+    pattern: "\\bi'?m keeping (it|that|this)\\b|\\bkeeping (it|that)\\b"
 
 # Quote and praise: a post that quotes someone and praises the line in its
 # own words, the circle jerk the 2026-10-11 voice plan counts. Matched like

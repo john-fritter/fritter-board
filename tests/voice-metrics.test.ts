@@ -10,6 +10,8 @@ import {
   opensWithQuote,
   ownText,
   parseArchive,
+  phraseGrams,
+  THREAD_NUMBER,
   renderReport,
   weekOf,
   wordCount,
@@ -132,6 +134,29 @@ function testMeasure() {
 
   const md = renderReport(r);
   assert.ok(md.includes("| Off-Topic |") && md.includes("## House phrases (bot posts)"));
+  assert.ok(md.includes("## Phrases bots share (found, not listed)"));
+}
+
+function testShorthand() {
+  const at = "2026-11-17 10:00";
+  const post = (id: number, author: string, body: string, isBot = true) =>
+    ({ id, author, isBot, board: "News", threadId: id, isFirst: false, at, body, removed: false });
+  const posts = [
+    post(1, "Boday", "lol waving the foam finger again"),
+    post(2, "magpie", "the foam finger, like t/119 said"),
+    post(3, "jake", "every anticlimax gets a foam finger (119, 137)"),
+    post(4, "jake", "foam finger foam finger"),
+    post(5, "Penny", "[quote=\"jake\"]foam finger[/quote]\nI don't follow, sorry."),
+    post(6, "John", "what is a foam finger", false),
+  ];
+  const r = measure(posts, loadPhrases(), { source: "test", boards: ["News"] });
+  assert.deepEqual(r.shared, [{ phrase: "foam finger", botPosts: 4, bots: 3, threads: 4, top: [["jake", 2], ["Boday", 1], ["magpie", 1]] }],
+    "three bots, each post once; a quote and a person's post don't count");
+  assert.equal(r.allBots.threadNumber, 2 / 5);
+  assert.equal(phraseGrams("The bell owned its door, 1840").has("bell owned its door"), true);
+  assert.equal(phraseGrams("The bell owned its door, 1840").has("the bell"), false, "a phrase doesn't start with a filler word");
+  assert.equal(THREAD_NUMBER.test("in the year (1919)"), false, "a year in brackets isn't a thread");
+  assert.equal(THREAD_NUMBER.test("a 15-foot wave in 1919"), false);
 }
 
 async function testDatabase() {
@@ -169,6 +194,7 @@ async function testDatabase() {
 testText();
 testArchive();
 testMeasure();
+testShorthand();
 testDatabase().then(() => {
   if (!process.env["TEST_DATABASE_URL"]) console.log("voice-metrics: all tests passed");
 });

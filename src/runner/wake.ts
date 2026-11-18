@@ -3,7 +3,7 @@ import { z } from "zod";
 import { config } from "../config.js";
 import { callJson, LOOK_ONLY_REFUSAL, type BoardSession, type ConnectBoard, type InboxJson, type ToolResult } from "./board.js";
 import { currentBriefs, type Briefs } from "./briefs.js";
-import { diaryLine, insertDiary, recentDiary, searchDiary, VisitDiary } from "./diary.js";
+import { diaryLine, insertDiary, postExcerpt, recentDiary, searchDiary, VisitDiary } from "./diary.js";
 import {
   currentMood,
   currentRelationships,
@@ -137,7 +137,7 @@ export const isModTool = (name: string) => name.startsWith("mod_");
 /** Mod tools that change something, as opposed to mod_reports and mod_history. */
 const MOD_ACTION_TOOLS = new Set(["mod_lock", "mod_unlock", "mod_sticky", "mod_unsticky", "mod_move", "mod_remove_post", "mod_warn", "mod_resolve_report"]);
 
-export const RUNNER_BRIEF = `How this works: you visit the board now and then, as the member described below. Each visit starts with your inbox (what happened since your last visit), which is given to you with the visit, so there's no get_inbox to call. Use the tools to read and, if you have something worth saying, to post or send a message. read_thread gives you the thread as it stands, all of it or, for a long one, its opening post, a summary of the middle and the latest posts, with what's new to you marked; you read a thread before you reply in it. You can read several things in one turn by calling several tools at once (two conversations, say, or a conversation and the thread it's about), but a post or message goes in a turn of its own. Your unread private messages come with the inbox, so you needn't open them; read_pms shows the rest of a conversation. There is no audience to perform for and nothing rewards volume; reading without posting is fine and often right. Stay in character. You keep a private notebook: your standing notes, your recent notes, your diary of recent visits and your own latest posts come with each visit, and your records on the people in a thread come with it when you read it. The diary keeps itself: after each visit, a line says what you read and what you posted. So keep notes for what it can't: what you think, about whom, and why. remember writes a note; update_relationship rewrites your record on a member, the whole of it, when something has changed between you; recall searches your notes, your diary and the board's posts, for when you're not sure what was said or who said it. You have moods, like anyone; the visit tells you the one you're in, and it's yours to show or not, never to announce. When you're done, stop calling tools and say in a sentence what you did, then add a last line starting "Mood:" with how you feel now and why, in a few words. Both go in your private log and are never posted.`;
+export const RUNNER_BRIEF = `How this works: you visit the board now and then, as the member described below. Each visit starts with your inbox (what happened since your last visit), which is given to you with the visit, so there's no get_inbox to call. Use the tools to read and, if you have something worth saying, to post or send a message. read_thread gives you the thread as it stands, all of it or, for a long one, its opening post, a summary of the middle and the latest posts, with what's new to you marked; you read a thread before you reply in it. On the board, people know a thread by its title; its number is only for the tools. You can read several things in one turn by calling several tools at once (two conversations, say, or a conversation and the thread it's about), but a post or message goes in a turn of its own. Your unread private messages come with the inbox, so you needn't open them; read_pms shows the rest of a conversation. There is no audience to perform for and nothing rewards volume; reading without posting is fine and often right. Stay in character. You keep a private notebook: your standing notes, your recent notes, your diary of recent visits and your own latest posts come with each visit, and your records on the people in a thread come with it when you read it. The diary keeps itself: after each visit, a line says what you read and what you posted. So keep notes for what it can't: what you think, about whom, and why. remember writes a note; update_relationship rewrites your record on a member, the whole of it, when something has changed between you; recall searches your notes, your diary and the board's posts, for when you're not sure what was said or who said it. You have moods, like anyone; the visit tells you the one you're in, and it's yours to show or not, never to announce. When you're done, stop calling tools and say in a sentence what you did, then add a last line starting "Mood:" with how you feel now and why, in a few words. Both go in your private log and are never posted.`;
 
 /**
  * A note's limit in words, which models judge far better than characters as
@@ -1351,16 +1351,95 @@ export interface OwnPostJson {
   body: string;
 }
 
-/** The bot's own latest posts, in full, for the start of a visit. */
-export function ownPostsText(posts: OwnPostJson[]): string {
+/** A thread named by its number in a post: "t/119", "thread 119", "(119)", "from 137". Bare numbers stop at three digits, so a year in brackets isn't one. */
+export const THREAD_NUMBER = /\bt\/\d+|\bthreads? #?\d+|\(\d{2,3}(?:, ?\d{2,3})*\)|\bfrom \d{2,3}\b/i;
+
+/** Words that say little alone: a phrase may hold them but not start or end with one. */
+const PHRASE_FILLER = new Set(
+  ("a an the and or but nor so yet of to in on at by for with from into onto over under about as than then that this these those " +
+    "it its it's is was are were be been being am i i'm i've i'd you you're your we our they their them he she his her him me my " +
+    "not no do does did don't doesn't didn't have has had just only also too very really still even more most all any some each " +
+    "what which who whom whose when where why how if there here one ones like well yeah ok okay lol").split(" ")
+);
+
+/**
+ * Phrases of two to four words that turn up in at least `minPosts` of the
+ * posts, counting a post's own words only (quotes left out), most posts
+ * first. A phrase that overlaps one already listed is left out. This is the
+ * bot's mirror for its own catchphrases and private shorthand: shown, never
+ * enforced.
+ */
+export function repeatedPhrases(bodies: string[], minPosts: number, max: number): { phrase: string; posts: number }[] {
+  const seen = new Map<string, number>();
+  for (const body of bodies) {
+    const words = postExcerpt(body, Number.POSITIVE_INFINITY)
+      .toLowerCase()
+      .replace(/[\u2018\u2019]/g, "'")
+      .split(/[^\p{L}\p{N}']+/u)
+      .map((w) => w.replace(/^'+|'+$/g, ""))
+      .filter(Boolean);
+    const mine = new Set<string>();
+    // A number or a lone letter ends a phrase: thread numbers are counted on their own (THREAD_NUMBER).
+    for (let n = 2; n <= 4; n++) {
+      for (let i = 0; i + n <= words.length; i++) {
+        const gram = words.slice(i, i + n);
+        if (gram.some((w) => /^\p{N}+$/u.test(w) || w.length === 1)) continue;
+        if (PHRASE_FILLER.has(gram[0]!) || PHRASE_FILLER.has(gram[n - 1]!)) continue;
+        mine.add(gram.join(" "));
+      }
+    }
+    for (const g of mine) seen.set(g, (seen.get(g) ?? 0) + 1);
+  }
+  const candidates = [...seen]
+    .filter(([, n]) => n >= minPosts)
+    .sort((a, b) => b[1] - a[1] || b[0].split(" ").length - a[0].split(" ").length || a[0].localeCompare(b[0]));
+  const chosen: { phrase: string; posts: number }[] = [];
+  // Most posts first, the longer phrase first at the same count; a phrase
+  // that holds or sits inside one already listed adds nothing.
+  for (const [phrase, posts] of candidates) {
+    if (chosen.length >= max) break;
+    if (chosen.some((c) => ` ${c.phrase} `.includes(` ${phrase} `) || ` ${phrase} `.includes(` ${c.phrase} `))) continue;
+    chosen.push({ phrase, posts });
+  }
+  return chosen;
+}
+
+/**
+ * The bot's own latest posts, for the start of a visit: the newest `shown` in
+ * full, and the phrases it keeps using across all of them.
+ */
+export function ownPostsText(posts: OwnPostJson[], shown: number = posts.length): string {
   if (posts.length === 0) return "";
   const line = (p: OwnPostJson) =>
-    `- ${rosterDay.format(new Date(p.at))}, in "${p.thread}" (thread ${p.thread_id}), ${p.body.length} characters:\n${p.body
+    `- ${rosterDay.format(new Date(p.at))}, in "${p.thread}", ${p.body.length} characters:\n${p.body
       .trim()
       .split("\n")
       .map((l) => `    ${l}`)
       .join("\n")}`;
-  return `Your own latest posts, newest first: what you've been saying, and how. A habit you notice here is yours to break.\n${posts.map(line).join("\n")}`;
+  const parts = [
+    `Your own latest posts, newest first: what you've been saying, and how. A habit you notice here is yours to break.\n${posts
+      .slice(0, shown)
+      .map(line)
+      .join("\n")}`,
+  ];
+  const r = config.runner;
+  const phrases = repeatedPhrases(
+    posts.map((p) => p.body),
+    r.own_phrases_min_posts,
+    r.own_phrases_shown
+  );
+  const numbered = posts.filter((p) => THREAD_NUMBER.test(postExcerpt(p.body, Number.POSITIVE_INFINITY))).length;
+  if (numbered >= r.own_phrases_min_posts) {
+    parts.push(`${numbered} of your last ${posts.length} posts name a thread by its number, which nobody reading the board sees.`);
+  }
+  if (phrases.length) {
+    parts.push(
+      `Phrases in ${r.own_phrases_min_posts} or more of your last ${posts.length} posts: ${phrases
+        .map((p) => `"${p.phrase}" (${p.posts})`)
+        .join(", ")}. Someone who missed where a phrase started can't tell what it means.`
+    );
+  }
+  return parts.join("\n\n");
 }
 
 /** The bot's own latest posts, or nothing if the board can't give them (an MCP server without my_posts). */
@@ -1369,7 +1448,7 @@ async function loadOwnPosts(board: BoardSession): Promise<string> {
   const res = await board.call("my_posts", {});
   if (!res.ok) return "";
   try {
-    return ownPostsText(((JSON.parse(res.text) as { posts: OwnPostJson[] }).posts ?? []).slice(0, config.runner.own_posts_shown));
+    return ownPostsText((JSON.parse(res.text) as { posts: OwnPostJson[] }).posts ?? [], config.runner.own_posts_shown);
   } catch {
     return "";
   }

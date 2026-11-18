@@ -263,9 +263,15 @@ runner:
   relationships_per_read: 10
   relationships_at_start: 6
   reflection_relationships_max: 15
-  # A visit opens with the bot's own latest posts, this many, in full (MCP
-  # my_posts), so it can see what it has been saying and how.
-  own_posts_shown: 20
+  # A visit opens with the bot's own latest posts (MCP my_posts, up to
+  # mcp.my_posts_items): the newest own_posts_shown in full, so it can see
+  # what it has been saying and how, and the phrases of two to four words
+  # that turn up in own_phrases_min_posts or more of all of them, at most
+  # own_phrases_shown. Twenty in full fed the bots' private shorthand back
+  # to them every visit (the 2026-11-18 archive; docs/decisions.md).
+  own_posts_shown: 8
+  own_phrases_min_posts: 3
+  own_phrases_shown: 8
   # A bot opening a thread reads all of it, up to thread_whole_posts posts,
   # before it can reply (John, 2026-10-19: a bot that saw only its unread
   # posts took another member's word for what an earlier post said). A

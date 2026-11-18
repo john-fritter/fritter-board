@@ -8,7 +8,9 @@
  * share of posts that open with a quote, how often house phrases
  * (config/voice-metrics.yaml) turn up and in how many threads, which boards
  * each member posts in, and the most posts a member made in one thread on
- * one day. Length and phrases count a post's own words only: quotes removed.
+ * one day. Since the 2026-11-18 archive, also how often a post names a thread
+ * by its number, and the phrases three or more bots share, found from the
+ * posts rather than listed (the board's shorthand). Length and phrases count a post's own words only: quotes removed.
  * Private messages aren't posts and aren't counted.
  */
 
@@ -73,6 +75,36 @@ export function opensWithQuote(body: string): boolean {
   return /^\s*\[quote\b/i.test(body);
 }
 
+/** A thread named by its number: "t/119", "thread 119", "(119)", "from 137". Bare numbers stop at three digits, so a year in brackets isn't one. */
+export const THREAD_NUMBER = /\bt\/\d+|\bthreads? #?\d+|\(\d{2,3}(?:, ?\d{2,3})*\)|\bfrom \d{2,3}\b/i;
+
+/** Words that say little alone: a phrase may hold them but not start or end with one. */
+const FILLER = new Set(
+  ("a an the and or but nor so yet of to in on at by for with from into onto over under about as than then that this these those " +
+    "it its it's is was are were be been being am i i'm i've i'd you you're your we our they their them he she his her him me my " +
+    "not no do does did don't doesn't didn't have has had just only also too very really still even more most all any some each " +
+    "what which who whom whose when where why how if there here one ones like well yeah ok okay lol").split(" ")
+);
+
+/** The phrases of two to four words in a text, each once, that don't start or end with a filler word or hold a number. */
+export function phraseGrams(text: string): Set<string> {
+  const words = text
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}']+/u)
+    .map((w) => w.replace(/^'+|'+$/g, ""))
+    .filter(Boolean);
+  const out = new Set<string>();
+  for (let n = 2; n <= 4; n++) {
+    for (let i = 0; i + n <= words.length; i++) {
+      const gram = words.slice(i, i + n);
+      if (gram.some((w) => /^\p{N}+$/u.test(w) || w.length === 1)) continue;
+      if (FILLER.has(gram[0]!) || FILLER.has(gram[n - 1]!)) continue;
+      out.add(gram.join(" "));
+    }
+  }
+  return out;
+}
+
 export function wordCount(text: string): number {
   return text.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
 }
@@ -94,6 +126,8 @@ export interface MemberRow {
   withPhrase: number;
   /** Posts that quote someone and praise the line (loadPraise). */
   quotePraise: number;
+  /** Posts that name a thread by its number ("t/119", "thread 119", "(119)"). */
+  threadNumber: number;
   /** Phrase name → posts using it, most used first. */
   phrases: [string, number][];
   /** Board name → posts, in board order. */
@@ -112,6 +146,15 @@ export interface PhraseRow {
   bots: number;
   threads: number;
   /** The bots using it most, with counts. */
+  top: [string, number][];
+}
+
+/** A phrase several bots have taken up: found from the posts, not from a list. */
+export interface SharedRow {
+  phrase: string;
+  botPosts: number;
+  bots: number;
+  threads: number;
   top: [string, number][];
 }
 
@@ -138,6 +181,8 @@ export interface VoiceReport {
   allBots: MemberRow;
   everyone: MemberRow;
   phrases: PhraseRow[];
+  /** Phrases of two to four words in posts by shared_min_bots or more bots, most posts first. */
+  shared: SharedRow[];
   boards: BoardRow[];
   /** Bot posts week by week, to show drift. */
   weeks: WeekRow[];
@@ -168,6 +213,8 @@ interface Measured {
   words: number;
   phrases: string[];
   praise: boolean;
+  threadNumber: boolean;
+  grams: Set<string>;
 }
 
 function measurePost(post: MetricPost, phrases: Phrase[], praise: Phrase[]): Measured {
@@ -178,6 +225,8 @@ function measurePost(post: MetricPost, phrases: Phrase[], praise: Phrase[]): Mea
     words: wordCount(text),
     phrases: phrases.filter((p) => p.pattern.test(text)).map((p) => p.name),
     praise: /\[quote\b/i.test(post.body) && praise.some((p) => p.pattern.test(text)),
+    threadNumber: THREAD_NUMBER.test(text),
+    grams: phraseGrams(text),
   };
 }
 
@@ -213,6 +262,7 @@ function memberRow(name: string, isBot: boolean, ms: Measured[], boardOrder: str
     question: share((m) => ownText(m.post.body).includes("?")),
     withPhrase: share((m) => m.phrases.length > 0),
     quotePraise: share((m) => m.praise),
+    threadNumber: share((m) => m.threadNumber),
     phrases: byCount(phrases),
     boards: boardOrder.filter((b) => boards.has(b)).map((b) => [b, boards.get(b)!]),
     maxThreadDay: Math.max(0, ...threadDays.values()),
@@ -229,6 +279,35 @@ export interface MeasureOptions {
   boards: string[];
   /** The praise patterns, for the quote-and-praise count (loadPraise); none counts nothing. */
   praise?: Phrase[];
+  /** A phrase is shared once this many bots use it; default 3. */
+  sharedMinBots?: number;
+  /** At most this many shared phrases; default 20. */
+  sharedMax?: number;
+}
+
+/**
+ * The phrases several bots have picked up from each other: two to four words
+ * in posts by at least `minBots` bots, most bot posts first. A phrase that
+ * overlaps one already listed with at least as many posts is left out.
+ */
+function sharedPhrases(botMs: Measured[], minBots: number, max: number): SharedRow[] {
+  const users = new Map<string, Measured[]>();
+  for (const m of botMs) for (const g of m.grams) users.set(g, [...(users.get(g) ?? []), m]);
+  const rows: SharedRow[] = [];
+  for (const [phrase, ms] of users) {
+    const perBot = new Map<string, number>();
+    for (const m of ms) perBot.set(m.post.author, (perBot.get(m.post.author) ?? 0) + 1);
+    if (perBot.size < minBots) continue;
+    rows.push({ phrase, botPosts: ms.length, bots: perBot.size, threads: new Set(ms.map((m) => m.post.threadId)).size, top: byCount(perBot).slice(0, 3) });
+  }
+  rows.sort((a, b) => b.botPosts - a.botPosts || b.phrase.split(" ").length - a.phrase.split(" ").length || a.phrase.localeCompare(b.phrase));
+  const out: SharedRow[] = [];
+  for (const r of rows) {
+    if (out.length >= max) break;
+    if (out.some((o) => ` ${o.phrase} `.includes(` ${r.phrase} `) || ` ${r.phrase} `.includes(` ${o.phrase} `))) continue;
+    out.push(r);
+  }
+  return out;
 }
 
 export function measure(all: MetricPost[], phrases: Phrase[], opts: MeasureOptions): VoiceReport {
@@ -289,6 +368,7 @@ export function measure(all: MetricPost[], phrases: Phrase[], opts: MeasureOptio
     allBots: memberRow("All bots", true, botMs, boardOrder),
     everyone: memberRow("Everyone", false, ms, boardOrder),
     phrases: phraseRows,
+    shared: sharedPhrases(botMs, opts.sharedMinBots ?? 3, opts.sharedMax ?? 20),
     boards: boardRows,
     weeks,
   };
@@ -313,12 +393,12 @@ export function renderReport(r: VoiceReport): string {
 
   out.push("## Members", "");
   out.push(cells(["Member", "Posts", "Threads started", "Median chars", "90th pct chars", "Median words",
-    "Opens with quote", "Any quote", "Quote and praise", "Asks a question", "House phrase", "Most in one thread-day", "Removed"]));
-  out.push(cells(Array(13).fill("---")));
+    "Opens with quote", "Any quote", "Quote and praise", "Asks a question", "House phrase", "Thread by number", "Most in one thread-day", "Removed"]));
+  out.push(cells(Array(14).fill("---")));
   for (const m of [...r.members, r.allBots, r.everyone]) {
     const name = m === r.allBots || m === r.everyone ? `**${m.name}**` : m.isBot ? `${m.name} (bot)` : m.name;
     out.push(cells([name, m.posts, m.threadsStarted, num(m.medianChars), num(m.p90Chars), num(m.medianWords),
-      pct(m.quoteOpen), pct(m.anyQuote), pct(m.quotePraise), pct(m.question), pct(m.withPhrase), m.maxThreadDay, m.removed]));
+      pct(m.quoteOpen), pct(m.anyQuote), pct(m.quotePraise), pct(m.question), pct(m.withPhrase), pct(m.threadNumber), m.maxThreadDay, m.removed]));
   }
   out.push("");
 
@@ -339,12 +419,12 @@ export function renderReport(r: VoiceReport): string {
 
   out.push("## Bot posts by week", "");
   out.push(cells(["Week of", "Posts", "Median chars", "Opens with quote", "Quote and praise", "Asks a question", "House phrase",
-    "Threads started", ...r.boards.map((b) => b.name)]));
-  out.push(cells(Array(r.boards.length + 8).fill("---")));
+    "Thread by number", "Threads started", ...r.boards.map((b) => b.name)]));
+  out.push(cells(Array(r.boards.length + 9).fill("---")));
   for (const w of r.weeks) {
     const counts = new Map(w.boards);
     out.push(cells([w.week, w.posts, num(w.medianChars), pct(w.quoteOpen), pct(w.quotePraise), pct(w.question), pct(w.withPhrase),
-      w.threadsStarted, ...r.boards.map((b) => counts.get(b.name) ?? 0)]));
+      pct(w.threadNumber), w.threadsStarted, ...r.boards.map((b) => counts.get(b.name) ?? 0)]));
   }
   out.push("");
 
@@ -355,6 +435,13 @@ export function renderReport(r: VoiceReport): string {
     out.push(cells([p.name, p.botPosts, pct(p.botShare), p.per1000Words.toFixed(2), p.bots, p.threads,
       p.top.map(([who, n]) => `${who} ${n}`).join(", ") || "–"]));
   }
+  out.push("");
+
+  out.push("## Phrases bots share (found, not listed)", "");
+  out.push("Two to four words that three or more bots have used in this window, most bot posts first: the board's shorthand, which a reader who missed where it started can't follow.", "");
+  out.push(cells(["Phrase", "Bot posts", "Bots", "Threads", "Most by"]));
+  out.push(cells(Array(5).fill("---")));
+  for (const p of r.shared) out.push(cells([p.phrase, p.botPosts, p.bots, p.threads, p.top.map(([who, n]) => `${who} ${n}`).join(", ")]));
   out.push("");
 
   out.push("## Each bot's phrases", "");
